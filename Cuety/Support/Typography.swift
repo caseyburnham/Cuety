@@ -1,0 +1,103 @@
+import SwiftUI
+
+/// Resolves the user's font choice into concrete `Font` values.
+///
+/// The cue number is set at a deliberately huge base size and allowed to scale
+/// down to fit. That is the native way to get "as big as the window allows"
+/// without measuring text by hand: `minimumScaleFactor` does the work, and it
+/// stays correct through window resizes and presentation mode with no layout
+/// passes of our own.
+@MainActor
+struct Typography {
+    /// The base point size for the cue number. Far larger than any window, so
+    /// the scale factor always drives the final size.
+    static let cueNumberBaseSize: CGFloat = 720
+
+    /// The floor for the cue number, as a fraction of the base size. Low
+    /// enough that a long number like "127.5" still fits a narrow window.
+    static let cueNumberMinimumScale: CGFloat = 0.02
+
+    let familyName: String?
+    let usesRounded: Bool
+
+    init(preferences: Preferences) {
+        self.familyName = preferences.fontFamily
+        self.usesRounded = preferences.usesRoundedSystemFont
+    }
+
+    /// The design to apply when using the system font.
+    private var design: Font.Design {
+        usesRounded ? .rounded : .default
+    }
+
+    /// The cue number: heavy, tabular, and as large as will fit.
+    var cueNumber: Font {
+        if let familyName {
+            return .custom(familyName, size: cueNumberBaseSizeValue)
+        }
+        return .system(size: cueNumberBaseSizeValue, weight: .bold, design: design)
+    }
+
+    private var cueNumberBaseSizeValue: CGFloat { Self.cueNumberBaseSize }
+
+    /// The cue name, beneath the number.
+    func cueName(size: CGFloat) -> Font {
+        if let familyName {
+            return .custom(familyName, size: size)
+        }
+        return .system(size: size, weight: .medium, design: design)
+    }
+
+    /// A drawer row's number column.
+    func drawerNumber(size: CGFloat, isPlayhead: Bool) -> Font {
+        if let familyName {
+            return .custom(familyName, size: size)
+        }
+        return .system(size: size, weight: isPlayhead ? .semibold : .regular, design: design)
+    }
+}
+
+/// The catalogue of fonts available for the cue display.
+///
+/// Reads the installed families through `NSFontManager` — the documented AppKit
+/// API — rather than scanning font directories.
+@MainActor
+struct FontCatalog {
+    /// Families installed on this Mac, alphabetically.
+    ///
+    /// Filtered to families that can actually render digits legibly at size:
+    /// symbol and dingbat families would produce a cue display of glyphs.
+    static var availableFamilies: [String] {
+        NSFontManager.shared.availableFontFamilies
+            .filter { family in
+                guard let font = NSFont(name: family, size: 12) else { return false }
+                // A family that can't draw "0" is no use for a cue number.
+                return font.glyphAvailable(for: "0")
+            }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    /// A short list of families that suit a large numeric readout, offered
+    /// above the full list so the choice isn't a wall of names.
+    static var recommendedFamilies: [String] {
+        let candidates = [
+            "SF Pro", "SF Pro Display", "SF Compact Display", "SF Mono",
+            "Helvetica Neue", "Avenir Next", "Futura", "Menlo",
+        ]
+        let installed = Set(NSFontManager.shared.availableFontFamilies)
+        return candidates.filter(installed.contains)
+    }
+}
+
+private extension NSFont {
+    /// Whether the font has a glyph for the given character.
+    func glyphAvailable(for character: Character) -> Bool {
+        guard let scalar = String(character).unicodeScalars.first,
+              let utf16Unit = UnicodeScalar(scalar.value)?.utf16.first
+        else { return false }
+
+        var characters: [UniChar] = [utf16Unit]
+        var glyphs: [CGGlyph] = [0]
+        return CTFontGetGlyphsForCharacters(self, &characters, &glyphs, 1) && glyphs[0] != 0
+    }
+}

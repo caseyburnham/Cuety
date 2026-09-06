@@ -1,0 +1,199 @@
+import SwiftUI
+
+/// The user's chosen appearance for the app, independent of the system setting.
+enum AppearanceMode: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+    case automatic
+    case light
+    case dark
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .automatic: "Automatic"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .automatic: "circle.lefthalf.filled"
+        case .light: "sun.max"
+        case .dark: "moon"
+        }
+    }
+
+    /// `nil` means "follow the system", which is what `preferredColorScheme` wants.
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .automatic: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
+
+/// Every user-facing setting, persisted to `UserDefaults`.
+///
+/// One observable object rather than scattered `@AppStorage` properties, so
+/// that the networking layer can read connection settings without pulling in
+/// SwiftUI, and so defaults live in exactly one place.
+@Observable
+final class Preferences {
+    private let defaults: UserDefaults
+
+    // MARK: Appearance and typography
+
+    var appearance: AppearanceMode {
+        didSet { defaults.set(appearance.rawValue, forKey: Key.appearance) }
+    }
+
+    /// A font family name from ``FontCatalog``, or `nil` for the system font.
+    ///
+    /// The system font is the default deliberately: it has the best numeric
+    /// figures and the widest weight range of anything guaranteed installed.
+    var fontFamily: String? {
+        didSet { defaults.set(fontFamily, forKey: Key.fontFamily) }
+    }
+
+    var usesRoundedSystemFont: Bool {
+        didSet { defaults.set(usesRoundedSystemFont, forKey: Key.usesRoundedSystemFont) }
+    }
+
+    // MARK: Display
+
+    var showsCueName: Bool {
+        didSet { defaults.set(showsCueName, forKey: Key.showsCueName) }
+    }
+
+    var showsDrawer: Bool {
+        didSet { defaults.set(showsDrawer, forKey: Key.showsDrawer) }
+    }
+
+    /// How many already-taken cues the drawer shows above the playhead.
+    var drawerPreviousCount: Int {
+        didSet { defaults.set(drawerPreviousCount, forKey: Key.drawerPreviousCount) }
+    }
+
+    /// How many upcoming cues the drawer shows below the playhead.
+    var drawerUpcomingCount: Int {
+        didSet { defaults.set(drawerUpcomingCount, forKey: Key.drawerUpcomingCount) }
+    }
+
+    // MARK: Detail pills
+
+    /// Every pill in display order, including disabled ones — reordering in
+    /// Settings must not be lost just because a pill is currently switched off.
+    var pillOrder: [DetailPillKind] {
+        didSet { persistPillOrder() }
+    }
+
+    var enabledPills: Set<DetailPillKind> {
+        didSet { persistEnabledPills() }
+    }
+
+    /// The pills to actually render, in the user's order.
+    var visiblePills: [DetailPillKind] {
+        pillOrder.filter(enabledPills.contains)
+    }
+
+    // MARK: System
+
+    var keepsDisplayAwake: Bool {
+        didSet { defaults.set(keepsDisplayAwake, forKey: Key.keepsDisplayAwake) }
+    }
+
+    // MARK: Connection
+
+    var defaultPort: Int {
+        didSet { defaults.set(defaultPort, forKey: Key.defaultPort) }
+    }
+
+    /// Seconds between `/thump` messages.
+    var heartbeatInterval: TimeInterval {
+        didSet { defaults.set(heartbeatInterval, forKey: Key.heartbeatInterval) }
+    }
+
+    /// Seconds before an unanswered request fails.
+    var requestTimeout: TimeInterval {
+        didSet { defaults.set(requestTimeout, forKey: Key.requestTimeout) }
+    }
+
+    /// Reconnect to the last-used workspace automatically at launch.
+    var autoConnect: Bool {
+        didSet { defaults.set(autoConnect, forKey: Key.autoConnect) }
+    }
+
+    // MARK: - Init
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+
+        appearance = defaults.string(forKey: Key.appearance)
+            .flatMap(AppearanceMode.init(rawValue:)) ?? .automatic
+        fontFamily = defaults.string(forKey: Key.fontFamily)
+        usesRoundedSystemFont = defaults.bool(forKey: Key.usesRoundedSystemFont)
+
+        showsCueName = defaults.object(forKey: Key.showsCueName) as? Bool ?? true
+        showsDrawer = defaults.object(forKey: Key.showsDrawer) as? Bool ?? true
+        drawerPreviousCount = defaults.object(forKey: Key.drawerPreviousCount) as? Int ?? 3
+        drawerUpcomingCount = defaults.object(forKey: Key.drawerUpcomingCount) as? Int ?? 3
+
+        pillOrder = Self.loadPillOrder(from: defaults)
+        enabledPills = Self.loadEnabledPills(from: defaults)
+
+        keepsDisplayAwake = defaults.bool(forKey: Key.keepsDisplayAwake)
+
+        defaultPort = defaults.object(forKey: Key.defaultPort) as? Int ?? 53000
+        heartbeatInterval = defaults.object(forKey: Key.heartbeatInterval) as? TimeInterval ?? 5
+        requestTimeout = defaults.object(forKey: Key.requestTimeout) as? TimeInterval ?? 5
+        autoConnect = defaults.object(forKey: Key.autoConnect) as? Bool ?? true
+    }
+
+    // MARK: - Pill persistence
+
+    private static func loadPillOrder(from defaults: UserDefaults) -> [DetailPillKind] {
+        let stored = (defaults.array(forKey: Key.pillOrder) as? [String] ?? [])
+            .compactMap(DetailPillKind.init(rawValue:))
+        // Union with the canonical order so a pill added in a later version of
+        // Cuety still appears for someone upgrading, rather than silently
+        // vanishing because it wasn't in their saved list.
+        let missing = DetailPillKind.defaultOrder.filter { !stored.contains($0) }
+        return stored.isEmpty ? DetailPillKind.defaultOrder : stored + missing
+    }
+
+    private static func loadEnabledPills(from defaults: UserDefaults) -> Set<DetailPillKind> {
+        guard let stored = defaults.array(forKey: Key.enabledPills) as? [String] else {
+            return DetailPillKind.defaultEnabled
+        }
+        return Set(stored.compactMap(DetailPillKind.init(rawValue:)))
+    }
+
+    private func persistPillOrder() {
+        defaults.set(pillOrder.map(\.rawValue), forKey: Key.pillOrder)
+    }
+
+    private func persistEnabledPills() {
+        defaults.set(enabledPills.map(\.rawValue), forKey: Key.enabledPills)
+    }
+
+    // MARK: - Keys
+
+    private enum Key {
+        static let appearance = "appearance"
+        static let fontFamily = "fontFamily"
+        static let usesRoundedSystemFont = "usesRoundedSystemFont"
+        static let showsCueName = "showsCueName"
+        static let showsDrawer = "showsDrawer"
+        static let drawerPreviousCount = "drawerPreviousCount"
+        static let drawerUpcomingCount = "drawerUpcomingCount"
+        static let pillOrder = "pillOrder"
+        static let enabledPills = "enabledPills"
+        static let keepsDisplayAwake = "keepsDisplayAwake"
+        static let defaultPort = "defaultPort"
+        static let heartbeatInterval = "heartbeatInterval"
+        static let requestTimeout = "requestTimeout"
+        static let autoConnect = "autoConnect"
+    }
+}
