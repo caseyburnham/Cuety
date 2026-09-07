@@ -23,7 +23,7 @@ struct DetailPill: View {
             }
             .font(.callout)
             .labelStyle(.titleAndIcon)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 7)
             .padding(.vertical, 7)
             .glassEffect(
                 content.tint.map { Glass.regular.tint($0.opacity(0.28)) } ?? .regular,
@@ -84,7 +84,7 @@ struct DetailPill: View {
             guard let mode = cue.continueMode, mode != .doNotContinue else { return nil }
             return Content(
                 text: mode.title,
-                systemImage: mode.systemImage,
+                systemImage: "arrow.down",
                 tint: .blue,
                 help: "This cue continues automatically"
             )
@@ -122,7 +122,7 @@ struct DetailPill: View {
             else { return nil }
             return Content(
                 text: notes,
-                systemImage: "text.alignleft",
+                systemImage: "ellipsis.bubble",
                 help: notes
             )
         }
@@ -131,24 +131,31 @@ struct DetailPill: View {
     /// Maps QLab's cue type strings onto SF Symbols.
     static func systemImage(forCueType type: String) -> String {
         switch type.lowercased() {
-        case "audio", "mic": "waveform"
-        case "video", "camera", "titles": "film"
+        case "audio": "speaker.wave.2"
+        case "mic": "mic"
+        case "video": "film"
+        case "camera": "video"
+        case "titles": "film"
         case "light": "lightbulb"
         case "group": "square.stack.3d.up"
         case "fade": "slider.horizontal.below.rectangle"
         case "wait": "hourglass"
-        case "start", "go": "play.fill"
-        case "stop", "hard stop": "stop.fill"
-        case "pause": "pause.fill"
-        case "load": "arrow.down.circle"
-        case "reset": "arrow.counterclockwise"
-        case "goto": "arrow.uturn.right"
-        case "target": "target"
+        case "start", "go": "play.circle"
+        case "stop", "hard stop": "stop.circle"
+        case "pause": "pause.circle"
+        case "load": "progress.indicator"
+        case "reset": "backward.end"
+        case "goto": "arrow.right"
+        case "target": "arrow.down.forward.circle"
         case "arm", "disarm": "power"
-        case "memo": "note.text"
+        case "memo": "ellipsis.bubble"
         case "script": "applescript"
-        case "network", "midi", "midi file", "timecode", "osc": "network"
-        case "devamp": "arrow.trianglehead.2.clockwise"
+        case "network": "network"
+        case "midi": "ev.plug.ac.type.2"
+        case "midi file": "music.note"
+        case "timecode": "clock"
+        case "osc": "network"
+        case "devamp": "arrow.uturn.right"
         default: "square.stack.3d.up"
         }
     }

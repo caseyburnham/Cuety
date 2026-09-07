@@ -30,6 +30,67 @@ struct QLabReplyTests {
         #expect(reply.data == "ok")
     }
 
+    // MARK: - Correlation keys
+
+    @Test(
+        "Strips the workspace prefix when building a correlation key",
+        arguments: [
+            ("/workspace/ABC/cueLists", "/cueLists"),
+            ("/cueLists", "/cueLists"),
+            ("/workspace/ABC/cue_id/XYZ/playbackPositionId", "/cue_id/XYZ/playbackPositionId"),
+            ("/cue_id/XYZ/playbackPositionId", "/cue_id/XYZ/playbackPositionId"),
+            // Not a workspace address, so it must survive untouched.
+            ("/workspaces", "/workspaces"),
+            ("/workspace/ABC", "/workspace/ABC"),
+        ]
+    )
+    func buildsCorrelationKey(address: String, expected: String) {
+        #expect(QLabReplyParser.correlationKey(for: address) == expected)
+    }
+
+    @Test("A prefixed request matches a reply that drops the prefix, and vice versa")
+    func correlationSurvivesPrefixMismatch() {
+        let sent = "/workspace/ABC/cue_id/XYZ/playbackPositionId"
+        let echoedWithout = "/cue_id/XYZ/playbackPositionId"
+
+        #expect(
+            QLabReplyParser.correlationKey(for: sent)
+                == QLabReplyParser.correlationKey(for: echoedWithout)
+        )
+        // Two different cues must still not collide.
+        #expect(
+            QLabReplyParser.correlationKey(for: sent)
+                != QLabReplyParser.correlationKey(for: "/cue_id/OTHER/playbackPositionId")
+        )
+    }
+
+    // MARK: - Connect access levels
+
+    @Test(
+        "Reads the access level from a connect reply",
+        arguments: [
+            ("ok", QLabAccessLevel.unspecified),
+            ("ok:view", .view),
+            ("ok:control", .control),
+            ("ok:edit", .edit),
+            // A tier added by a later QLab must connect, not be rejected.
+            ("ok:supervise", .other("supervise")),
+            // A trailing colon is still an acceptance, just an unnamed level.
+            ("ok:", .other("")),
+        ]
+    )
+    func readsAccessLevel(data: String, expected: QLabAccessLevel) {
+        #expect(QLabAccessLevel(connectReplyData: data) == expected)
+    }
+
+    @Test(
+        "Rejects connect replies that are not acceptances",
+        arguments: ["badpass", "denied", "", "okay", "ok extra", "notok:view"]
+    )
+    func rejectsNonAcceptances(data: String) {
+        #expect(QLabAccessLevel(connectReplyData: data) == nil)
+    }
+
     @Test("Decodes a badpass reply")
     func decodesBadPass() throws {
         let message = replyMessage(

@@ -70,7 +70,10 @@ final class AppModel {
 
     func start() {
         browser.start()
-        Task { await refreshWorkspaces() }
+        Task {
+            await refreshWorkspaces()
+            await autoConnectIfNeeded()
+        }
     }
 
     /// Asks every known server what workspaces it has open.
@@ -92,6 +95,50 @@ final class AppModel {
                 browser.update(updated)
             }
         }
+    }
+
+    // MARK: - Auto-connect
+
+    /// How long after launch Cuety keeps looking for the last-used workspace.
+    private static let autoConnectWindow: Duration = .seconds(10)
+
+    /// How long to wait between re-asking the servers during that window.
+    private static let autoConnectPollInterval: Duration = .seconds(2)
+
+    /// Reconnects to the last-used workspace, giving Bonjour time to find it.
+    ///
+    /// A single attempt at launch would nearly always miss: discovery is
+    /// asynchronous, so the workspace usually isn't in the browser's list yet
+    /// when the app finishes starting. Instead this re-asks over a bounded
+    /// window and gives up quietly when it closes.
+    ///
+    /// Every path out checks `selection` first. An automatic connection must
+    /// never overrule the operator — if they pick a workspace themselves while
+    /// this is still polling, that choice stands and this stops.
+    private func autoConnectIfNeeded() async {
+        guard preferences.autoConnect, let target = preferences.lastWorkspace else { return }
+
+        let deadline = ContinuousClock.now + Self.autoConnectWindow
+        while ContinuousClock.now < deadline {
+            guard selection == nil else { return }
+
+            if isKnown(target) {
+                await connect(to: target)
+                return
+            }
+
+            try? await Task.sleep(for: Self.autoConnectPollInterval)
+            guard selection == nil else { return }
+            await refreshWorkspaces()
+        }
+    }
+
+    /// Whether a workspace is currently open on a server we can see, and so
+    /// worth attempting a connection to.
+    private func isKnown(_ selection: WorkspaceSelection) -> Bool {
+        browser.server(withID: selection.serverID)?
+            .workspaces.contains { $0.uniqueID == selection.workspaceID }
+            ?? false
     }
 
     // MARK: - Connecting
@@ -122,6 +169,13 @@ final class AppModel {
                 wasRejected: rejected
             )
         }
+
+        // Only a connection that actually reached the workspace is worth
+        // restoring at launch, so a failed or refused attempt doesn't become
+        // the thing Cuety tries again tomorrow.
+        if client.status.hasLiveData {
+            preferences.lastWorkspace = selection
+        }
     }
 
     /// Saves a passcode and retries the connection once.
@@ -144,6 +198,10 @@ final class AppModel {
 
     /// Connects with a passcode without saving it, for a one-off session on
     /// someone else's machine.
+    ///
+    /// Deliberately does not record the workspace for auto-connect: with no
+    /// passcode in the Keychain, restoring it at launch could only produce a
+    /// passcode prompt, which is not what "one-off" should mean.
     func connectOnce(withPasscode passcode: String, for prompt: PasscodePrompt) async {
         guard let server = browser.server(withID: prompt.serverID) else { return }
 
@@ -174,6 +232,15 @@ final class AppModel {
         try? passcodes.remove(
             serverID: selection.serverID, workspaceID: selection.workspaceID
         )
+    }
+
+    /// Drops every stored passcode.
+    ///
+    /// The blunt instrument Settings needs: Cuety can only list passcodes for
+    /// workspaces it can currently see, so this is the only way to clear ones
+    /// belonging to a machine that has since gone away.
+    func forgetAllPasscodes() {
+        try? passcodes.removeAll()
     }
 
     private func workspaceName(for selection: WorkspaceSelection) -> String? {

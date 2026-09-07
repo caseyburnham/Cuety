@@ -11,7 +11,7 @@ struct HeaderBar: View {
     @Namespace private var glassNamespace
 
     var body: some View {
-        GlassEffectContainer(spacing: 18) {
+        GlassEffectContainer(spacing: 12) {
             HStack(spacing: 12) {
                 HeartbeatGlyph()
                     .glassEffectID("heartbeat", in: glassNamespace)
@@ -75,14 +75,14 @@ struct HeartbeatGlyph: View {
     var body: some View {
         if isRelevant {
             Image(systemName: "heart.fill")
-                .font(.system(size: 13))
+                .font(.system(size: 15))
                 .foregroundStyle(tint)
                 .symbolEffect(
                     .bounce,
                     options: .nonRepeating,
                     value: client.heartbeatCount
                 )
-                .frame(width: 22, height: 22)
+                .frame(width: 26, height: 26)
                 .padding(6)
                 .glassEffect(.regular, in: .circle)
                 .help(helpText)
@@ -124,10 +124,10 @@ struct KeepAwakeGlyph: View {
             }
         } label: {
             Image(systemName: isOn ? "sun.max.fill" : "moon.zzz.fill")
-                .font(.system(size: 13))
+                .font(.system(size: 15))
                 .foregroundStyle(isOn ? .yellow : .secondary)
                 .contentTransition(.symbolEffect(.replace))
-                .frame(width: 22, height: 22)
+                .frame(width: 26, height: 26)
         }
         .buttonStyle(.plain)
         .padding(6)

@@ -39,6 +39,8 @@ final class QLabClient {
 
     private(set) var connectedSince: Date?
     private(set) var usedPasscode = false
+    /// The permission tier QLab granted this session.
+    private(set) var accessLevel: QLabAccessLevel = .unspecified
     private(set) var isSubscribedToUpdates = false
     private(set) var reconnectCount = 0
     private(set) var lastErrorDescription: String?
@@ -99,7 +101,7 @@ final class QLabClient {
 
     /// Connects to a workspace and completes the full handshake.
     func connect(to server: QLabServer, workspaceID: String, passcode: String?) async {
-        disconnect(sendDisconnect: false)
+        disconnect(sendDisconnect: true)
 
         currentTarget = (server, workspaceID, passcode)
         status = .connecting
@@ -131,14 +133,13 @@ final class QLabClient {
         reconnectTask = nil
 
         let connection = self.connection
-        let workspaceID = workspace?.uniqueID
-
-        if sendDisconnect, let connection, let workspaceID {
+        if sendDisconnect, let connection {
             // Best effort and deliberately not awaited: QLab is told we're
             // going, but a wedged socket must not block teardown.
             Task {
-                try? await connection.send(OSCMessage("/workspace/\(workspaceID)/updates", [.int32(0)]))
-                try? await connection.send(OSCMessage("/workspace/\(workspaceID)/disconnect"))
+                _ = try? await connection.send(OSCMessage("/forgetMeNot", [.false]))
+                _ = try? await connection.send(OSCMessage("/udpKeepAlive", [.false]))
+                _ = try? await connection.send(OSCMessage("/disconnect"))
                 await connection.cancel()
             }
         } else if let connection {
@@ -154,6 +155,7 @@ final class QLabClient {
         workspace = nil
         isSubscribedToUpdates = false
         connectedSince = nil
+        accessLevel = .unspecified
         cueLists = []
         playheads = [:]
         watchedCueListID = nil
@@ -187,47 +189,69 @@ final class QLabClient {
         } ?? OSCMessage("/workspace/\(workspaceID)/connect")
 
         let connectReply = try await request(connectMessage, as: String.self)
-        switch connectReply.data {
-        case "ok":
+        let connectData = connectReply.data ?? ""
+
+        if let level = QLabAccessLevel(connectReplyData: connectData) {
+            // Covers both `ok` and `ok:<level>`. Matching only a bare `ok`
+            // here rejected every QLab 5 workspace that has a passcode set,
+            // because those answer with the granted tier instead.
+            accessLevel = level
             usedPasscode = passcode != nil
-        case "badpass":
+        } else if connectData == "badpass" {
             // Never retried automatically: QLab lengthens its own delay after
             // repeated failures, so hammering it makes the situation worse.
             status = .needsPasscode(rejected: true)
             throw RequestFailure.passcodeRejected
-        default:
-            if connectReply.status == .denied {
-                status = .needsPasscode(rejected: passcode != nil)
-                throw RequestFailure.passcodeRequired
-            }
+        } else if connectReply.status == .denied {
+            status = .needsPasscode(rejected: passcode != nil)
+            throw RequestFailure.passcodeRequired
+        } else {
             throw RequestFailure.handshakeFailed(
                 step: "connect",
-                detail: connectReply.data ?? "no reply data"
+                detail: connectData.isEmpty ? "no reply data" : connectData
             )
         }
 
-        // 3. Ask QLab to reply to everything. This is what makes correlation
-        //    reliable — otherwise commands that produce no natural reply would
-        //    leave requests hanging until they time out.
-        _ = try? await request(
-            OSCMessage("/workspace/\(workspaceID)/alwaysReply", [.int32(1)]),
+        // 3. Keep this client registered with QLab for the lifetime of the
+        //    session. These are client-level commands, not workspace methods.
+        try await sendWithoutReply(OSCMessage("/forgetMeNot", [.true]))
+        try await sendWithoutReply(OSCMessage("/udpKeepAlive", [.true]))
+
+        // 4. Ask QLab to reply to everything. This makes correlation reliable
+        //    for commands that do not otherwise produce a natural reply.
+        _ = try await request(
+            OSCMessage("/alwaysReply", [.true]),
             as: QLabEmptyPayload.self
         )
 
-        // 4. Subscribe to push updates. This is the playhead feed.
+        // 5. Subscribe to workspace updates so cue-list changes (including
+        //    newly added cues) trigger a refresh.
         let updatesReply = try await request(
-            OSCMessage("/workspace/\(workspaceID)/updates", [.int32(1)]),
+            OSCMessage("/updates", [.true]),
+            as: QLabEmptyPayload.self
+        )
+
+        // 6. Subscribe to Show Control Broadcast playhead events. The two
+        //    feeds are complementary: /updates describes model changes, while
+        //    /listen/playhead reports the cue currently standing by.
+        let playheadReply = try await request(
+            OSCMessage("/listen/playhead"),
             as: QLabEmptyPayload.self
         )
         isSubscribedToUpdates = updatesReply.status.isSuccess
+            && playheadReply.status.isSuccess
 
-        // 5. Fetch the cue lists.
+        // 7. Fetch the cue lists, and with them the current playheads.
         try await refreshCueLists()
 
         connectedSince = Date()
         backoffAttempt = 0
         status = .connected
         startHeartbeat()
+
+        // 8. Fill in the detail pills for wherever the playhead already is,
+        //    rather than leaving them blank until the next cue.
+        await refreshPlayheadCueDetails()
 
         logger.info("Connected to workspace \(match.displayName, privacy: .public)")
         _ = connection
@@ -251,7 +275,9 @@ final class QLabClient {
 
     private struct PendingRequest {
         let id: UUID
-        let address: String
+        /// The ``QLabReplyParser/correlationKey(for:)`` form, not the address as
+        /// sent — see that method for why the two differ.
+        let correlationKey: String
         let continuation: CheckedContinuation<OSCMessage, any Error>
     }
 
@@ -277,6 +303,15 @@ final class QLabClient {
             case .replyUnreadable(let detail): detail
             }
         }
+    }
+
+    /// Sends a client-level command whose transport delivery is all Cuety
+    /// needs. QLab does not reliably emit a correlated reply for keep-alive
+    /// registration, so these must not block the handshake waiting for one.
+    private func sendWithoutReply(_ message: OSCMessage) async throws {
+        guard let connection else { throw RequestFailure.disconnected }
+        let byteCount = try await connection.send(message)
+        log.record(OSCEvent(message: message, direction: .outbound, byteCount: byteCount))
     }
 
     /// Sends a message and awaits its typed reply.
@@ -313,9 +348,10 @@ final class QLabClient {
             guard case .received(let incoming, let bytes) = event else { continue }
             log.record(OSCEvent(message: incoming, direction: .inbound, byteCount: bytes))
 
-            guard QLabReplyParser.correlationAddress(of: incoming) == message.address else {
-                continue
-            }
+            let expected = QLabReplyParser.correlationKey(for: message.address)
+            guard let echoed = QLabReplyParser.correlationAddress(of: incoming),
+                  QLabReplyParser.correlationKey(for: echoed) == expected
+            else { continue }
             do {
                 return try QLabReplyParser.parse(incoming, as: payloadType)
             } catch {
@@ -330,12 +366,13 @@ final class QLabClient {
         over connection: QLabConnection
     ) async throws -> OSCMessage {
         let id = UUID()
+        let key = QLabReplyParser.correlationKey(for: message.address)
 
         return try await withCheckedThrowingContinuation { continuation in
             pending[id] = PendingRequest(
-                id: id, address: message.address, continuation: continuation
+                id: id, correlationKey: key, continuation: continuation
             )
-            pendingByAddress[message.address, default: []].append(id)
+            pendingByAddress[key, default: []].append(id)
 
             Task { [weak self] in
                 guard let self else { return }
@@ -379,9 +416,9 @@ final class QLabClient {
     private func removePending(_ id: UUID) -> PendingRequest? {
         timeoutTasks.removeValue(forKey: id)?.cancel()
         guard let request = pending.removeValue(forKey: id) else { return nil }
-        pendingByAddress[request.address]?.removeAll { $0 == id }
-        if pendingByAddress[request.address]?.isEmpty == true {
-            pendingByAddress.removeValue(forKey: request.address)
+        pendingByAddress[request.correlationKey]?.removeAll { $0 == id }
+        if pendingByAddress[request.correlationKey]?.isEmpty == true {
+            pendingByAddress.removeValue(forKey: request.correlationKey)
         }
         return request
     }
@@ -472,15 +509,46 @@ final class QLabClient {
         // address the reply echoes.
         if QLabReplyParser.isReply(message) {
             if let address = QLabReplyParser.correlationAddress(of: message),
-               let id = pendingByAddress[address]?.first {
+               let id = pendingByAddress[QLabReplyParser.correlationKey(for: address)]?.first {
                 complete(requestID: id, with: message)
             }
             return
         }
 
-        // Then push updates.
+        // Show Control Broadcast messages are ordinary OSC messages rather
+        // than JSON-wrapped replies.
+        if message.address == "/qlab/event/workspace/playhead" {
+            handleBroadcastPlayhead(message)
+            return
+        }
+
+        // Retain support for legacy workspace updates when talking to older
+        // QLab versions, even though new sessions use /listen/playhead.
         if message.address.hasPrefix("/update/") {
             await handleUpdate(message)
+        }
+    }
+
+    private func handleBroadcastPlayhead(_ message: OSCMessage) {
+        // /listen/playhead sends: number, name, uniqueID, type.
+        guard message.arguments.count >= 3,
+              let cueID = message.arguments[2].stringValue
+        else { return }
+
+        // Broadcast identifies the cue, but not its cue list. Prefer the list
+        // containing that cue; fall back to the list the operator is watching.
+        let listID = cueLists.first {
+            CueGraph(cueList: $0).cue(withID: cueID) != nil
+        }?.uniqueID ?? watchedCueListID
+
+        guard let listID else { return }
+        setPlayhead(cueID, forCueListID: listID)
+        if watchedCueListID == nil {
+            watchedCueListID = listID
+        }
+
+        Task { [weak self] in
+            await self?.refreshPlayheadCueDetails()
         }
     }
 
@@ -490,7 +558,7 @@ final class QLabClient {
         let components = message.addressComponents
         // Shapes, all prefixed by ["update", "workspace", <id>]:
         //   …                                       → reload cue lists
-        //   … + ["cue_id", <cueID>]                 → reload one cue
+        //   … + ["cue_id", <cueID>]                 → reload cue lists
         //   … + ["cueList", <listID>, "playbackPosition"] (+ arg) → playhead moved
         //   … + ["disconnect"]                      → go away
         guard components.count >= 3,
@@ -510,20 +578,15 @@ final class QLabClient {
             disconnect(sendDisconnect: false)
 
         case "cue_id":
-            if tail.count >= 2 {
-                scheduleCueRefresh(cueID: tail[1])
-            }
+            // QLab uses this form for cue edits, renames, and newly inserted
+            // cues. Refresh the list model regardless of whether the changed
+            // cue is currently on the playhead.
+            await debouncedCueListRefresh()
 
         case "cueList":
             if tail.count >= 3, tail[2] == "playbackPosition" {
                 let listID = tail[1]
-                // No argument means the playhead was unset — a real state, not
-                // a missing value, and the display has an empty state for it.
-                if let cueID = message.arguments.first?.stringValue, !cueID.isEmpty {
-                    playheads[listID] = cueID
-                } else {
-                    playheads.removeValue(forKey: listID)
-                }
+                setPlayhead(message.arguments.first?.stringValue, forCueListID: listID)
                 if watchedCueListID == nil { watchedCueListID = listID }
             }
 
@@ -546,13 +609,6 @@ final class QLabClient {
 
     /// Refetching a single cue is handled in Milestone 5, where the cue graph
     /// knows whether the cue is on screen and therefore worth a round trip.
-    private func scheduleCueRefresh(cueID: String) {
-        guard cueID == currentPlayheadCueID else { return }
-        Task { [weak self] in
-            await self?.refreshPlayheadCueDetails()
-        }
-    }
-
     // MARK: - Cue data
 
     func refreshCueLists() async throws {
@@ -566,6 +622,73 @@ final class QLabClient {
         if watchedCueListID == nil {
             watchedCueListID = cueLists.first?.uniqueID
         }
+
+        // Cue lists and playheads are refreshed together on purpose. The push
+        // feed only reports a playhead when it *moves*, so for a list we have
+        // just learned about nothing else would ever fill this in.
+        await refreshPlayheads()
+    }
+
+    /// Asks every cue list where its playhead currently sits.
+    ///
+    /// Without this, a freshly connected workspace shows every list as having
+    /// an unset playhead until someone advances a cue in QLab — the subscription
+    /// from step 4 of the handshake reports *changes*, not current state.
+    func refreshPlayheads() async {
+        guard let workspaceID = workspace?.uniqueID else { return }
+
+        for list in cueLists {
+            do {
+                // `playbackPositionID`, not `…Id`. OSC addresses are
+                // case-sensitive and QLab 5 capitalises the `ID` — the QLab 4
+                // dictionary spelled it `playbackPositionId`, so the wrong
+                // spelling looks plausible and fails as a silent empty reply
+                // rather than as an obvious error.
+                let reply = try await request(
+                    OSCMessage(
+                        "/workspace/\(workspaceID)/cue_id/\(list.uniqueID)/playbackPositionID"
+                    ),
+                    as: String.self
+                )
+
+                // A non-success status is a *failed query*, not an unset
+                // playhead. Conflating the two is what let the misspelled
+                // address above masquerade as "this list has no playhead".
+                guard reply.status.isSuccess else {
+                    logger.warning(
+                        """
+                        playbackPositionID for \(list.uniqueID, privacy: .public) \
+                        answered \(String(describing: reply.status), privacy: .public)
+                        """
+                    )
+                    continue
+                }
+
+                setPlayhead(reply.data, forCueListID: list.uniqueID)
+            } catch {
+                // One list that won't answer must not stop the others: a cart,
+                // or a list QLab declines for, shouldn't blank the display.
+                logger.warning(
+                    """
+                    playbackPositionID failed for \(list.uniqueID, privacy: .public): \
+                    \(String(describing: error), privacy: .public)
+                    """
+                )
+            }
+        }
+    }
+
+    /// Records a playhead, treating QLab's several spellings of "unset" alike.
+    ///
+    /// An absent argument, an empty string, and the literal `none` all mean the
+    /// same thing, and it is a real state rather than a missing value — the
+    /// display has an empty state for it.
+    private func setPlayhead(_ cueID: String?, forCueListID listID: String) {
+        guard let cueID, !cueID.isEmpty, cueID != "none" else {
+            playheads.removeValue(forKey: listID)
+            return
+        }
+        playheads[listID] = cueID
     }
 
     /// The cue ID at the playhead of the watched cue list, if any.
@@ -723,6 +846,18 @@ final class QLabClient {
         lastErrorDate = Date()
     }
 
+    /// Turns an error into something an operator can read.
+    ///
+    /// Cuety's own error types — ``OSCDecodingError``, ``RequestFailure``,
+    /// ``PasscodeStore/Failure`` and friends — conform to
+    /// `CustomStringConvertible` precisely so their wording lands in the
+    /// inspector. Anything else, `NWError` included, reads better through
+    /// `localizedDescription`.
+    ///
+    /// The compiler warns that this cast "always succeeds" and it is wrong:
+    /// at runtime `as?` does discriminate, and rewriting it as an
+    /// unconditional `as` to quiet the warning swaps every system error for a
+    /// reflective type dump like `Cuety.SomeError()`. Leave the `as?` alone.
     private func describe(_ error: any Error) -> String {
         if let described = error as? any CustomStringConvertible {
             return described.description

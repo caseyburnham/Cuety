@@ -65,6 +65,12 @@ struct ConnectionInspectorView: View {
                 Spacer(minLength: 0)
             }
             .animation(Motion.status, value: client.status)
+
+            if client.workspace != nil || client.status.hasLiveData {
+                Button("Disconnect", role: .destructive) {
+                    model.disconnect()
+                }
+            }
         }
     }
 
@@ -94,6 +100,7 @@ struct ConnectionInspectorView: View {
                 }
             }
             LabeledContent("Passcode", value: client.usedPasscode ? "In use" : "Not required")
+            LabeledContent("Access", value: client.accessLevel.title)
             LabeledContent(
                 "Update Subscription",
                 value: client.isSubscribedToUpdates ? "Active" : "Inactive"

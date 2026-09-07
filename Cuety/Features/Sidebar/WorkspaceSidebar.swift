@@ -12,7 +12,9 @@ struct WorkspaceSidebar: View {
 
     @State private var isAddingServer = false
     @State private var newHost = ""
-    @State private var newPort = String(QLabServer.defaultPort)
+    /// Seeded from the preference when the sheet opens, so a house that runs
+    /// QLab on a non-standard port sets it once in Settings.
+    @State private var newPort = ""
 
     var body: some View {
         List(selection: selectionBinding) {
@@ -49,6 +51,7 @@ struct WorkspaceSidebar: View {
         .toolbar {
             ToolbarItem {
                 Button {
+                    newPort = String(model.preferences.defaultPort)
                     isAddingServer = true
                 } label: {
                     Label("Add Server", systemImage: "plus")
@@ -267,7 +270,7 @@ struct WorkspaceSidebar: View {
     private func dismissAddServer() {
         isAddingServer = false
         newHost = ""
-        newPort = String(QLabServer.defaultPort)
+        newPort = ""
     }
 }
 

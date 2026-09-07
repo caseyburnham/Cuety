@@ -1,24 +1,32 @@
 import SwiftUI
 
 /// Cuety's Settings window.
+///
+/// Four tabs, split by what the operator is thinking about rather than by which
+/// type owns the value: how the app behaves, how the cue reads, what metadata
+/// sits under it, and how Cuety talks to QLab.
 struct SettingsView: View {
-    @Environment(AppModel.self) private var model
-
     var body: some View {
-        // Milestone 8 replaces this with the four real tabs.
         TabView {
             Tab("General", systemImage: "gearshape") {
-                Form {
-                    Picker("Appearance", selection: Bindable(model.preferences).appearance) {
-                        ForEach(AppearanceMode.allCases) { mode in
-                            Label(mode.title, systemImage: mode.systemImage).tag(mode)
-                        }
-                    }
-                }
-                .formStyle(.grouped)
+                GeneralSettingsView()
+            }
+
+            Tab("Display", systemImage: "textformat.size") {
+                DisplaySettingsView()
+            }
+
+            Tab("Details", systemImage: "capsule.on.rectangle") {
+                DetailPillSettingsView()
+            }
+
+            Tab("Connection", systemImage: "network") {
+                ConnectionSettingsView()
             }
         }
-        .frame(width: 520, height: 320)
+        // A fixed size because each tab is a `Form`: letting the window resize
+        // to its content would make it jump as the operator moves between tabs.
+        .frame(width: 540, height: 440)
     }
 }
 

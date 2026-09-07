@@ -125,6 +125,19 @@ final class Preferences {
         didSet { defaults.set(autoConnect, forKey: Key.autoConnect) }
     }
 
+    /// The workspace ``autoConnect`` should restore, recorded on every
+    /// successful connection.
+    ///
+    /// Persisted as two plain strings rather than an encoded struct: a
+    /// half-written or stale value then degrades to "no last workspace" instead
+    /// of a decode failure, and the keys stay readable in `defaults(1)`.
+    var lastWorkspace: WorkspaceSelection? {
+        didSet {
+            defaults.set(lastWorkspace?.serverID, forKey: Key.lastServerID)
+            defaults.set(lastWorkspace?.workspaceID, forKey: Key.lastWorkspaceID)
+        }
+    }
+
     // MARK: - Init
 
     init(defaults: UserDefaults = .standard) {
@@ -149,6 +162,13 @@ final class Preferences {
         heartbeatInterval = defaults.object(forKey: Key.heartbeatInterval) as? TimeInterval ?? 5
         requestTimeout = defaults.object(forKey: Key.requestTimeout) as? TimeInterval ?? 5
         autoConnect = defaults.object(forKey: Key.autoConnect) as? Bool ?? true
+
+        if let serverID = defaults.string(forKey: Key.lastServerID),
+           let workspaceID = defaults.string(forKey: Key.lastWorkspaceID) {
+            lastWorkspace = WorkspaceSelection(
+                serverID: serverID, workspaceID: workspaceID
+            )
+        }
     }
 
     // MARK: - Pill persistence
@@ -195,5 +215,7 @@ final class Preferences {
         static let heartbeatInterval = "heartbeatInterval"
         static let requestTimeout = "requestTimeout"
         static let autoConnect = "autoConnect"
+        static let lastServerID = "lastServerID"
+        static let lastWorkspaceID = "lastWorkspaceID"
     }
 }
