@@ -45,6 +45,7 @@ struct CueDisplayView: View {
             if !model.isPresenting {
                 DetailPillsRow(cue: cue, kinds: model.preferences.visiblePills)
                     .padding(.top, 6)
+                    .padding(.bottom, 12)
             }
         }
         .padding(.horizontal, 32)
@@ -71,9 +72,12 @@ struct CueDisplayView: View {
                 .accessibilityLabel("Cue number \(number)")
         } else if let name = cue.displayName {
             VStack(spacing: 6) {
+                // The same font as a cue number: this name is standing in for
+                // one, so it should not silently ignore the operator's choice
+                // of family the way a hardcoded system font did.
                 Text(name)
-                    .font(.system(size: 200, weight: .bold))
-                    .minimumScaleFactor(0.05)
+                    .font(typography.cueNumber)
+                    .minimumScaleFactor(Typography.cueNumberMinimumScale)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .transition(.blurReplace)
@@ -82,7 +86,7 @@ struct CueDisplayView: View {
                     .font(.caption)
                     .textCase(.uppercase)
                     .foregroundStyle(.tertiary)
-                    .tracking(1.2)
+                    .tracking(1)
             }
             .accessibilityLabel("Unnumbered cue, \(name)")
         } else {
@@ -110,6 +114,7 @@ struct CueDisplayView: View {
         .textCase(.uppercase)
         .tracking(1.4)
         .foregroundStyle(.secondary)
+        .padding(.top, 24)
     }
 
     // MARK: - Empty states

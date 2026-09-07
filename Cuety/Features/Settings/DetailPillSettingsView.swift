@@ -12,8 +12,7 @@ struct DetailPillSettingsView: View {
         let preferences = model.preferences
         let client = model.client
 
-        VStack(spacing: 0) {
-            List {
+        List {
                 // The row is written inline on purpose. Moving it into a
                 // `-> some View` helper makes the reorderable list render
                 // completely empty: `reorderable()` needs to see the row views
@@ -55,12 +54,13 @@ struct DetailPillSettingsView: View {
                 }
                 .reorderable()
             }
-            .reorderContainer(for: DetailPillKind.self) { difference in
-                apply(difference, to: preferences)
-            }
-
-            Divider()
-
+        .reorderContainer(for: DetailPillKind.self) { difference in
+            apply(difference, to: preferences)
+        }
+        // A bottom bar as a safe-area inset rather than a `Divider` inside a
+        // `VStack`: the list then scrolls under it and the bar picks up the
+        // standard material, the same as the Activity Log's status bar.
+        .safeAreaInset(edge: .bottom) {
             HStack {
                 Text("Drag to reorder. Only enabled pills are requested from QLab.")
                     .font(.caption)
@@ -81,6 +81,7 @@ struct DetailPillSettingsView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
+            .background(.bar)
         }
     }
 

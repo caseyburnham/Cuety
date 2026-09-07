@@ -15,9 +15,11 @@ struct WorkspaceSidebar: View {
     /// Seeded from the preference when the sheet opens, so a house that runs
     /// QLab on a non-standard port sets it once in Settings.
     @State private var newPort = ""
+    @State private var expandedServerIDs: Set<String> = []
+    @State private var expandedWorkspaceIDs: Set<String> = []
 
     var body: some View {
-        List(selection: selectionBinding) {
+        List(selection: watchedCueList) {
             if !model.browser.bonjourServers.isEmpty {
                 Section("Bonjour") {
                     ForEach(model.browser.bonjourServers) { server in
@@ -26,9 +28,20 @@ struct WorkspaceSidebar: View {
                 }
             }
 
-            Section("Local") {
-                ForEach(model.browser.manualServers) { server in
-                    serverRow(server)
+            if !model.browser.manualServers.isEmpty {
+                Section {
+                    ForEach(model.browser.manualServers) { server in
+                        serverRow(server)
+                    }
+                } header: {
+                    Text("Local")
+                } footer: {
+                    if let date = model.lastRefreshDate {
+                        HStack(spacing: 4) {
+                            Text("Updated")
+                            Text(date, style: .time)
+                        }
+                    }
                 }
             }
 
@@ -64,7 +77,16 @@ struct WorkspaceSidebar: View {
                     Task { await model.refreshWorkspaces() }
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
+                        // The symbol animates itself while the refresh is in
+                        // flight, which keeps the button's size and position
+                        // fixed — swapping in a `ProgressView` would not.
+                        .symbolEffect(
+                            .rotate.byLayer,
+                            options: .repeat(.continuous),
+                            isActive: model.isRefreshing
+                        )
                 }
+                .disabled(model.isRefreshing)
                 .help("Ask every server for its open workspaces")
             }
         }
@@ -73,11 +95,32 @@ struct WorkspaceSidebar: View {
         }
     }
 
+    // MARK: - Selection
+
+    /// Drives the list's native selection from the watched cue list.
+    ///
+    /// Only cue list rows carry a `tag`, so servers and workspaces stay
+    /// unselectable while the cue lists get the system's sidebar highlight
+    /// instead of a hand-drawn row background.
+    private var watchedCueList: Binding<String?> {
+        Binding {
+            model.client.watchedCueListID
+        } set: { newValue in
+            // Clicking empty space clears selection; that shouldn't stop us
+            // watching the list the operator already chose.
+            guard let newValue, newValue != model.client.watchedCueListID else { return }
+            withAnimation(Motion.cueChange) {
+                model.client.watchedCueListID = newValue
+            }
+            Task { await model.client.refreshPlayheadCueDetails() }
+        }
+    }
+
     // MARK: - Rows
 
     @ViewBuilder
     private func serverRow(_ server: QLabServer) -> some View {
-        DisclosureGroup {
+        DisclosureGroup(isExpanded: expansionBinding(for: server.id)) {
             if server.workspaces.isEmpty {
                 Label(
                     server.lastError == nil ? "No open workspaces" : "Unreachable",
@@ -92,6 +135,9 @@ struct WorkspaceSidebar: View {
                 }
             }
         } label: {
+            // No button wrapper: a `DisclosureGroup` label already toggles the
+            // group when clicked, and wrapping it stole that behaviour along
+            // with the row's native highlight.
             Label {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(server.name)
@@ -100,10 +146,15 @@ struct WorkspaceSidebar: View {
                         .foregroundStyle(.tertiary)
                 }
             } icon: {
-                Image(systemName: server.source == .bonjour ? "network" : "desktopcomputer")
+                Image(systemName: server.source == .bonjour ? "bonjour" : "desktopcomputer")
             }
         }
         .contextMenu {
+            if model.selection?.serverID == server.id, model.client.status.hasLiveData {
+                Button("Disconnect") {
+                    model.disconnect()
+                }
+            }
             if server.source == .manual, server.id != QLabServer.localhost().id {
                 Button("Remove Server", role: .destructive) {
                     model.browser.removeManualServer(id: server.id)
@@ -120,101 +171,131 @@ struct WorkspaceSidebar: View {
         let selection = WorkspaceSelection(
             serverID: server.id, workspaceID: workspace.uniqueID
         )
+        let selectionID = "\(server.id)|\(workspace.uniqueID)"
         let isConnected = model.selection == selection && model.client.status.hasLiveData
 
-        DisclosureGroup(isExpanded: .constant(isConnected)) {
+        DisclosureGroup(isExpanded: workspaceExpansionBinding(for: selectionID)) {
             if isConnected {
                 ForEach(model.client.cueLists) { list in
                     cueListRow(list)
                 }
             }
         } label: {
-            Label {
-                HStack(spacing: 4) {
-                    Text(workspace.displayName)
-                    if model.passcodes.hasPasscode(
-                        serverID: server.id, workspaceID: workspace.uniqueID
-                    ) {
-                        Image(systemName: "key.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .help("A passcode for this workspace is saved in your Keychain")
-                    }
+            HStack(spacing: 4) {
+                Text(workspace.displayName)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if model.passcodes.hasPasscode(
+                    serverID: server.id, workspaceID: workspace.uniqueID
+                ) {
+                    Image(systemName: "key.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .help("A passcode for this workspace is saved in your Keychain")
                 }
-            } icon: {
-                Image(systemName: isConnected ? "checkmark.circle.fill" : "doc.text")
-                    .foregroundStyle(isConnected ? .green : .secondary)
-                    .contentTransition(.symbolEffect(.replace))
+
+                // The icon reports connection state and stays put; what a click
+                // does is in the tooltip. Morphing it to a red ✗ under the
+                // pointer meant the row's meaning changed on hover, which is
+                // not something macOS controls do.
+                Button {
+                    if isConnected {
+                        model.disconnect()
+                    } else {
+                        Task { await model.connect(to: selection) }
+                    }
+                } label: {
+                    Image(systemName: isConnected ? "checkmark.circle.fill" : "link.circle")
+                        .foregroundStyle(isConnected ? .green : .secondary)
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                .buttonStyle(.borderless)
+                .help(isConnected
+                    ? "Connected. Click to disconnect."
+                    : "Connect to this workspace")
+                .accessibilityLabel(isConnected ? "Disconnect" : "Connect")
             }
         }
-        .tag(selection)
+        .contextMenu {
+            // Both cases covered, so a right-click never opens an empty menu.
+            if isConnected {
+                Button("Disconnect") {
+                    model.disconnect()
+                }
+            } else {
+                Button("Connect") {
+                    Task { await model.connect(to: selection) }
+                }
+            }
+        }
     }
 
+    /// A selectable row. Selection *is* the watched-list state, so the row
+    /// carries no highlight of its own — the sidebar draws the standard one.
     @ViewBuilder
     private func cueListRow(_ list: Cue) -> some View {
         let isWatched = model.client.watchedCueListID == list.uniqueID
 
-        Button {
-            withAnimation(Motion.cueChange) {
-                model.client.watchedCueListID = list.uniqueID
-            }
-            Task { await model.client.refreshPlayheadCueDetails() }
-        } label: {
-            Label {
-                HStack {
-                    Text(list.displayName ?? "Untitled Cue List")
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    if model.client.playheads[list.uniqueID] == nil {
-                        Image(systemName: "minus")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .help("This cue list has no playhead set")
-                    }
+        Label {
+            HStack {
+                Text(list.displayName ?? "Untitled Cue List")
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if model.client.playheads[list.uniqueID] == nil {
+                    Image(systemName: "minus")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .help("This cue list has no playhead set")
                 }
-            } icon: {
-                Image(systemName: isWatched ? "eye.fill" : "list.bullet")
-                    .foregroundStyle(isWatched ? Color.accentColor : .secondary)
-                    .contentTransition(.symbolEffect(.replace))
             }
-            .fontWeight(isWatched ? .semibold : .regular)
+        } icon: {
+            Image(systemName: isWatched ? "eye" : "eye.slash")
+                .contentTransition(.symbolEffect(.replace))
         }
-        .buttonStyle(.plain)
+        .tag(list.uniqueID)
+        .accessibilityHint("Watches this cue list's playhead")
     }
 
-    // MARK: - Selection
-
-    /// Selecting a workspace connects to it; deselecting disconnects.
-    private var selectionBinding: Binding<WorkspaceSelection?> {
+    private func workspaceExpansionBinding(for workspaceID: String) -> Binding<Bool> {
         Binding {
-            model.selection
-        } set: { newValue in
-            guard let newValue else {
-                model.disconnect()
-                return
+            expandedWorkspaceIDs.contains(workspaceID)
+        } set: { isExpanded in
+            if isExpanded {
+                expandedWorkspaceIDs.insert(workspaceID)
+            } else {
+                expandedWorkspaceIDs.remove(workspaceID)
             }
-            guard newValue != model.selection else { return }
-            Task { await model.connect(to: newValue) }
+        }
+    }
+
+    private func expansionBinding(for serverID: String) -> Binding<Bool> {
+        Binding {
+            expandedServerIDs.contains(serverID)
+        } set: { isExpanded in
+            if isExpanded {
+                expandedServerIDs.insert(serverID)
+            } else {
+                expandedServerIDs.remove(serverID)
+            }
         }
     }
 
     // MARK: - Overlays and sheets
 
     private var searchingOverlay: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "antenna.radiowaves.left.and.right")
-                .font(.title)
-                .foregroundStyle(.secondary)
-                .symbolEffect(.variableColor.iterative, isActive: model.browser.isBrowsing)
-
-            Text("Looking for QLab")
-                .font(.callout)
+        ContentUnavailableView {
+            Label {
+                Text("Looking for QLab")
+            } icon: {
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .symbolEffect(
+                        .variableColor.iterative,
+                        isActive: model.browser.isBrowsing
+                    )
+            }
+        } description: {
             Text("Open a workspace in QLab 5 on this Mac or on the network.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
         }
-        .padding()
         .allowsHitTesting(false)
     }
 
@@ -233,11 +314,13 @@ struct WorkspaceSidebar: View {
         .formStyle(.grouped)
         .frame(width: 380)
         .safeAreaInset(edge: .bottom) {
+            // Both buttons at the trailing edge, confirmation last: the macOS
+            // convention for a sheet's action row.
             HStack {
-                Button("Cancel", role: .cancel) { dismissAddServer() }
                 Spacer()
+                Button("Cancel", role: .cancel) { dismissAddServer() }
                 Button("Add") { addServer() }
-                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
                     .disabled(!isNewServerValid)
             }
             .padding()

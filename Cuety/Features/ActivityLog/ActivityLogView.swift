@@ -11,6 +11,11 @@ struct ActivityLogView: View {
     @State private var searchText = ""
     @State private var directionFilter: DirectionFilter = .all
     @State private var selection: Set<OSCEvent.ID> = []
+    /// Newest first by default, which is what an operator watching a live
+    /// session wants. Clicking a header re-sorts from here.
+    @State private var sortOrder = [
+        KeyPathComparator(\OSCEvent.timestamp, order: .reverse)
+    ]
 
     private enum DirectionFilter: String, CaseIterable, Identifiable {
         case all, sent, received, malformed
@@ -38,16 +43,18 @@ struct ActivityLogView: View {
 
     private var filteredEntries: [OSCEvent] {
         let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
-        return model.log.entries.reversed().filter { entry in
-            guard directionFilter.matches(entry.direction) else { return false }
-            guard !query.isEmpty else { return true }
-            return entry.address.lowercased().contains(query)
-                || entry.arguments.lowercased().contains(query)
-        }
+        return model.log.entries
+            .filter { entry in
+                guard directionFilter.matches(entry.direction) else { return false }
+                guard !query.isEmpty else { return true }
+                return entry.address.lowercased().contains(query)
+                    || entry.arguments.lowercased().contains(query)
+            }
+            .sorted(using: sortOrder)
     }
 
     var body: some View {
-        Table(filteredEntries, selection: $selection) {
+        Table(filteredEntries, selection: $selection, sortOrder: $sortOrder) {
             TableColumn("") { entry in
                 Image(systemName: entry.direction.systemImage)
                     .foregroundStyle(tint(for: entry.direction))
@@ -56,14 +63,14 @@ struct ActivityLogView: View {
             }
             .width(24)
 
-            TableColumn("Time") { entry in
+            TableColumn("Time", value: \.timestamp) { entry in
                 Text(entry.timestamp, format: .dateTime.hour().minute().second())
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
             .width(min: 70, ideal: 80, max: 110)
 
-            TableColumn("Address") { entry in
+            TableColumn("Address", value: \.address) { entry in
                 Text(entry.address)
                     .fontDesign(.monospaced)
                     .lineLimit(1)
@@ -71,7 +78,7 @@ struct ActivityLogView: View {
             }
             .width(min: 180, ideal: 280)
 
-            TableColumn("Arguments") { entry in
+            TableColumn("Arguments", value: \.arguments) { entry in
                 Text(entry.arguments)
                     .fontDesign(.monospaced)
                     .foregroundStyle(.secondary)
@@ -80,7 +87,7 @@ struct ActivityLogView: View {
             }
             .width(min: 120, ideal: 240)
 
-            TableColumn("Bytes") { entry in
+            TableColumn("Bytes", value: \.byteCount) { entry in
                 Text(entry.byteCount, format: .number)
                     .monospacedDigit()
                     .foregroundStyle(.tertiary)
@@ -132,6 +139,7 @@ struct ActivityLogView: View {
                 } label: {
                     Label("Copy", systemImage: "doc.on.doc")
                 }
+                .keyboardShortcut("c", modifiers: .command)
                 .disabled(selection.isEmpty)
                 .help("Copy the selected rows")
             }
@@ -149,7 +157,6 @@ struct ActivityLogView: View {
         .safeAreaInset(edge: .bottom) {
             statusBar
         }
-        .navigationTitle("Activity Log")
     }
 
     /// Totals stay visible even when the table is filtered or paused, so the
@@ -199,7 +206,9 @@ struct ActivityLogView: View {
     }
 
     private func copySelection() {
-        let lines = model.log.entries
+        // Copied in the order they appear on screen, not in log order, so the
+        // pasted text matches what was selected.
+        let lines = filteredEntries
             .filter { selection.contains($0.id) }
             .map(\.copyableDescription)
         guard !lines.isEmpty else { return }

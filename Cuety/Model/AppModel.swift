@@ -20,6 +20,12 @@ final class AppModel {
     /// The workspace the user has chosen in the sidebar.
     var selection: WorkspaceSelection?
 
+    /// True while workspace discovery is refreshing.
+    private(set) var isRefreshing = false
+
+    /// The time the most recent manual or automatic refresh completed.
+    private(set) var lastRefreshDate: Date?
+
     // MARK: Passcode prompting
 
     /// Set when a workspace needs a passcode we don't have, or rejected the one
@@ -81,19 +87,30 @@ final class AppModel {
     /// Failures are recorded per server rather than thrown: one unreachable
     /// machine must not stop the others from appearing in the sidebar.
     func refreshWorkspaces() async {
-        for server in browser.servers {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer {
+            isRefreshing = false
+            lastRefreshDate = Date()
+        }
+
+        browser.restartBrowsing()
+        var updatedServers = browser.servers
+        for (index, server) in updatedServers.enumerated() {
             do {
-                let workspaces = try await client.fetchWorkspaces(from: server)
-                var updated = server
-                updated.workspaces = workspaces
-                updated.lastError = nil
-                browser.update(updated)
+                updatedServers[index].workspaces = try await client.fetchWorkspaces(from: server)
+                updatedServers[index].lastError = nil
             } catch {
-                var updated = server
-                updated.workspaces = []
-                updated.lastError = String(describing: error)
-                browser.update(updated)
+                updatedServers[index].workspaces = []
+                updatedServers[index].lastError = String(describing: error)
             }
+        }
+        browser.update(updatedServers)
+
+        // Refresh the connected workspace's cue data as well as the server list.
+        if client.status.hasLiveData {
+            try? await client.refreshCueLists()
+            await client.refreshPlayheadCueDetails()
         }
     }
 

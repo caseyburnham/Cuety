@@ -111,6 +111,19 @@ struct CueRowView: View {
             }
         }
 
+        /// The largest size any row uses — the next cue's. The number column is
+        /// sized from this so every row's number lands on the same edge.
+        static let largestFontSize: CGFloat = 22
+
+        /// The name is set a little smaller than the number it sits beside, so
+        /// the number stays the thing the eye lands on first.
+        static let nameSizeRatio: CGFloat = 0.82
+
+        /// Indicators are small enough to read as annotations on the row rather
+        /// than as content, with a floor so they don't vanish on taken cues.
+        static let indicatorSizeRatio: CGFloat = 0.55
+        static let minimumIndicatorSize: CGFloat = 9
+
         var weight: Font.Weight {
             switch self {
             case .taken: .regular
@@ -148,22 +161,17 @@ struct CueRowView: View {
 
     @Environment(AppModel.self) private var model
 
+    private var typography: Typography { Typography(preferences: model.preferences) }
+
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            // Numbers share a right-aligned column so they line up as a scale
-            // the eye can read down, rather than ragged text.
-            Text(cue.displayNumber ?? "–")
-                .font(
-                    Typography(preferences: model.preferences)
-                        .drawerNumber(size: role.fontSize, isPlayhead: role.isNext)
-                )
-                .fontWeight(role.weight)
-                .monospacedDigit()
-                .frame(width: numberColumnWidth, alignment: .trailing)
+            numberColumn
                 .foregroundStyle(cue.displayNumber == nil ? .tertiary : .primary)
 
             Text(cue.displayName ?? "Untitled")
-                .font(.system(size: role.fontSize * 0.82, weight: role.weight))
+                .font(.system(
+                    size: role.fontSize * Role.nameSizeRatio, weight: role.weight
+                ))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .foregroundStyle(cue.displayName == nil ? .tertiary : .secondary)
@@ -178,9 +186,34 @@ struct CueRowView: View {
         .accessibilityLabel(accessibilityDescription)
     }
 
-    /// Wide enough for a number like "127.5" without the column dancing as the
-    /// playhead moves between short and long numbers.
-    private var numberColumnWidth: CGFloat { 78 }
+    /// Numbers share a right-aligned column so they line up as a scale the eye
+    /// can read down, rather than ragged text.
+    ///
+    /// The column's width comes from laying out a hidden template at the
+    /// drawer's largest row size and drawing the real number over it. A fixed
+    /// point value would be a guess that silently stops fitting the moment the
+    /// operator picks a wider font family.
+    private var numberColumn: some View {
+        Text(verbatim: "000.0")
+            .font(typography.drawerNumber(size: Role.largestFontSize, isPlayhead: true))
+            .fontWeight(.semibold)
+            .monospacedDigit()
+            .hidden()
+            .accessibilityHidden(true)
+            // Baseline-aligned, not centred: the template is always 22pt, so a
+            // smaller row's number has to sit on the template's baseline or it
+            // drifts away from the name beside it.
+            .overlay(alignment: .trailingFirstTextBaseline) {
+                Text(cue.displayNumber ?? "–")
+                    .font(typography.drawerNumber(
+                        size: role.fontSize, isPlayhead: role.isNext
+                    ))
+                    .fontWeight(role.weight)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+    }
 
     /// Only the states worth interrupting for: a disarmed cue that will not
     /// fire, and a flag the operator set deliberately.
@@ -203,7 +236,9 @@ struct CueRowView: View {
                     .help(cue.continueMode?.title ?? "")
             }
         }
-        .font(.system(size: max(9, role.fontSize * 0.55)))
+        .font(.system(size: max(
+            Role.minimumIndicatorSize, role.fontSize * Role.indicatorSizeRatio
+        )))
     }
 
     private var accessibilityDescription: String {

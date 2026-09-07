@@ -8,8 +8,6 @@ import SwiftUI
 struct AppCommands: Commands {
     let model: AppModel
 
-    @Environment(\.openWindow) private var openWindow
-
     var body: some Commands {
         CommandGroup(after: .sidebar) {
             Button(model.isPresenting ? "Exit Presentation Mode" : "Enter Presentation Mode") {
@@ -22,22 +20,27 @@ struct AppCommands: Commands {
                 set: { _ in model.toggleDrawer() }
             ))
             .keyboardShortcut("d", modifiers: [.command, .option])
-
-            Divider()
         }
 
-        CommandGroup(before: .windowList) {
-            Button("Activity Log") {
-                openWindow(id: WindowID.activityLog.rawValue)
+        // Connection actions get their own menu rather than being appended to
+        // View: they act on the QLab session, not on what the window shows.
+        // The Activity Log and Connection Status windows are deliberately absent
+        // here — a `Window` scene already contributes its own Window-menu item,
+        // and its `keyboardShortcut` binds to that item, so adding buttons for
+        // them would produce a second copy of each command.
+        CommandMenu("Connection") {
+            Button("Refresh") {
+                Task { await model.refreshWorkspaces() }
             }
-            .keyboardShortcut("l", modifiers: [.command, .shift])
-
-            Button("Connection Status") {
-                openWindow(id: WindowID.connectionInspector.rawValue)
-            }
-            .keyboardShortcut("i", modifiers: [.command, .shift])
+            .keyboardShortcut("r", modifiers: .command)
+            .disabled(model.isRefreshing)
 
             Divider()
+
+            Button("Disconnect") {
+                model.disconnect()
+            }
+            .disabled(!model.client.status.hasLiveData)
         }
     }
 }

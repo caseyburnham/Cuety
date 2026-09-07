@@ -61,6 +61,12 @@ final class QLabBrowser {
         isBrowsing = true
     }
 
+    /// Restarts Bonjour discovery without discarding the currently displayed servers.
+    func restartBrowsing() {
+        stop()
+        start()
+    }
+
     func stop() {
         browser?.stateUpdateHandler = nil
         browser?.browseResultsChangedHandler = nil
@@ -141,14 +147,47 @@ final class QLabBrowser {
         servers[index] = server
     }
 
+    /// Replaces several server entries in one observation update.
+    func update(_ updatedServers: [QLabServer]) {
+        let updates = Dictionary(
+            updatedServers.map { ($0.id, $0) },
+            uniquingKeysWith: { _, latest in latest }
+        )
+        servers = servers.map { updates[$0.id] ?? $0 }
+    }
+
     func server(withID id: String) -> QLabServer? {
         servers.first { $0.id == id }
     }
 
     // MARK: - Grouping
 
-    var bonjourServers: [QLabServer] { servers.filter { $0.source == .bonjour } }
+    var bonjourServers: [QLabServer] {
+        let manualHosts = Set(
+            manualServers.map { Self.normalizedHost($0.name) }
+        )
+        let localComputerNames = Set([
+            Host.current().localizedName,
+            ProcessInfo.processInfo.hostName
+        ].compactMap { $0 }.map(Self.normalizedHost))
+
+        return servers.filter {
+            $0.source == .bonjour
+                && !manualHosts.contains(Self.normalizedHost($0.name))
+                && !localComputerNames.contains(Self.normalizedHost($0.name))
+        }
+    }
+
     var manualServers: [QLabServer] { servers.filter { $0.source == .manual } }
+
+    private static func normalizedHost(_ host: String) -> String {
+        host
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .split(separator: ".")
+            .dropLast("local" == host.split(separator: ".").last?.lowercased() ? 1 : 0)
+            .joined(separator: ".")
+    }
 
     // MARK: - Persistence
 

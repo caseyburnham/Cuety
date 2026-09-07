@@ -20,7 +20,6 @@ struct PasscodeSheet: View {
             header
 
             SecureField("Passcode", text: $passcode)
-                .textFieldStyle(.roundedBorder)
                 .focused($isFieldFocused)
                 .onSubmit(submit)
 
@@ -38,17 +37,19 @@ struct PasscodeSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
 
+            // Both buttons at the trailing edge, confirmation last. The default
+            // action styles itself prominently, so it needs no button style of
+            // its own.
             HStack {
+                Spacer()
                 Button("Cancel", role: .cancel) {
                     model.passcodePrompt = nil
                     model.disconnect()
                     dismiss()
                 }
-                Spacer()
                 Button("Connect", action: submit)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(passcode.isEmpty)
                     .keyboardShortcut(.defaultAction)
+                    .disabled(passcode.isEmpty)
             }
         }
         .padding(20)

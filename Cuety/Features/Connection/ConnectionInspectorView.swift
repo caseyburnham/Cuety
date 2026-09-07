@@ -11,31 +11,37 @@ struct ConnectionInspectorView: View {
 
     private var client: QLabClient { model.client }
 
+    /// Nothing has been attempted yet, so there are no details to show.
+    private var isIdle: Bool {
+        if case .offline = client.status, client.workspace == nil { return true }
+        return false
+    }
+
     var body: some View {
-        Form {
-            statusSection
+        // An `if`, not an overlay: laying the empty state *over* a populated
+        // Form left the status section showing through behind it.
+        if isIdle {
+            ContentUnavailableView(
+                "Not Connected",
+                systemImage: "network.slash",
+                description: Text(client.status.detail)
+            )
+        } else {
+            Form {
+                statusSection
 
-            if client.status.hasLiveData || client.workspace != nil {
-                transportSection
-                sessionSection
-                qlabSection
-                healthSection
-            }
+                if client.status.hasLiveData || client.workspace != nil {
+                    transportSection
+                    sessionSection
+                    qlabSection
+                    healthSection
+                }
 
-            if client.lastErrorDescription != nil {
-                errorSection
+                if client.lastErrorDescription != nil {
+                    errorSection
+                }
             }
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Connection Status")
-        .overlay {
-            if case .offline = client.status, client.workspace == nil {
-                ContentUnavailableView(
-                    "Not Connected",
-                    systemImage: "network.slash",
-                    description: Text(client.status.detail)
-                )
-            }
+            .formStyle(.grouped)
         }
     }
 

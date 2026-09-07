@@ -17,13 +17,21 @@ struct DetailPill: View {
                 Text(content.text)
                     .fontWeight(.medium)
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: content.isFlexible ? 240 : nil, alignment: .leading)
             } icon: {
                 Image(systemName: content.systemImage)
                     .foregroundStyle(content.tint ?? .secondary)
             }
             .font(.callout)
             .labelStyle(.titleAndIcon)
-            .padding(.horizontal, 7)
+            // A pill with bounded text holds its natural width; only free text
+            // is allowed to give way, and it yields first, so a long note
+            // truncates instead of squeezing "Disarmed" down to "Disar…".
+            .fixedSize(horizontal: !content.isFlexible, vertical: false)
+            .layoutPriority(content.isFlexible ? -1 : 0)
+            .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .glassEffect(
                 content.tint.map { Glass.regular.tint($0.opacity(0.28)) } ?? .regular,
@@ -40,6 +48,10 @@ struct DetailPill: View {
         let systemImage: String
         var tint: Color?
         var help: String
+        /// Whether the text is free-form and may be shortened to fit. True only
+        /// for notes; every other pill's text is a short bounded value that
+        /// should never be truncated.
+        var isFlexible = false
     }
 
     static func content(for kind: DetailPillKind, cue: Cue) -> Content? {
@@ -123,7 +135,8 @@ struct DetailPill: View {
             return Content(
                 text: notes,
                 systemImage: "ellipsis.bubble",
-                help: notes
+                help: notes,
+                isFlexible: true
             )
         }
     }

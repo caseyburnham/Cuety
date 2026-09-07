@@ -22,14 +22,6 @@ struct MainWindowView: View {
 
     private var detail: some View {
         CueDisplayView()
-            // The header floats over the display rather than pushing it down,
-            // which is what lets the cue number use the full height.
-            .overlay(alignment: .topTrailing) {
-                if !model.isPresenting {
-                    HeaderBar()
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if model.preferences.showsDrawer && !model.isPresenting {
                     CueDrawerView()
@@ -37,6 +29,7 @@ struct MainWindowView: View {
                 }
             }
             .background(backdrop)
+            .toolbar { StatusToolbarContent() }
             .toolbar(model.isPresenting ? .hidden : .automatic)
             .navigationTitle(navigationTitle)
             .navigationSubtitle(navigationSubtitle)
