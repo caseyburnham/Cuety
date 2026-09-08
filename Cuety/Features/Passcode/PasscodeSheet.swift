@@ -1,16 +1,13 @@
 import SwiftUI
 
 /// Prompts for a workspace passcode.
-///
-/// The rejection copy is load-bearing: QLab introduces a progressively longer
-/// delay after repeated bad passcodes, so telling the operator to slow down is
-/// more useful than letting them hammer the button and conclude Cuety is broken.
 struct PasscodeSheet: View {
     let prompt: AppModel.PasscodePrompt
 
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
 
+    @State private var isSubmitting = false
+    @State private var attemptError: String?
     @State private var passcode = ""
     @State private var shouldRemember = true
     @FocusState private var isFieldFocused: Bool
@@ -22,18 +19,15 @@ struct PasscodeSheet: View {
             SecureField("Passcode", text: $passcode)
                 .focused($isFieldFocused)
                 .onSubmit(submit)
+                .disabled(isSubmitting)
 
             Toggle("Remember in my Keychain", isOn: $shouldRemember)
+                .disabled(isSubmitting)
 
-            if prompt.wasRejected {
-                Label {
-                    Text("QLab delays repeated attempts, so wait a moment before trying again.")
-                } icon: {
-                    Image(systemName: "clock.badge.exclamationmark")
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if let attemptError {
+                Text(attemptError)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             // Both buttons at the trailing edge, confirmation last. The default
@@ -42,31 +36,32 @@ struct PasscodeSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) {
-                    model.passcodePrompt = nil
                     model.disconnect()
-                    dismiss()
                 }
-                Button("Connect", action: submit)
+                .keyboardShortcut(.cancelAction)
+                .disabled(isSubmitting)
+                Button(isSubmitting ? "Connecting…" : "Connect", action: submit)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(passcode.isEmpty)
+                    .disabled(passcode.isEmpty || isSubmitting)
             }
         }
         .padding(20)
         .frame(width: 360)
         .onAppear { isFieldFocused = true }
+        .interactiveDismissDisabled(isSubmitting)
     }
 
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: prompt.wasRejected ? "lock.trianglebadge.exclamationmark" : "lock.circle")
+            Image(systemName: currentPrompt.wasRejected ? "lock.trianglebadge.exclamationmark" : "lock.circle")
                 .font(.largeTitle)
-                .foregroundStyle(prompt.wasRejected ? .orange : .secondary)
+                .foregroundStyle(currentPrompt.wasRejected ? .orange : .secondary)
                 .contentTransition(.symbolEffect(.replace))
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(prompt.wasRejected ? "Passcode Not Accepted" : "Passcode Required")
+                Text(currentPrompt.wasRejected ? "Passcode Not Accepted" : "Passcode Required")
                     .font(.headline)
-                Text("\(prompt.workspaceName) is protected by an OSC passcode.")
+                Text("Enter the OSC passcode for \(prompt.workspaceName).")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -74,21 +69,26 @@ struct PasscodeSheet: View {
         }
     }
 
-    private func submit() {
-        guard !passcode.isEmpty else { return }
-        let entered = passcode
+    private var currentPrompt: AppModel.PasscodePrompt {
+        model.passcodePrompt ?? prompt
+    }
 
-        // Only persist when asked. A passcode typed for a one-off connection to
-        // someone else's machine shouldn't linger in the Keychain.
-        if shouldRemember {
-            Task { await model.submitPasscode(entered, for: prompt) }
-        } else {
-            model.passcodePrompt = nil
-            Task {
-                await model.connectOnce(withPasscode: entered, for: prompt)
+    private func submit() {
+        guard !passcode.isEmpty, !isSubmitting else { return }
+        isSubmitting = true
+        attemptError = nil
+        Task {
+            await model.submitPasscode(passcode, for: prompt, remember: shouldRemember)
+            isSubmitting = false
+            if model.passcodePrompt != nil {
+                if case .needsPasscode = model.client.status {
+                    attemptError = nil
+                } else {
+                    attemptError = model.client.status.detail
+                }
+                isFieldFocused = true
             }
         }
-        dismiss()
     }
 }
 

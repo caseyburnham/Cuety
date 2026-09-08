@@ -33,8 +33,7 @@ final class AppModel {
         let serverID: String
         let workspaceID: String
         let workspaceName: String
-        /// True when a passcode was tried and refused, so the sheet can warn
-        /// about QLab's escalating delay.
+        /// True when a submitted passcode was refused.
         var wasRejected: Bool
 
         var id: String { "\(serverID)|\(workspaceID)" }
@@ -61,6 +60,15 @@ final class AppModel {
         self.log = log
         self.client = QLabClient(preferences: preferences, log: log)
         self.browser = QLabBrowser()
+        self.client.onPasscodeRequired = { [weak self] rejected in
+            guard let self, let selection = self.selection else { return }
+            if rejected { self.forgetPasscode(for: selection) }
+            self.passcodePrompt = PasscodePrompt(
+                serverID: selection.serverID, workspaceID: selection.workspaceID,
+                workspaceName: self.workspaceName(for: selection) ?? "this workspace",
+                wasRejected: rejected
+            )
+        }
 
         // Apply the persisted keep-awake preference at launch, so the setting
         // survives a relaunch rather than silently resetting.
@@ -146,7 +154,7 @@ final class AppModel {
             guard selection == nil else { return }
 
             if isKnown(target) {
-                await connect(to: target)
+                await connect(to: target, useSavedPasscode: true)
                 return
             }
 
@@ -166,32 +174,22 @@ final class AppModel {
 
     // MARK: - Connecting
 
-    /// Connects to a workspace, using a stored passcode if one exists and
-    /// prompting if QLab refuses.
-    func connect(to selection: WorkspaceSelection) async {
+    /// Workspace selection tries without credentials first. Launch restoration
+    /// can reuse a passcode the operator previously chose to remember.
+    func connect(to selection: WorkspaceSelection, useSavedPasscode: Bool = false) async {
         guard let server = browser.server(withID: selection.serverID) else { return }
 
         self.selection = selection
-        let stored = passcodes.passcode(
+        passcodePrompt = nil
+        let stored = useSavedPasscode ? passcodes.passcode(
             serverID: selection.serverID, workspaceID: selection.workspaceID
-        )
+        ) : nil
 
         await client.connect(
             to: server,
             workspaceID: selection.workspaceID,
             passcode: stored
         )
-
-        // The client sets `needsPasscode` when QLab wants credentials we don't
-        // have or refused the ones we sent.
-        if case .needsPasscode(let rejected) = client.status {
-            passcodePrompt = PasscodePrompt(
-                serverID: selection.serverID,
-                workspaceID: selection.workspaceID,
-                workspaceName: workspaceName(for: selection) ?? "this workspace",
-                wasRejected: rejected
-            )
-        }
 
         // Only a connection that actually reached the workspace is worth
         // restoring at launch, so a failed or refused attempt doesn't become
@@ -201,51 +199,31 @@ final class AppModel {
         }
     }
 
-    /// Saves a passcode and retries the connection once.
-    ///
-    /// Deliberately a single explicit retry driven by the user pressing Connect
-    /// — QLab lengthens its own delay after repeated failures, so an automatic
-    /// retry loop would make a mistyped passcode progressively worse.
-    func submitPasscode(_ passcode: String, for prompt: PasscodePrompt) async {
-        try? passcodes.save(
-            passcode, serverID: prompt.serverID, workspaceID: prompt.workspaceID
-        )
-        passcodePrompt = nil
-
-        await connect(
-            to: WorkspaceSelection(
-                serverID: prompt.serverID, workspaceID: prompt.workspaceID
-            )
-        )
-    }
-
-    /// Connects with a passcode without saving it, for a one-off session on
-    /// someone else's machine.
-    ///
-    /// Deliberately does not record the workspace for auto-connect: with no
-    /// passcode in the Keychain, restoring it at launch could only produce a
-    /// passcode prompt, which is not what "one-off" should mean.
-    func connectOnce(withPasscode passcode: String, for prompt: PasscodePrompt) async {
+    /// One explicit attempt. Keep the sheet open on failure and save only a
+    /// credential that reached a live workspace session.
+    func submitPasscode(
+        _ passcode: String, for prompt: PasscodePrompt, remember: Bool
+    ) async {
         guard let server = browser.server(withID: prompt.serverID) else { return }
-
-        selection = WorkspaceSelection(
+        let target = WorkspaceSelection(
             serverID: prompt.serverID, workspaceID: prompt.workspaceID
         )
-        await client.connect(
-            to: server, workspaceID: prompt.workspaceID, passcode: passcode
-        )
+        selection = target
+        await client.connect(to: server, workspaceID: prompt.workspaceID, passcode: passcode)
 
-        if case .needsPasscode(let rejected) = client.status {
-            passcodePrompt = PasscodePrompt(
-                serverID: prompt.serverID,
-                workspaceID: prompt.workspaceID,
-                workspaceName: prompt.workspaceName,
-                wasRejected: rejected
-            )
+        if client.status.hasLiveData {
+            if remember {
+                try? passcodes.save(
+                    passcode, serverID: prompt.serverID, workspaceID: prompt.workspaceID
+                )
+                preferences.lastWorkspace = target
+            }
+            passcodePrompt = nil
         }
     }
 
     func disconnect() {
+        passcodePrompt = nil
         client.disconnect()
         selection = nil
     }

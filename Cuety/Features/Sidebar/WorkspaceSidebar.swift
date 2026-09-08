@@ -1,383 +1,302 @@
 import SwiftUI
 
-/// The workspace list: servers grouped by how Cuety found them, each disclosing
-/// its open workspaces, each connected workspace disclosing its cue lists.
-///
-/// The list's selection *is* the watched cue list, because the watched cue list
-/// is what the detail pane shows — which is what a source list's selection means
-/// on macOS. Servers and workspaces carry no tag and so aren't selectable: they
-/// are containers and actions, not things the window can display.
-///
-/// Cue lists are selectable at all because "which list is the active one" has no
-/// documented getter in QLab's OSC dictionary. Letting the operator say which
-/// list to watch is both a workaround for that and the better behaviour: on a
-/// multi-list show, they may well want to watch a specific one.
+/// Workspaces grouped by server, followed by the connected workspace's cue lists.
+/// Keeping both at one level avoids nested disclosure rows changing their job.
 struct WorkspaceSidebar: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var isAddingServer = false
     @State private var newHost = ""
-    /// Seeded from the preference when the sheet opens, so a house that runs
-    /// QLab on a non-standard port sets it once in Settings.
-    @State private var newPort = Int(QLabServer.defaultPort)
-    /// Servers the operator has *closed*, rather than the ones they've opened.
-    /// Inverted deliberately: a new server arrives expanded, so its workspaces —
-    /// or its "no open workspaces" explanation — are readable without a click.
-    @State private var collapsedServerIDs: Set<String> = []
+    @State private var newPort = String(QLabServer.defaultPort)
+    @State private var isConnecting = false
+    @State private var selectedRow: Selection?
+    @State private var probingServerIDs: Set<String> = []
+    @FocusState private var hostIsFocused: Bool
+
+    private enum Selection: Hashable {
+        case workspace(WorkspaceSelection)
+        case cueList(String)
+    }
 
     var body: some View {
-        List(selection: watchedCueList) {
-            if !model.browser.bonjourServers.isEmpty {
-                Section(QLabServer.Source.bonjour.sectionTitle) {
-                    ForEach(model.browser.bonjourServers) { server in
-                        serverRow(server)
+        List(selection: sidebarSelection) {
+            ForEach(model.browser.manualServers + model.browser.bonjourServers) { server in
+                Section {
+                    ForEach(server.workspaces) { workspace in
+                        workspaceRow(workspace, on: server)
+                    }
+                    if server.workspaces.isEmpty {
+                        serverStatus(server)
+                            .selectionDisabled()
+                    }
+                } header: {
+                    Text(server.name)
+                        .help(server.address ?? "Discovered on the local network")
+                        .contextMenu {
+                            removeServerButton(server)
+                        }
+                }
+            }
+
+            if model.client.status.hasLiveData {
+                Section("Cue Lists") {
+                    ForEach(model.client.cueLists) { list in
+                        cueListRow(list)
+                    }
+                    if model.client.cueLists.isEmpty {
+                        Text("No Cue Lists")
+                            .foregroundStyle(.secondary)
+                            .selectionDisabled()
                     }
                 }
             }
 
-            // Never empty: the localhost entry is always present.
-            Section(QLabServer.Source.manual.sectionTitle) {
-                ForEach(model.browser.manualServers) { server in
-                    serverRow(server)
-                }
-            }
-
             if let error = model.browser.browseError {
-                Section("Network") {
+                Section("Network Discovery") {
                     Label(error, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(.secondary)
+                        .selectionDisabled()
                 }
             }
         }
+        .contextMenu(forSelectionType: Selection.self) { items in
+            if case .workspace(let selection) = items.first {
+                if model.selection == selection && model.client.status.hasLiveData {
+                    Button("Disconnect") { model.disconnect() }
+                } else {
+                    Button("Connect") { connect(to: selection) }
+                        .disabled(isConnecting || model.client.status.isTransitional)
+                }
+                if let server = model.browser.server(withID: selection.serverID) {
+                    removeServerButton(server)
+                }
+            }
+        } primaryAction: { items in
+            if case .workspace(let selection) = items.first {
+                connect(to: selection)
+            }
+        }
+        .onChange(of: model.selection) { selectedRow = nil }
+        .onChange(of: model.client.watchedCueListID) { selectedRow = nil }
         .listStyle(.sidebar)
-        .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
-        .toolbar {
-            ToolbarItem {
+        .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack {
                 Button {
-                    // Reset both fields here rather than on dismissal, so the
-                    // sheet is fresh however it was last closed.
                     newHost = ""
-                    newPort = model.preferences.defaultPort
+                    newPort = String(model.preferences.defaultPort)
                     isAddingServer = true
                 } label: {
-                    Label("Add Server", systemImage: "plus")
+                    Label("Add Server…", systemImage: "plus")
                 }
-                .help("Connect to QLab at a specific address")
-            }
-
-            ToolbarItem {
+                Spacer()
                 Button {
                     Task { await model.refresh() }
                 } label: {
                     Label("Refresh Everything", systemImage: "arrow.clockwise")
-                        // The symbol animates itself while the refresh is in
-                        // flight, which keeps the button's size and position
-                        // fixed — swapping in a `ProgressView` would not. It is
-                        // also the app's only indication that Cuety is out
-                        // looking, so it runs on launch as well as on demand.
-                        //
-                        // Periodic rather than continuous: each turn is a
-                        // discrete eased animation, so the glyph accelerates and
-                        // settles instead of grinding round at one speed. A zero
-                        // delay runs them back to back, and the doubled speed
-                        // reads as busy rather than as laboured.
-                        .symbolEffect(
-                            .rotate.byLayer,
-                            options: .repeat(.periodic(delay: 0)).speed(2),
-                            isActive: model.isRefreshing
-                        )
+                        .symbolEffect(.rotate, isActive: model.isRefreshing && !reduceMotion)
                 }
-                .disabled(model.isRefreshing)
-                .help(
-                    """
-                    Restart Bonjour discovery, re-ask every server for its open \
-                    workspaces, and rebuild the connection to QLab from scratch.
-                    """
-                )
+                .labelStyle(.iconOnly)
+                .disabled(model.isRefreshing || isConnecting || model.client.status.isTransitional)
+                .help("Refresh available workspaces and rebuild the current QLab connection.")
             }
+            .padding(10)
+            .background(.bar)
         }
         .sheet(isPresented: $isAddingServer) {
             addServerSheet
         }
     }
 
-    // MARK: - Selection
-
-    /// Drives the list's native selection from the watched cue list.
-    private var watchedCueList: Binding<String?> {
+    private var sidebarSelection: Binding<Selection?> {
         Binding {
-            model.client.watchedCueListID
-        } set: { newValue in
-            // Clicking empty space clears selection; that shouldn't stop us
-            // watching the list the operator already chose.
-            guard let newValue, newValue != model.client.watchedCueListID else { return }
-            withAnimation(Motion.cueChange) {
-                model.client.watchedCueListID = newValue
+            if let selectedRow { return selectedRow }
+            if model.client.status.hasLiveData, let id = model.client.watchedCueListID {
+                return .cueList(id)
             }
-            Task { await model.client.refreshPlayheadCueDetails() }
-        }
-    }
-
-    // MARK: - Rows
-
-    private func serverRow(_ server: QLabServer) -> some View {
-        DisclosureGroup(isExpanded: expansionBinding(for: server.id)) {
-            if server.workspaces.isEmpty {
-                Label(
-                    server.lastError == nil ? "No open workspaces" : "Unreachable",
-                    systemImage: server.lastError == nil ? "tray" : "exclamationmark.triangle"
-                )
-                .foregroundStyle(server.lastError == nil ? Color.secondary : Color.orange)
-                .help(server.lastError ?? "QLab has no workspaces open on this machine.")
-            } else {
-                ForEach(server.workspaces) { workspace in
-                    WorkspaceRow(workspace: workspace, server: server)
+            return model.selection.map(Selection.workspace)
+        } set: { selection in
+            guard let selection, !isConnecting, !model.client.status.isTransitional else { return }
+            selectedRow = selection
+            switch selection {
+            case .workspace:
+                break
+            case .cueList(let id):
+                guard id != model.client.watchedCueListID else { return }
+                withAnimation(reduceMotion ? nil : Motion.cueChange) {
+                    model.client.watchedCueListID = id
                 }
-            }
-        } label: {
-            // No button wrapper: a `DisclosureGroup` label already toggles the
-            // group when clicked, and wrapping it stole that behaviour along
-            // with the row's native highlight.
-            Label {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(server.name)
-                    // Absent for a Bonjour service, whose address is the
-                    // system's to resolve and whose name is already above.
-                    if let address = server.address {
-                        Text(address)
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            } icon: {
-                Image(systemName: server.source == .bonjour ? "bonjour" : "desktopcomputer")
-            }
-        }
-        .contextMenu {
-            if server.source == .manual, server.id != QLabServer.localhost().id {
-                Button("Remove Server", role: .destructive) {
-                    model.browser.removeManualServer(id: server.id)
-                }
+                Task { await model.client.refreshPlayheadCueDetails() }
             }
         }
     }
 
-    private func expansionBinding(for serverID: String) -> Binding<Bool> {
-        Binding {
-            !collapsedServerIDs.contains(serverID)
-        } set: { isExpanded in
-            if isExpanded {
-                collapsedServerIDs.remove(serverID)
-            } else {
-                collapsedServerIDs.insert(serverID)
-            }
-        }
-    }
+    private func workspaceRow(_ workspace: QLabWorkspaceInfo, on server: QLabServer) -> some View {
+        let selection = WorkspaceSelection(serverID: server.id, workspaceID: workspace.uniqueID)
+        let isCurrent = model.selection == selection
 
-    // MARK: - Add Server
-
-    private var addServerSheet: some View {
-        Form {
-            Section {
-                TextField("Host", text: $newHost, prompt: Text("192.168.1.10"))
-                TextField(
-                    "Port",
-                    value: $newPort,
-                    format: .number.grouping(.never)
-                )
-                .monospacedDigit()
-            } header: {
-                Text("Add Server")
-            } footer: {
-                Text("A workspace with its own OSC port reports it once connected.")
-            }
-        }
-        .formStyle(.grouped)
-        .frame(width: 380)
-        .safeAreaInset(edge: .bottom) {
-            // Both buttons at the trailing edge, confirmation last: the macOS
-            // convention for a sheet's action row.
+        return Label {
             HStack {
-                Spacer()
-                Button("Cancel", role: .cancel) { isAddingServer = false }
-                Button("Add") { addServer() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!isNewServerValid)
-            }
-            .padding()
-        }
-    }
-
-    private var isNewServerValid: Bool {
-        !newHost.trimmingCharacters(in: .whitespaces).isEmpty
-            && UInt16(exactly: newPort) != nil
-            && newPort > 0
-    }
-
-    private func addServer() {
-        guard let port = UInt16(exactly: newPort), port > 0 else { return }
-        let server = model.browser.addManualServer(
-            host: newHost.trimmingCharacters(in: .whitespaces), port: port
-        )
-        isAddingServer = false
-
-        // Ask the new server what it has straight away, so the row isn't empty.
-        Task {
-            if let workspaces = try? await model.client.fetchWorkspaces(from: server) {
-                var updated = server
-                updated.workspaces = workspaces
-                model.browser.update(updated)
-            }
-        }
-    }
-}
-
-/// One open workspace, disclosing its cue lists once there are cue lists to
-/// disclose.
-///
-/// A view of its own rather than a `@ViewBuilder` method on the sidebar so that
-/// it can own its disclosure state.
-private struct WorkspaceRow: View {
-    let workspace: QLabWorkspaceInfo
-    let server: QLabServer
-
-    @Environment(AppModel.self) private var model
-
-    /// Open by default, so connecting reveals the cue lists rather than leaving
-    /// the operator to find a chevron while the detail pane asks them to pick a
-    /// list. Only consulted while connected, since there is nothing to disclose
-    /// otherwise.
-    @State private var isExpanded = true
-
-    private var selection: WorkspaceSelection {
-        WorkspaceSelection(serverID: server.id, workspaceID: workspace.uniqueID)
-    }
-
-    private var isConnected: Bool {
-        model.selection == selection && model.client.status.hasLiveData
-    }
-
-    var body: some View {
-        row
-            .animation(Motion.status, value: isConnected)
-            .contextMenu {
-                // Both cases covered, so a right-click never opens an empty menu.
-                if isConnected {
-                    Button("Disconnect") { model.disconnect() }
-                } else {
-                    Button("Connect") {
-                        Task { await model.connect(to: selection) }
+                Text(workspace.displayName)
+                    .lineLimit(2)
+                Spacer(minLength: 4)
+                if isCurrent {
+                    if model.client.status.isTransitional {
+                        ProgressView().controlSize(.small)
+                    } else if model.client.status.hasLiveData {
+                        WorkspaceDisconnectButton(status: model.client.status) { model.disconnect() }
+                    } else {
+                        Image(systemName: model.client.status.systemImage)
+                            .foregroundStyle(model.client.status.tint)
+                            .help(model.client.status.title)
+                            .accessibilityLabel(model.client.status.title)
                     }
                 }
             }
+        } icon: {
+            Image(systemName: "list.bullet.below.rectangle")
+        }
+        .tag(Selection.workspace(selection))
+        .help(workspace.displayName)
+        .accessibilityHint("Double-click to connect to this workspace")
+    }
+
+    private func connect(to selection: WorkspaceSelection) {
+        guard !isConnecting, !model.client.status.isTransitional else { return }
+        guard selection != model.selection || !model.client.status.hasLiveData else { return }
+        selectedRow = nil
+        isConnecting = true
+        Task {
+            defer { isConnecting = false }
+            await model.connect(to: selection)
+        }
     }
 
     @ViewBuilder
-    private var row: some View {
-        if isConnected {
-            // Connected, the row's only job on click is to open and close the
-            // cue lists — which is exactly what a `DisclosureGroup` label does
-            // on its own, so nothing else is layered on top of it.
-            DisclosureGroup(isExpanded: $isExpanded) {
-                ForEach(model.client.cueLists) { list in
-                    cueListRow(list)
-                }
-            } label: {
-                label
+    private func removeServerButton(_ server: QLabServer) -> some View {
+        if server.source == .manual, server.id != QLabServer.localhost().id {
+            Button("Remove Server", role: .destructive) {
+                if model.selection?.serverID == server.id { model.disconnect() }
+                model.browser.removeManualServer(id: server.id)
             }
+            .disabled(isConnecting || model.client.status.isTransitional)
+        }
+    }
+
+    @ViewBuilder
+    private func serverStatus(_ server: QLabServer) -> some View {
+        if model.isRefreshing || probingServerIDs.contains(server.id) {
+            HStack {
+                ProgressView().controlSize(.small)
+                Text("Looking for workspaces…")
+            }
+            .foregroundStyle(.secondary)
+        } else if let error = server.lastError {
+            Label("Unable to Reach QLab", systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.secondary)
+                .help(error)
         } else {
-            // Disconnected, there is nothing to disclose, so no chevron: a
-            // chevron that opens onto nothing is an affordance that lies. The
-            // row becomes the connect control instead, which is the one thing
-            // an operator wants from a workspace they aren't watching yet.
-            Button {
-                Task { await model.connect(to: selection) }
-            } label: {
-                label
-            }
-            .buttonStyle(.plain)
-            .help("Connect to this workspace")
-            .accessibilityHint("Connects to this workspace")
+            Text("No Open Workspaces")
+                .foregroundStyle(.secondary)
         }
     }
 
-    /// Name, then two pieces of state worth knowing before you click: whether
-    /// Cuety already holds this workspace's passcode, and whether it is the one
-    /// currently connected. Neither is a control — connecting and disconnecting
-    /// live on the row itself, its context menu, and the Connection menu.
-    private var label: some View {
-        HStack(spacing: 4) {
-            Text(workspace.displayName)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            if model.passcodes.hasPasscode(
-                serverID: server.id, workspaceID: workspace.uniqueID
-            ) {
-                Image(systemName: "key.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .help("A passcode for this workspace is saved in your Keychain")
-            }
-
-            Image(systemName: isConnected ? "checkmark.circle.fill" : "link.circle")
-                .foregroundStyle(isConnected ? .green : .secondary)
-                .contentTransition(.symbolEffect(.replace))
-                .help(isConnected ? "Connected" : "Not connected")
-                .accessibilityHidden(true)
-        }
-    }
-
-    /// A selectable row. Selection *is* the watched-list state, so the row
-    /// carries no watched marker of its own — the sidebar draws the standard
-    /// highlight, and the trailing value is free to report something else.
     private func cueListRow(_ list: Cue) -> some View {
-        Label {
-            HStack(spacing: 6) {
+        let cue = model.client.playheads[list.uniqueID]
+            .flatMap { list.children.firstCue(withID: $0) }
+        let playheadDescription = cue.map {
+            "Standing by: \($0.displayNumber ?? "Unnumbered cue"), \($0.displayName ?? "Untitled")"
+        } ?? "No cue standing by"
+
+        return Label {
+            HStack {
                 Text(list.displayName ?? "Untitled Cue List")
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                playhead(of: list)
+                Text(cue?.displayNumber ?? "—")
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .help(playheadDescription)
+                    .accessibilityLabel(playheadDescription)
             }
         } icon: {
-            Image(systemName: "list.bullet")
+            Image(systemName: "list.triangle")
         }
-        .tag(list.uniqueID)
+        .tag(Selection.cueList(list.uniqueID))
+        .help(list.displayName ?? "Untitled Cue List")
         .accessibilityHint("Watches this cue list's playhead")
     }
 
-    /// Where this list is standing by.
-    ///
-    /// The reason to show it on an unselected row: on a multi-list show the
-    /// operator can see every list's position at once instead of having to
-    /// switch the display between them to find out.
-    @ViewBuilder
-    private func playhead(of list: Cue) -> some View {
-        let cue = model.client.playheads[list.uniqueID]
-            .flatMap { list.children.firstCue(withID: $0) }
-
-        Text(cue?.displayNumber ?? "—")
-            .font(.caption)
-            .monospacedDigit()
-            .foregroundStyle(cue == nil ? .tertiary : .secondary)
-            .help(playheadHelp(for: cue))
-            .accessibilityLabel(playheadHelp(for: cue))
+    private var addServerSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Add Server").font(.headline)
+            Text("Enter the address of the Mac running QLab.")
+                .foregroundStyle(.secondary)
+            Form {
+                TextField("Host", text: $newHost, prompt: Text("192.168.1.10"))
+                    .focused($hostIsFocused)
+                TextField("Port", text: $newPort)
+                    .monospacedDigit()
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { isAddingServer = false }
+                    .keyboardShortcut(.cancelAction)
+                Button("Add", action: addServer)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(host.isEmpty || port == nil)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+        .onAppear { hostIsFocused = true }
     }
 
-    private func playheadHelp(for cue: Cue?) -> String {
-        guard let cue else { return "This cue list has no playhead set" }
-        guard let number = cue.displayNumber else {
-            return "Standing by: \(cue.displayName ?? "an unnumbered cue")"
+    private var host: String { newHost.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var port: UInt16? {
+        guard let value = UInt16(newPort), value > 0 else { return nil }
+        return value
+    }
+
+    private func addServer() {
+        guard !host.isEmpty, let port else { return }
+        let server = model.browser.addManualServer(host: host, port: port)
+        isAddingServer = false
+        guard probingServerIDs.insert(server.id).inserted else { return }
+        Task {
+            defer { probingServerIDs.remove(server.id) }
+            var updated = server
+            do {
+                updated.workspaces = try await model.client.fetchWorkspaces(from: server)
+                updated.lastError = nil
+            } catch {
+                updated.lastError = String(describing: error)
+            }
+            model.browser.update(updated)
         }
-        guard let name = cue.displayName else { return "Standing by: cue \(number)" }
-        return "Standing by: cue \(number), \(name)"
     }
 }
 
-#Preview {
-    NavigationSplitView {
-        WorkspaceSidebar()
-            .environment(AppModel())
-    } detail: {
-        Text("Detail")
+private struct WorkspaceDisconnectButton: View {
+    let status: ConnectionStatus
+    let disconnect: () -> Void
+    @State private var isHovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button(action: disconnect) {
+            Image(systemName: isHovering ? "xmark.circle.fill" : status.systemImage)
+                .foregroundStyle(isHovering ? .red : status.tint)
+                .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp)))
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .animation(reduceMotion ? nil : Motion.status, value: isHovering)
+        .help("Disconnect")
+        .accessibilityLabel("Disconnect from workspace")
     }
 }

@@ -17,31 +17,13 @@ struct StatusToolbarContent: ToolbarContent {
         // you tell the system these are two separate groupings.
         ToolbarSpacer(.fixed, placement: .primaryAction)
 
-        ToolbarItem(placement: .primaryAction) {
+        ToolbarItemGroup(placement: .primaryAction) {
             ConnectionStatusIndicator()
         }
     }
 }
 
-/// The heartbeat and the connection glyph, paired, as one button onto the
-/// connection inspector.
-///
-/// Two glyphs because they answer two questions that can disagree: *what state
-/// is the session in* and *is traffic actually flowing right now*. A session
-/// can read `connected` while the far end has gone quiet — the heart is what
-/// shows that in the second before the missed-thump count catches up and turns
-/// the status glyph amber.
-///
-/// One control rather than two loose images side by side: a bare `Image` in a
-/// toolbar item gets none of the padding the system gives a button, so the
-/// heart sat flush against the edge of its glass container. Wrapping both
-/// glyphs in one button hands the metrics back to the system — and one hit
-/// target is right anyway, since both glyphs report on the same link and the
-/// inspector is where the detail behind them lives.
-///
-/// Both glyphs are always present, and each says what it has to say by changing
-/// itself. Nothing appears or disappears, so the pair never changes width and
-/// never shoves the rest of the toolbar sideways.
+/// Adjacent controls for traffic activity and session status.
 struct ConnectionStatusIndicator: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
@@ -53,20 +35,27 @@ struct ConnectionStatusIndicator: View {
     private var isLive: Bool { status.hasLiveData }
 
     var body: some View {
-        Button {
-            openWindow(id: WindowID.connectionInspector.rawValue)
-        } label: {
-            // An explicit stack rather than a `Label`: the toolbar's icon-only
-            // label style would collapse a `Label` down to a single glyph.
-            HStack(spacing: 6) {
+        Group {
+            Button {
+                openWindow(id: WindowID.activityLog.rawValue)
+            } label: {
                 heartbeat
+            }
+            .help("Activity Log. " + heartbeatHelpText)
+            .accessibilityLabel("Activity Log")
+            .accessibilityValue(heartbeatHelpText)
+            .accessibilityHint("Opens the activity log")
+
+            Button {
+                openWindow(id: WindowID.connectionInspector.rawValue)
+            } label: {
                 connection
             }
+            .help("\(status.title). \(status.detail)")
+            .accessibilityLabel("Connection status")
+            .accessibilityValue(status.title)
+            .accessibilityHint("Opens the connection status window")
         }
-        .help(helpText)
-        .accessibilityLabel("Connection status")
-        .accessibilityValue(helpText)
-        .accessibilityHint("Opens the connection status window")
     }
 
     /// Beats once per received `/thump`.
@@ -97,7 +86,7 @@ struct ConnectionStatusIndicator: View {
     /// so this glyph, the inspector, and the display's empty state cannot
     /// disagree about what any given state looks like.
     private var connection: some View {
-        Image(systemName: status.systemImage)
+        Image(systemName: connectionSymbol)
             .foregroundStyle(status.tint)
             // `.replace` animates between two different symbols; the
             // variable-color effect conveys ongoing work while connecting, and
@@ -107,16 +96,20 @@ struct ConnectionStatusIndicator: View {
             .animation(Motion.status, value: status)
     }
 
+    private var connectionSymbol: String {
+        if case .offline = status { return "bolt.horizontal.circle" }
+        if case .needsPasscode = status { return "lock.fill" }
+        return status.systemImage
+    }
+
     private var heartTint: Color {
         guard isLive else { return .secondary }
         return client.missedThumps > 0 ? .orange : .pink
     }
 
-    /// One tooltip for the pair, since one hover covers both glyphs. The state
-    /// first, then the health behind it — the same order the inspector uses.
-    private var helpText: String {
-        var text = "\(status.title). \(status.detail)"
-        guard isLive else { return text }
+    private var heartbeatHelpText: String {
+        guard isLive else { return "Not receiving heartbeats from QLab." }
+        var text = "Receiving heartbeats from QLab."
 
         guard client.heartbeatCount > 0 else {
             return text + " Waiting for the first heartbeat from QLab."

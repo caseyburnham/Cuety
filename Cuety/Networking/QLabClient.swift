@@ -55,6 +55,8 @@ final class QLabClient {
     private(set) var missedThumps = 0
     private var roundTripSamples: [TimeInterval] = []
 
+    var onPasscodeRequired: ((Bool) -> Void)?
+
     // MARK: Private plumbing
 
     private var connection: QLabConnection?
@@ -110,17 +112,19 @@ final class QLabClient {
         self.connection = connection
         let stream = await connection.start()
 
-        // One task consumes the event stream for the whole session.
-        eventTask = Task { [weak self] in
-            for await event in stream {
-                guard let self else { return }
-                await self.handle(event)
-            }
-        }
-
         do {
+            try await waitForReady(on: stream)
+            guard self.connection === connection else { return }
+            // Once ready, one consumer owns all session events.
+            eventTask = Task { [weak self] in
+                for await event in stream {
+                    guard let self, self.connection === connection else { return }
+                    await self.handle(event)
+                }
+            }
             try await performHandshake(workspaceID: workspaceID, passcode: passcode)
         } catch {
+            guard self.connection === connection else { return }
             await handleHandshakeFailure(error)
         }
     }
@@ -162,6 +166,9 @@ final class QLabClient {
 
     /// Tears down the session, optionally telling QLab first.
     func disconnect(sendDisconnect: Bool = true) {
+        currentTarget = nil
+        cueListRefreshTask?.cancel()
+        cueListRefreshTask = nil
         heartbeatTask?.cancel()
         heartbeatTask = nil
         reconnectTask?.cancel()
@@ -191,6 +198,7 @@ final class QLabClient {
         isSubscribedToUpdates = false
         connectedSince = nil
         accessLevel = .unspecified
+        usedPasscode = false
         cueLists = []
         playheads = [:]
         watchedCueListID = nil
@@ -226,20 +234,16 @@ final class QLabClient {
         let connectReply = try await request(connectMessage, as: String.self)
         let connectData = connectReply.data ?? ""
 
-        if let level = QLabAccessLevel(connectReplyData: connectData) {
+        if connectReply.status.isSuccess,
+           let level = QLabAccessLevel(connectReplyData: connectData) {
             // Covers both `ok` and `ok:<level>`. Matching only a bare `ok`
             // here rejected every QLab 5 workspace that has a passcode set,
             // because those answer with the granted tier instead.
             accessLevel = level
             usedPasscode = passcode != nil
         } else if connectData == "badpass" {
-            // Never retried automatically: QLab lengthens its own delay after
-            // repeated failures, so hammering it makes the situation worse.
-            status = .needsPasscode(rejected: true)
+            requirePasscode()
             throw RequestFailure.passcodeRejected
-        } else if connectReply.status == .denied {
-            status = .needsPasscode(rejected: passcode != nil)
-            throw RequestFailure.passcodeRequired
         } else {
             throw RequestFailure.handshakeFailed(
                 step: "connect",
@@ -278,6 +282,7 @@ final class QLabClient {
 
         // 7. Fetch the cue lists, and with them the current playheads.
         try await refreshCueLists()
+        guard self.connection === connection else { throw RequestFailure.disconnected }
 
         connectedSince = Date()
         backoffAttempt = 0
@@ -357,11 +362,34 @@ final class QLabClient {
     ) async throws -> QLabReply<Payload> {
         guard let connection else { throw RequestFailure.disconnected }
         let replyMessage = try await sendAndAwaitReply(message, over: connection)
-        do {
-            return try QLabReplyParser.parse(replyMessage, as: payloadType)
-        } catch {
-            throw RequestFailure.replyUnreadable(String(describing: error))
+        guard self.connection === connection else { throw RequestFailure.disconnected }
+        return try validateSessionReply(replyMessage, as: payloadType)
+    }
+
+    /// Check authorization before decoding a payload: denied replies may carry
+    /// an error string where a successful request would return cue arrays.
+    func validateSessionReply<Payload: Decodable & Sendable>(
+        _ message: OSCMessage, as payloadType: Payload.Type
+    ) throws -> QLabReply<Payload> {
+        let envelope = try QLabReplyParser.parse(message, as: QLabEmptyPayload.self)
+        if envelope.status == .denied {
+            requirePasscode()
+            throw RequestFailure.passcodeRequired
         }
+        guard envelope.status.isSuccess else {
+            throw RequestFailure.handshakeFailed(
+                step: envelope.address, detail: "QLab returned \(envelope.status)."
+            )
+        }
+        return try QLabReplyParser.parse(message, as: payloadType)
+    }
+
+    private func requirePasscode() {
+        let rejected = currentTarget?.passcode != nil
+        disconnect(sendDisconnect: false)
+        status = .needsPasscode(rejected: rejected)
+        recordError(rejected ? RequestFailure.passcodeRejected : RequestFailure.passcodeRequired)
+        onPasscodeRequired?(rejected)
     }
 
     /// Variant used by ``fetchWorkspaces(from:)``, which runs against a probe
@@ -807,11 +835,14 @@ final class QLabClient {
                 OSCMessage("/workspace/\(workspaceID)/thump"),
                 as: String.self
             )
-            guard reply.data == "thump" || reply.status.isSuccess else { return }
+            guard reply.data == "thump" else {
+                throw RequestFailure.handshakeFailed(step: "thump", detail: "Unexpected heartbeat reply.")
+            }
 
             let roundTrip = Date().timeIntervalSince(sentAt)
             recordThump(roundTrip: roundTrip)
         } catch {
+            guard status.hasLiveData else { return }
             missedThumps += 1
             // One missed thump on a busy show network is noise. Three in a row
             // is a real signal, and matches the TCP keepalive count.
@@ -883,20 +914,33 @@ final class QLabClient {
 
     /// Turns an error into something an operator can read.
     ///
-    /// Cuety's own error types — ``OSCDecodingError``, ``RequestFailure``,
-    /// ``PasscodeStore/Failure`` and friends — conform to
-    /// `CustomStringConvertible` precisely so their wording lands in the
-    /// inspector. Anything else, `NWError` included, reads better through
-    /// `localizedDescription`.
-    ///
-    /// The compiler warns that this cast "always succeeds" and it is wrong:
-    /// at runtime `as?` does discriminate, and rewriting it as an
-    /// unconditional `as` to quiet the warning swaps every system error for a
-    /// reflective type dump like `Cuety.SomeError()`. Leave the `as?` alone.
+    /// Cuety's own error types word their `description` for the inspector, so
+    /// they are preferred when present. Anything else, `NWError` included,
+    /// reads better through `localizedDescription` — a bare `CustomStringConvertible`
+    /// cast is no good here, since bridged `NSError`s satisfy it and describe
+    /// themselves as `Error Domain=… Code=…`.
     private func describe(_ error: any Error) -> String {
-        if let described = error as? any CustomStringConvertible {
+        if let described = error as? any OperatorReadableError {
             return described.description
         }
         return error.localizedDescription
     }
 }
+
+// MARK: - Operator-readable errors
+
+/// An error whose `description` is prose written for the person running the
+/// show, not a debugging dump.
+///
+/// ``QLabClient/describe(_:)`` surfaces that wording in the connection
+/// inspector and the Activity Log. Conform new Cuety error types below;
+/// without the conformance they fall back to `localizedDescription`, which for
+/// a Swift error type is the unhelpful "The operation couldn't be completed."
+nonisolated protocol OperatorReadableError: Error, CustomStringConvertible {}
+
+nonisolated extension OSCDecodingError: OperatorReadableError {}
+nonisolated extension SLIPFramingError: OperatorReadableError {}
+extension PasscodeStore.Failure: OperatorReadableError {}
+nonisolated extension QLabReplyParser.Failure: OperatorReadableError {}
+extension QLabConnection.SendFailure: OperatorReadableError {}
+extension QLabClient.RequestFailure: OperatorReadableError {}

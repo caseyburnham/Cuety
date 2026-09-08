@@ -65,7 +65,7 @@ enum ConnectionStatus: Hashable, Sendable {
             "Opening a connection to QLab."
         case .needsPasscode(let rejected):
             rejected
-                ? "That passcode was not accepted. QLab delays repeated attempts, so wait a moment before trying again."
+                ? "That passcode was not accepted. Try again."
                 : "This workspace is protected by a passcode."
         case .connected:
             "Receiving cue updates from QLab."
