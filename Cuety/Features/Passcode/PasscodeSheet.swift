@@ -24,7 +24,6 @@ struct PasscodeSheet: View {
                 .onSubmit(submit)
 
             Toggle("Remember in my Keychain", isOn: $shouldRemember)
-                .font(.callout)
 
             if prompt.wasRejected {
                 Label {

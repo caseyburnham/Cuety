@@ -31,7 +31,10 @@ struct CueDrawerView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 2) {
-                if previous.isEmpty {
+                // The boundary rows are driven by the graph, not by an empty
+                // slice: with the drawer set to show no previous cues, "Top of
+                // cue list" would otherwise be claimed on every cue in the show.
+                if graph.isFirst(playheadID) {
                     boundaryRow("Top of cue list", systemImage: "arrow.up.to.line")
                 } else {
                     // Nearest-last, so the row adjacent to the playhead is the
@@ -46,7 +49,7 @@ struct CueDrawerView: View {
 
                 playheadMarker
 
-                if upcoming.isEmpty {
+                if graph.isLast(playheadID) {
                     boundaryRow("End of cue list", systemImage: "arrow.down.to.line")
                 } else {
                     ForEach(Array(upcoming.enumerated()), id: \.element.id) { offset, cue in
@@ -57,6 +60,9 @@ struct CueDrawerView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
         }
+        // A thinner material than the app's status bars use, because this is a
+        // content area rather than a strip of chrome: the cue rows should read
+        // as sitting on the window, not on a toolbar.
         .background(.thinMaterial)
         .animation(Motion.drawerShift, value: playheadID)
         .accessibilityElement(children: .contain)
@@ -67,11 +73,11 @@ struct CueDrawerView: View {
     private var playheadMarker: some View {
         HStack(spacing: 8) {
             Image(systemName: "arrowtriangle.right.fill")
-                .font(.system(size: 9))
-                .foregroundStyle(Color.accentColor)
+                .font(.caption2)
+                .foregroundStyle(.tint)
 
             Rectangle()
-                .fill(Color.accentColor.opacity(0.5))
+                .fill(.tint.opacity(0.5))
                 .frame(height: 1)
         }
         .padding(.vertical, 5)
@@ -96,6 +102,11 @@ struct CueRowView: View {
         /// Coming up. `distance` is 1 for the next cue.
         case upcoming(distance: Int)
 
+        /// The size of the drawer's most prominent row — the next cue's. Every
+        /// other size steps down from here, and the number column is laid out
+        /// from it so every row's number lands on the same edge.
+        static let nextCueFontSize: CGFloat = 22
+
         /// Upcoming cues get progressively smaller; taken cues are uniformly
         /// small, because how long ago something fired matters less than how
         /// soon something is coming.
@@ -104,16 +115,12 @@ struct CueRowView: View {
             case .taken: 13
             case .upcoming(let distance):
                 switch distance {
-                case 1: 22
+                case 1: Self.nextCueFontSize
                 case 2: 17
                 default: 14
                 }
             }
         }
-
-        /// The largest size any row uses — the next cue's. The number column is
-        /// sized from this so every row's number lands on the same edge.
-        static let largestFontSize: CGFloat = 22
 
         /// The name is set a little smaller than the number it sits beside, so
         /// the number stays the thing the eye lands on first.
@@ -169,12 +176,15 @@ struct CueRowView: View {
                 .foregroundStyle(cue.displayNumber == nil ? .tertiary : .primary)
 
             Text(cue.displayName ?? "Untitled")
-                .font(.system(
+                // The operator's chosen family, the same as the number beside
+                // it: a drawer that mixed families across one row would look
+                // like two different apps.
+                .font(typography.cueName(
                     size: role.fontSize * Role.nameSizeRatio, weight: role.weight
                 ))
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .foregroundStyle(cue.displayName == nil ? .tertiary : .secondary)
+                .foregroundStyle(nameStyle)
 
             Spacer(minLength: 0)
 
@@ -186,6 +196,18 @@ struct CueRowView: View {
         .accessibilityLabel(accessibilityDescription)
     }
 
+    /// The cue's own colour from QLab, the same as the display gives the
+    /// headline name — a cue flagged green in the drawer is the one that will
+    /// be green when it reaches the playhead.
+    ///
+    /// A placeholder name stays hierarchical: "Untitled" is Cuety's word, not
+    /// the operator's, so it should never be shown in a colour they chose.
+    private var nameStyle: AnyShapeStyle {
+        guard cue.displayName != nil else { return AnyShapeStyle(.tertiary) }
+        guard let color = cue.color else { return AnyShapeStyle(.secondary) }
+        return AnyShapeStyle(color)
+    }
+
     /// Numbers share a right-aligned column so they line up as a scale the eye
     /// can read down, rather than ragged text.
     ///
@@ -195,20 +217,16 @@ struct CueRowView: View {
     /// operator picks a wider font family.
     private var numberColumn: some View {
         Text(verbatim: "000.0")
-            .font(typography.drawerNumber(size: Role.largestFontSize, isPlayhead: true))
-            .fontWeight(.semibold)
+            .font(typography.drawerNumber(size: Role.nextCueFontSize, weight: .semibold))
             .monospacedDigit()
             .hidden()
             .accessibilityHidden(true)
-            // Baseline-aligned, not centred: the template is always 22pt, so a
-            // smaller row's number has to sit on the template's baseline or it
-            // drifts away from the name beside it.
+            // Baseline-aligned, not centred: the template is always the next
+            // cue's size, so a smaller row's number has to sit on the
+            // template's baseline or it drifts away from the name beside it.
             .overlay(alignment: .trailingFirstTextBaseline) {
                 Text(cue.displayNumber ?? "–")
-                    .font(typography.drawerNumber(
-                        size: role.fontSize, isPlayhead: role.isNext
-                    ))
-                    .fontWeight(role.weight)
+                    .font(typography.drawerNumber(size: role.fontSize, weight: role.weight))
                     .monospacedDigit()
                     .lineLimit(1)
                     .fixedSize()
@@ -216,24 +234,24 @@ struct CueRowView: View {
     }
 
     /// Only the states worth interrupting for: a disarmed cue that will not
-    /// fire, and a flag the operator set deliberately.
-    @ViewBuilder
+    /// fire, a flag the operator set deliberately, and a cue that takes the
+    /// next one with it.
     private var trailingIndicators: some View {
         HStack(spacing: 5) {
             if cue.isArmed == false {
-                Image(systemName: "power")
+                Image(systemName: DetailPillKind.armed.systemImage)
                     .foregroundStyle(.red)
                     .help("Disarmed — this cue will not fire")
             }
             if cue.isFlagged == true {
-                Image(systemName: "flag.fill")
+                Image(systemName: DetailPillKind.flagged.systemImage)
                     .foregroundStyle(.yellow)
                     .help("Flagged")
             }
-            if cue.continueMode == .autoContinue || cue.continueMode == .autoFollow {
-                Image(systemName: cue.continueMode?.systemImage ?? "arrow.turn.down.right")
+            if let mode = cue.continueMode, mode != .doNotContinue {
+                Image(systemName: mode.systemImage)
                     .foregroundStyle(.blue)
-                    .help(cue.continueMode?.title ?? "")
+                    .help(mode.title)
             }
         }
         .font(.system(size: max(
@@ -247,6 +265,9 @@ struct CueRowView: View {
         if let name = cue.displayName { parts.append(name) }
         if cue.isArmed == false { parts.append("disarmed") }
         if cue.isFlagged == true { parts.append("flagged") }
+        if let mode = cue.continueMode, mode != .doNotContinue {
+            parts.append(mode.title)
+        }
         return parts.joined(separator: ", ")
     }
 }

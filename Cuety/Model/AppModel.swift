@@ -23,9 +23,6 @@ final class AppModel {
     /// True while workspace discovery is refreshing.
     private(set) var isRefreshing = false
 
-    /// The time the most recent manual or automatic refresh completed.
-    private(set) var lastRefreshDate: Date?
-
     // MARK: Passcode prompting
 
     /// Set when a workspace needs a passcode we don't have, or rejected the one
@@ -77,24 +74,35 @@ final class AppModel {
     func start() {
         browser.start()
         Task {
-            await refreshWorkspaces()
+            await refresh()
             await autoConnectIfNeeded()
         }
     }
 
-    /// Asks every known server what workspaces it has open.
+    /// Rebuilds everything Cuety knows about QLab, from discovery down to the
+    /// live session.
     ///
-    /// Failures are recorded per server rather than thrown: one unreachable
-    /// machine must not stop the others from appearing in the sidebar.
-    func refreshWorkspaces() async {
+    /// Three steps, in the only order their dependencies allow:
+    ///
+    /// 1. Restart Bonjour discovery, so machines that have appeared or gone
+    ///    since launch are reflected rather than remembered.
+    /// 2. Re-ask every server, discovered or manual, what it has open. Failures
+    ///    are recorded per server rather than thrown: one unreachable machine
+    ///    must not stop the others from appearing in the sidebar.
+    /// 3. Rebuild the live session — socket, handshake, subscriptions, cue
+    ///    lists, playheads, and the detail pills — via ``QLabClient/reconnect()``.
+    ///
+    /// Step 3 is the reason this is more than a data refresh, and the reason the
+    /// cue display flickers through `connecting` on the way: the operator
+    /// reaching for Refresh is usually doing it *because* something has gone
+    /// stale in a way that asking politely won't fix.
+    func refresh() async {
         guard !isRefreshing else { return }
         isRefreshing = true
-        defer {
-            isRefreshing = false
-            lastRefreshDate = Date()
-        }
+        defer { isRefreshing = false }
 
         browser.restartBrowsing()
+
         var updatedServers = browser.servers
         for (index, server) in updatedServers.enumerated() {
             do {
@@ -107,10 +115,8 @@ final class AppModel {
         }
         browser.update(updatedServers)
 
-        // Refresh the connected workspace's cue data as well as the server list.
         if client.status.hasLiveData {
-            try? await client.refreshCueLists()
-            await client.refreshPlayheadCueDetails()
+            await client.reconnect()
         }
     }
 
@@ -146,7 +152,7 @@ final class AppModel {
 
             try? await Task.sleep(for: Self.autoConnectPollInterval)
             guard selection == nil else { return }
-            await refreshWorkspaces()
+            await refresh()
         }
     }
 
@@ -293,6 +299,4 @@ final class AppModel {
         preferences.keepsDisplayAwake.toggle()
         displaySleepBlocker.setEnabled(preferences.keepsDisplayAwake)
     }
-
-    var isKeepingDisplayAwake: Bool { displaySleepBlocker.isEnabled }
 }

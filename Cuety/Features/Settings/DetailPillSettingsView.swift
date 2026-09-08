@@ -13,47 +13,49 @@ struct DetailPillSettingsView: View {
         let client = model.client
 
         List {
-                // The row is written inline on purpose. Moving it into a
-                // `-> some View` helper makes the reorderable list render
-                // completely empty: `reorderable()` needs to see the row views
-                // in the `ForEach` content itself, and an opaque return type
-                // hides them from it. Plain rows survive the extraction, so
-                // the failure looks unrelated to reordering — it isn't.
-                ForEach(preferences.pillOrder) { kind in
-                    Toggle(isOn: Binding {
-                        preferences.enabledPills.contains(kind)
-                    } set: { isEnabled in
-                        if isEnabled {
-                            preferences.enabledPills.insert(kind)
-                        } else {
-                            preferences.enabledPills.remove(kind)
-                        }
+            // The row is written inline on purpose. Moving it into a
+            // `-> some View` helper makes the reorderable list render
+            // completely empty: `reorderable()` needs to see the row views
+            // in the `ForEach` content itself, and an opaque return type
+            // hides them from it. Plain rows survive the extraction, so
+            // the failure looks unrelated to reordering — it isn't.
+            ForEach(preferences.pillOrder) { kind in
+                Toggle(isOn: Binding {
+                    preferences.enabledPills.contains(kind)
+                } set: { isEnabled in
+                    if isEnabled {
+                        preferences.enabledPills.insert(kind)
+                    } else {
+                        preferences.enabledPills.remove(kind)
+                    }
 
-                        // Enabling a pill widens the set of cue keys Cuety
-                        // asks for, and nothing else triggers that request
-                        // until the playhead next moves. Refetch now so the
-                        // pill fills in immediately rather than sitting blank
-                        // until the following cue.
-                        Task { await client.refreshPlayheadCueDetails() }
-                    }) {
-                        Label {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(kind.title)
-                                Text(kind.settingsDescription)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: kind.systemImage)
-                                .foregroundStyle(
-                                    preferences.enabledPills.contains(kind)
-                                        ? Color.accentColor : .secondary
-                                )
+                    // Enabling a pill widens the set of cue keys Cuety
+                    // asks for, and nothing else triggers that request
+                    // until the playhead next moves. Refetch now so the
+                    // pill fills in immediately rather than sitting blank
+                    // until the following cue.
+                    Task { await client.refreshPlayheadCueDetails() }
+                }) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(kind.title)
+                            Text(kind.settingsDescription)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
+                    } icon: {
+                        // The glyph the pill itself uses, so this list reads as
+                        // a preview of the row rather than as an index of it.
+                        Image(systemName: kind.systemImage)
+                            .foregroundStyle(
+                                preferences.enabledPills.contains(kind)
+                                    ? Color.accentColor : .secondary
+                            )
                     }
                 }
-                .reorderable()
             }
+            .reorderable()
+        }
         .reorderContainer(for: DetailPillKind.self) { difference in
             apply(difference, to: preferences)
         }

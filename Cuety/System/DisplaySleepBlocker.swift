@@ -14,8 +14,6 @@ final class DisplaySleepBlocker {
     /// The opaque activity token, non-nil exactly when the block is active.
     private var token: NSObjectProtocol?
 
-    var isEnabled: Bool { token != nil }
-
     func setEnabled(_ enabled: Bool) {
         enabled ? begin() : end()
     }

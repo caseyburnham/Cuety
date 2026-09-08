@@ -52,8 +52,6 @@ struct DisplaySettingsView: View {
                 Toggle("Show the cue name", isOn: Bindable(preferences).showsCueName)
             } footer: {
                 Text("The name appears beneath the number. Turning it off gives the number the whole window.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Section("Cue Drawer") {
@@ -67,6 +65,7 @@ struct DisplaySettingsView: View {
                     value: Bindable(preferences).drawerPreviousCount,
                     in: 0...10
                 )
+                .monospacedDigit()
                 .disabled(!preferences.showsDrawer)
 
                 Stepper(
@@ -74,11 +73,11 @@ struct DisplaySettingsView: View {
                     value: Bindable(preferences).drawerUpcomingCount,
                     in: 0...10
                 )
+                .monospacedDigit()
                 .disabled(!preferences.showsDrawer)
             }
         }
         .formStyle(.grouped)
-        .monospacedDigit()
         .task {
             allFamilies = FontCatalog.availableFamilies
             recommendedFamilies = FontCatalog.recommendedFamilies
@@ -87,10 +86,14 @@ struct DisplaySettingsView: View {
 
     /// A live preview of the chosen family, so the choice can be judged on the
     /// glyphs themselves rather than on a font name.
+    ///
+    /// Set exactly as the drawer sets the cue standing by, since that is where
+    /// the family is read at a size close to this one.
     private var sample: some View {
         LabeledContent("Preview") {
             Text(verbatim: "127.5")
-                .font(Typography(preferences: preferences).drawerNumber(size: 40, isPlayhead: true))
+                .font(Typography(preferences: preferences)
+                    .drawerNumber(size: 40, weight: .semibold))
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)

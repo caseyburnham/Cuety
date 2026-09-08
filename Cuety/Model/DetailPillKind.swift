@@ -43,6 +43,11 @@ enum DetailPillKind: String, CaseIterable, Codable, Hashable, Sendable, Identifi
         }
     }
 
+    /// The glyph this pill uses.
+    ///
+    /// Also what Settings shows beside the pill's toggle, so the two cannot
+    /// disagree about what a pill looks like. ``DetailPillKind/cueType`` is the
+    /// one kind that overrides it, picking a symbol per QLab cue type.
     var systemImage: String {
         switch self {
         case .cueType: "square.stack.3d.up"
@@ -52,8 +57,8 @@ enum DetailPillKind: String, CaseIterable, Codable, Hashable, Sendable, Identifi
         case .continueMode: "arrow.turn.down.right"
         case .cueList: "list.bullet"
         case .armed: "power"
-        case .flagged: "flag"
-        case .notes: "text.alignleft"
+        case .flagged: "flag.fill"
+        case .notes: "ellipsis.bubble"
         }
     }
 
@@ -84,7 +89,10 @@ enum DetailPillKind: String, CaseIterable, Codable, Hashable, Sendable, Identifi
         case .cueList: "The name of the cue list the cue belongs to."
         case .armed: "Shown only when the cue is disarmed."
         case .flagged: "Shown only when the cue is flagged."
-        case .notes: "The cue's notes field, when it has any."
+        // Says where it lands as well as what it is: notes always take a line
+        // of their own beneath the rest, so unlike every other pill here, this
+        // one's position in the order doesn't change what you see.
+        case .notes: "The cue's notes field, when it has any. Always on its own line, below the others."
         }
     }
 }

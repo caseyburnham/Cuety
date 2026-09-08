@@ -19,9 +19,6 @@ final class QLabBrowser {
     /// Discovered and manual servers, Bonjour first within each section.
     private(set) var servers: [QLabServer] = []
 
-    /// Whether the browser is actively searching.
-    private(set) var isBrowsing = false
-
     /// Set when browsing itself fails, e.g. local network permission denied.
     private(set) var browseError: String?
 
@@ -58,7 +55,6 @@ final class QLabBrowser {
         }
 
         browser.start(queue: .main)
-        isBrowsing = true
     }
 
     /// Restarts Bonjour discovery without discarding the currently displayed servers.
@@ -72,23 +68,18 @@ final class QLabBrowser {
         browser?.browseResultsChangedHandler = nil
         browser?.cancel()
         browser = nil
-        isBrowsing = false
     }
 
     private func handleStateChange(_ state: NWBrowser.State) {
         switch state {
         case .ready:
             browseError = nil
-            isBrowsing = true
         case .failed(let error):
             logger.error("Browse failed: \(error.localizedDescription, privacy: .public)")
             browseError = error.localizedDescription
-            isBrowsing = false
             // A failed browser never recovers on its own, so drop it — `start()`
             // will build a fresh one when something asks again.
             stop()
-        case .cancelled:
-            isBrowsing = false
         case .waiting(let error):
             browseError = error.localizedDescription
         default:

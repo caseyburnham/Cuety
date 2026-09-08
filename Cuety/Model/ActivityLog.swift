@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 /// One entry in the OSC activity log.
 ///
@@ -25,6 +25,17 @@ nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
             case .outbound: "Sent"
             case .inbound: "Received"
             case .malformed: "Malformed"
+            }
+        }
+
+        /// Kept on the direction rather than in the view, so the table's column
+        /// glyphs, the status bar's tallies, and the inspector cannot end up
+        /// colouring the same direction three different ways.
+        var tint: Color {
+            switch self {
+            case .outbound: .blue
+            case .inbound: .green
+            case .malformed: .orange
             }
         }
     }

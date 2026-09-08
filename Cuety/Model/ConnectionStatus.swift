@@ -2,15 +2,15 @@ import SwiftUI
 
 /// Where the connection to QLab currently stands.
 ///
-/// The cases are ordered from least to most connected, and each one carries its
-/// own glyph, tint, and human-readable phrasing. Keeping presentation on the
-/// state itself means the header glyph, the inspector, and the sidebar cannot
-/// disagree about what "degraded" looks like.
+/// Strictly the state of the *session*: network discovery is the browser's
+/// business, not this type's. The cases are ordered from least to most
+/// connected, and each one carries its own glyph, tint, and human-readable
+/// phrasing. Keeping presentation on the state itself means the toolbar glyph,
+/// the inspector, and the cue display cannot disagree about what "degraded"
+/// looks like.
 enum ConnectionStatus: Hashable, Sendable {
     /// No connection attempted.
     case offline
-    /// Looking for QLab instances on the network.
-    case browsing
     /// TCP connecting, or mid-handshake.
     case connecting
     /// The workspace requires a passcode we don't have or that was rejected.
@@ -25,7 +25,6 @@ enum ConnectionStatus: Hashable, Sendable {
     var systemImage: String {
         switch self {
         case .offline: "bolt.horizontal.circle"
-        case .browsing: "antenna.radiowaves.left.and.right"
         case .connecting: "progress.indicator"
         case .needsPasscode: "lock.circle"
         case .connected: "checkmark.circle.fill"
@@ -37,7 +36,7 @@ enum ConnectionStatus: Hashable, Sendable {
     var tint: Color {
         switch self {
         case .offline: .secondary
-        case .browsing, .connecting: .accentColor
+        case .connecting: .accentColor
         case .needsPasscode: .orange
         case .connected: .green
         case .degraded: .yellow
@@ -49,7 +48,6 @@ enum ConnectionStatus: Hashable, Sendable {
     var title: String {
         switch self {
         case .offline: "Not Connected"
-        case .browsing: "Searching"
         case .connecting: "Connecting"
         case .needsPasscode(let rejected): rejected ? "Passcode Rejected" : "Passcode Required"
         case .connected: "Connected"
@@ -62,9 +60,7 @@ enum ConnectionStatus: Hashable, Sendable {
     var detail: String {
         switch self {
         case .offline:
-            "Choose a QLab workspace to connect."
-        case .browsing:
-            "Looking for QLab on the local network."
+            "Choose a QLab workspace in the sidebar to connect."
         case .connecting:
             "Opening a connection to QLab."
         case .needsPasscode(let rejected):
@@ -82,10 +78,8 @@ enum ConnectionStatus: Hashable, Sendable {
 
     /// Whether the status glyph should animate to convey ongoing work.
     var isTransitional: Bool {
-        switch self {
-        case .browsing, .connecting: true
-        default: false
-        }
+        if case .connecting = self { return true }
+        return false
     }
 
     /// Whether cue data on screen can still be trusted.
@@ -96,7 +90,7 @@ enum ConnectionStatus: Hashable, Sendable {
     var hasLiveData: Bool {
         switch self {
         case .connected, .degraded: true
-        case .offline, .browsing, .connecting, .needsPasscode, .failed: false
+        case .offline, .connecting, .needsPasscode, .failed: false
         }
     }
 }

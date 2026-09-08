@@ -32,28 +32,30 @@ struct Typography {
 
     /// The cue number: heavy, tabular, and as large as will fit.
     var cueNumber: Font {
-        if let familyName {
-            return .custom(familyName, size: cueNumberBaseSizeValue)
-        }
-        return .system(size: cueNumberBaseSizeValue, weight: .bold, design: design)
+        font(size: Self.cueNumberBaseSize, weight: .bold)
     }
 
-    private var cueNumberBaseSizeValue: CGFloat { Self.cueNumberBaseSize }
-
-    /// The cue name, beneath the number.
-    func cueName(size: CGFloat) -> Font {
-        if let familyName {
-            return .custom(familyName, size: size)
-        }
-        return .system(size: size, weight: .medium, design: design)
+    /// A cue name, whether the headline one or a drawer row's.
+    func cueName(size: CGFloat, weight: Font.Weight = .medium) -> Font {
+        font(size: size, weight: weight)
     }
 
     /// A drawer row's number column.
-    func drawerNumber(size: CGFloat, isPlayhead: Bool) -> Font {
-        if let familyName {
-            return .custom(familyName, size: size)
+    func drawerNumber(size: CGFloat, weight: Font.Weight) -> Font {
+        font(size: size, weight: weight)
+    }
+
+    /// The operator's chosen family at a given size, falling back to the system
+    /// font.
+    ///
+    /// The weight is applied either way. It is what separates the cue standing
+    /// by from the ones around it, so a custom family has to honour it too —
+    /// otherwise picking a font would flatten the drawer's hierarchy.
+    private func font(size: CGFloat, weight: Font.Weight) -> Font {
+        guard let familyName else {
+            return .system(size: size, weight: weight, design: design)
         }
-        return .system(size: size, weight: isPlayhead ? .semibold : .regular, design: design)
+        return .custom(familyName, size: size).weight(weight)
     }
 }
 

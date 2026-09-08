@@ -28,7 +28,6 @@ struct MainWindowView: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .background(backdrop)
             .toolbar { StatusToolbarContent() }
             .toolbar(model.isPresenting ? .hidden : .automatic)
             .navigationTitle(navigationTitle)
@@ -38,26 +37,6 @@ struct MainWindowView: View {
             .onExitCommand {
                 if model.isPresenting { model.togglePresentationMode() }
             }
-    }
-
-    /// A very restrained gradient. The cue number is the subject; the
-    /// background exists to give the Liquid Glass pills something to refract
-    /// and to keep a large flat field from looking dead.
-    private var backdrop: some View {
-        Rectangle()
-            .fill(.background)
-            .overlay {
-                LinearGradient(
-                    colors: [
-                        Color.accentColor.opacity(0.055),
-                        Color.clear,
-                        Color.accentColor.opacity(0.03),
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
-            .ignoresSafeArea()
     }
 
     private var navigationTitle: String {

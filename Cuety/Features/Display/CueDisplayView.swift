@@ -4,6 +4,11 @@ import SwiftUI
 struct CueDisplayView: View {
     @Environment(AppModel.self) private var model
 
+    /// The tracking applied to the display's small uppercase captions. One
+    /// value, so the caption above the number and the one below it read as the
+    /// same piece of typography.
+    private static let captionTracking: CGFloat = 1.2
+
     private var client: QLabClient { model.client }
     private var typography: Typography { Typography(preferences: model.preferences) }
 
@@ -34,7 +39,10 @@ struct CueDisplayView: View {
                let name = cue.displayName {
                 Text(name)
                     .font(typography.cueName(size: model.isPresenting ? 40 : 28))
-                    .foregroundStyle(.secondary)
+                    // The colour the operator gave the cue in QLab, so the
+                    // colour-coding they already rely on carries through to the
+                    // display instead of stopping at QLab's window.
+                    .foregroundStyle(cue.color ?? .secondary)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.5)
@@ -44,11 +52,10 @@ struct CueDisplayView: View {
 
             if !model.isPresenting {
                 DetailPillsRow(cue: cue, kinds: model.preferences.visiblePills)
-                    .padding(.top, 6)
-                    .padding(.bottom, 12)
             }
         }
         .padding(.horizontal, 32)
+        .padding(.vertical, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -80,17 +87,18 @@ struct CueDisplayView: View {
                     .minimumScaleFactor(Typography.cueNumberMinimumScale)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
+                    // Still the cue's colour, but against `.primary` rather
+                    // than `.secondary`: here the name is the headline, so an
+                    // uncoloured cue must not read as subordinate to nothing.
+                    .foregroundStyle(cue.color ?? .primary)
                     .transition(.blurReplace)
 
-                Text("Unnumbered")
-                    .font(.caption)
-                    .textCase(.uppercase)
+                caption("Unnumbered")
                     .foregroundStyle(.tertiary)
-                    .tracking(1)
             }
             .accessibilityLabel("Unnumbered cue, \(name)")
         } else {
-            Text("—")
+            Text(verbatim: "—")
                 .font(typography.cueNumber)
                 .minimumScaleFactor(Typography.cueNumberMinimumScale)
                 .lineLimit(1)
@@ -101,33 +109,36 @@ struct CueDisplayView: View {
 
     private var standingByCaption: some View {
         HStack(spacing: 6) {
-            Text("Standing By")
+            caption("Standing By")
             if let graph = client.watchedGraph,
                let cueID = client.currentPlayheadCueID,
                graph.isLast(cueID) {
-                Text("· End of List")
+                caption("· End of List")
                     .foregroundStyle(.tertiary)
             }
         }
-        .font(.caption)
-        .fontWeight(.semibold)
-        .textCase(.uppercase)
-        .tracking(1.4)
         .foregroundStyle(.secondary)
-        .padding(.top, 24)
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .textCase(.uppercase)
+            .tracking(Self.captionTracking)
     }
 
     // MARK: - Empty states
     //
     // Three genuinely different situations, each with its own explanation.
     // Collapsing them into one "no cue" message would leave the operator
-    // guessing which one they are in.
+    // guessing which one they are in. All three are `ContentUnavailableView`, so
+    // "nothing to show" always looks the same however Cuety got there.
 
     @ViewBuilder
     private var emptyState: some View {
         if !client.status.hasLiveData {
             ContentUnavailableView {
-                Label("Not Connected", systemImage: client.status.systemImage)
+                Label(client.status.title, systemImage: client.status.systemImage)
             } description: {
                 Text(client.status.detail)
             }
@@ -137,33 +148,15 @@ struct CueDisplayView: View {
             } description: {
                 Text("This workspace has no cue lists.")
             }
-        } else if client.watchedCueListID == nil {
-            ContentUnavailableView {
-                Label("No Cue List Selected", systemImage: "eye.slash")
-            } description: {
-                Text("Choose a cue list in the sidebar to watch its playhead.")
-            }
         } else {
             // The playhead is genuinely unset: QLab sent a playbackPosition
             // update with no cue ID. A real state, not an error.
-            VStack(spacing: 14) {
-                Text("—")
-                    .font(typography.cueNumber)
-                    .minimumScaleFactor(Typography.cueNumberMinimumScale)
-                    .lineLimit(1)
-                    .foregroundStyle(.quaternary)
-
-                Text("No Cue Standing By")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-
+            ContentUnavailableView {
+                // The same glyph the drawer marks the playhead with.
+                Label("No Cue Standing By", systemImage: "arrowtriangle.right")
+            } description: {
                 Text("The playhead in this cue list is not set.")
-                    .font(.callout)
-                    .foregroundStyle(.tertiary)
             }
-            .padding(32)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("No cue standing by. The playhead in this cue list is not set.")
         }
     }
 }

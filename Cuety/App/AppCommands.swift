@@ -29,8 +29,12 @@ struct AppCommands: Commands {
         // and its `keyboardShortcut` binds to that item, so adding buttons for
         // them would produce a second copy of each command.
         CommandMenu("Connection") {
-            Button("Refresh") {
-                Task { await model.refreshWorkspaces() }
+            // Named for what it does rather than the vaguer "Refresh": this
+            // restarts discovery and rebuilds the session, which momentarily
+            // interrupts the cue display. ⌘R is easy to hit by accident, so the
+            // menu item should not undersell it.
+            Button("Refresh Everything") {
+                Task { await model.refresh() }
             }
             .keyboardShortcut("r", modifiers: .command)
             .disabled(model.isRefreshing)

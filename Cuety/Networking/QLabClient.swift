@@ -125,6 +125,41 @@ final class QLabClient {
         }
     }
 
+    /// Tears the session down and builds it again against the same workspace.
+    ///
+    /// Distinct from refetching cue data, which only asks QLab to restate what
+    /// it already believes. This re-does the parts that asking cannot fix: the
+    /// socket, and the `/updates` and `/listen/playhead` subscriptions, either
+    /// of which can lapse without QLab saying so — leaving a session that looks
+    /// healthy and reports a playhead that stopped moving hours ago.
+    ///
+    /// The display briefly shows `connecting` while this runs. That is left
+    /// visible on purpose: the operator asked for the connection to be rebuilt,
+    /// and a rebuild that gave no sign of happening would be worse than a
+    /// moment of honest status.
+    func reconnect() async {
+        guard let target = currentTarget else { return }
+
+        // A reconnection is not a change of mind. Teardown clears the watched
+        // list, and the handshake would then default to the first one — so on a
+        // multi-list show, refreshing would quietly move the display off the
+        // list the operator chose.
+        let watched = watchedCueListID
+
+        await connect(
+            to: target.server,
+            workspaceID: target.workspaceID,
+            passcode: target.passcode
+        )
+
+        guard let watched, watched != watchedCueListID,
+              cueLists.contains(where: { $0.uniqueID == watched })
+        else { return }
+
+        watchedCueListID = watched
+        await refreshPlayheadCueDetails()
+    }
+
     /// Tears down the session, optionally telling QLab first.
     func disconnect(sendDisconnect: Bool = true) {
         heartbeatTask?.cancel()

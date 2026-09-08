@@ -19,7 +19,10 @@ struct DetailPill: View {
                     .monospacedDigit()
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: content.isFlexible ? 240 : nil, alignment: .leading)
+                    .frame(
+                        maxWidth: content.isFlexible ? Self.flexibleTextMaxWidth : nil,
+                        alignment: .leading
+                    )
             } icon: {
                 Image(systemName: content.systemImage)
                     .foregroundStyle(content.tint ?? .secondary)
@@ -33,13 +36,32 @@ struct DetailPill: View {
             .layoutPriority(content.isFlexible ? -1 : 0)
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            .glassEffect(
-                content.tint.map { Glass.regular.tint($0.opacity(0.28)) } ?? .regular,
-                in: .capsule
-            )
+            // The border goes on *before* the glass, not after. Glass renders
+            // its material behind the view it's applied to and composites over
+            // anything layered on afterwards, which mutes a trailing overlay to
+            // a dark smudge — the same reason the tinted icon above stays crisp
+            // and a stroke added below the glass line does not.
+            .overlay {
+                if content.isOutlined, let tint = content.tint {
+                    Capsule().strokeBorder(tint, lineWidth: 1.5)
+                }
+            }
+            .glassEffect(Self.glass(for: content), in: .capsule)
             .help(content.help)
             .accessibilityLabel("\(kind.title): \(content.text)")
         }
+    }
+
+    /// How wide free-form text is allowed to run before it truncates. Generous,
+    /// because the only flexible pill now has a line to itself.
+    static let flexibleTextMaxWidth: CGFloat = 520
+
+    /// An outlined pill states itself with its border, so it keeps clear glass:
+    /// a tinted fill *and* a stroke would be the same fact told twice, and the
+    /// two together read as a much louder pill than any value warrants.
+    private static func glass(for content: Content) -> Glass {
+        guard !content.isOutlined, let tint = content.tint else { return .regular }
+        return Glass.regular.tint(tint.opacity(0.28))
     }
 
     /// What a pill shows, or `nil` when it has nothing to say.
@@ -52,23 +74,40 @@ struct DetailPill: View {
         /// for notes; every other pill's text is a short bounded value that
         /// should never be truncated.
         var isFlexible = false
+        /// Draws the tint as a border around clear glass rather than as a fill.
+        ///
+        /// Reserved for a cue that is a different *kind* of thing rather than
+        /// one carrying a notable value — currently only a group. A filled pill
+        /// says "look at this value"; an outlined one says "this cue is built
+        /// differently", which is a distinction worth being able to make.
+        var isOutlined = false
     }
 
     static func content(for kind: DetailPillKind, cue: Cue) -> Content? {
         switch kind {
         case .cueType:
             guard let type = cue.type, !type.isEmpty else { return nil }
+            // The one kind whose glyph depends on the value rather than the
+            // kind, because "which sort of cue is this" is the whole point.
+            //
+            // A group is called out because it is structurally unlike every
+            // other cue: firing it fires the cues inside it, so what happens
+            // on the next GO isn't described by this row alone.
             return Content(
                 text: type,
                 systemImage: systemImage(forCueType: type),
-                help: "Cue type"
+                tint: cue.isGroup ? .green : nil,
+                help: cue.isGroup
+                    ? "Group cue — firing it fires the cues inside it"
+                    : "Cue type",
+                isOutlined: cue.isGroup
             )
 
         case .duration:
             guard let duration = cue.duration, duration > 0 else { return nil }
             return Content(
                 text: formatDuration(duration),
-                systemImage: "clock",
+                systemImage: kind.systemImage,
                 help: "Duration"
             )
 
@@ -77,7 +116,7 @@ struct DetailPill: View {
             guard let preWait = cue.preWait, preWait > 0 else { return nil }
             return Content(
                 text: formatDuration(preWait),
-                systemImage: "hourglass.tophalf.filled",
+                systemImage: kind.systemImage,
                 tint: .orange,
                 help: "Pre-wait before this cue acts"
             )
@@ -86,7 +125,7 @@ struct DetailPill: View {
             guard let postWait = cue.postWait, postWait > 0 else { return nil }
             return Content(
                 text: formatDuration(postWait),
-                systemImage: "hourglass.bottomhalf.filled",
+                systemImage: kind.systemImage,
                 tint: .orange,
                 help: "Post-wait before the next cue"
             )
@@ -94,9 +133,11 @@ struct DetailPill: View {
         case .continueMode:
             // "Do not continue" is the default, so showing it would be noise.
             guard let mode = cue.continueMode, mode != .doNotContinue else { return nil }
+            // The mode's own glyph, so this pill and the drawer's indicator
+            // draw the same thing for the same cue.
             return Content(
                 text: mode.title,
-                systemImage: "arrow.down",
+                systemImage: mode.systemImage,
                 tint: .blue,
                 help: "This cue continues automatically"
             )
@@ -105,7 +146,7 @@ struct DetailPill: View {
             guard let listName = cue.listName, !listName.isEmpty else { return nil }
             return Content(
                 text: listName,
-                systemImage: "list.bullet",
+                systemImage: kind.systemImage,
                 help: "Cue list"
             )
 
@@ -114,7 +155,7 @@ struct DetailPill: View {
             guard cue.isArmed == false else { return nil }
             return Content(
                 text: "Disarmed",
-                systemImage: "power",
+                systemImage: kind.systemImage,
                 tint: .red,
                 help: "This cue is disarmed and will not fire"
             )
@@ -123,7 +164,7 @@ struct DetailPill: View {
             guard cue.isFlagged == true else { return nil }
             return Content(
                 text: "Flagged",
-                systemImage: "flag.fill",
+                systemImage: kind.systemImage,
                 tint: .yellow,
                 help: "This cue is flagged in QLab"
             )
@@ -134,7 +175,7 @@ struct DetailPill: View {
             else { return nil }
             return Content(
                 text: notes,
-                systemImage: "ellipsis.bubble",
+                systemImage: kind.systemImage,
                 help: notes,
                 isFlexible: true
             )
@@ -142,13 +183,17 @@ struct DetailPill: View {
     }
 
     /// Maps QLab's cue type strings onto SF Symbols.
+    ///
+    /// The default is deliberately a question mark rather than a plausible
+    /// glyph: a cue type Cuety doesn't recognise should say so, not quietly
+    /// present itself as a group.
     static func systemImage(forCueType type: String) -> String {
         switch type.lowercased() {
         case "audio": "speaker.wave.2"
         case "mic": "mic"
         case "video": "film"
         case "camera": "video"
-        case "titles": "film"
+        case "titles", "text": "textformat"
         case "light": "lightbulb"
         case "group": "square.stack.3d.up"
         case "fade": "slider.horizontal.below.rectangle"
@@ -156,20 +201,19 @@ struct DetailPill: View {
         case "start", "go": "play.circle"
         case "stop", "hard stop": "stop.circle"
         case "pause": "pause.circle"
-        case "load": "progress.indicator"
+        case "load": "tray.and.arrow.down"
         case "reset": "backward.end"
         case "goto": "arrow.right"
-        case "target": "arrow.down.forward.circle"
+        case "target": "scope"
         case "arm", "disarm": "power"
         case "memo": "ellipsis.bubble"
         case "script": "applescript"
-        case "network": "network"
-        case "midi": "ev.plug.ac.type.2"
+        case "network", "osc": "network"
+        case "midi": "pianokeys"
         case "midi file": "music.note"
         case "timecode": "clock"
-        case "osc": "network"
         case "devamp": "arrow.uturn.right"
-        default: "square.stack.3d.up"
+        default: "questionmark.square.dashed"
         }
     }
 
@@ -184,9 +228,16 @@ struct DetailPill: View {
     }
 }
 
-/// The row of pills beneath the cue name.
+/// The pills beneath the cue name: the short values on one line, and the note
+/// on a line of its own beneath them.
 ///
-/// One `GlassEffectContainer` for the whole row, per Apple's guidance to group
+/// Notes are split out because they are a different shape of information. Every
+/// other pill is a glanceable token a few characters wide, and the row is meant
+/// to be read sideways in one pass; a sentence of free text sitting among them
+/// dominates the line and pushes the tokens off to one side. Given its own
+/// line, the note can run wide without disturbing the reading order above it.
+///
+/// One `GlassEffectContainer` for both lines, per Apple's guidance to group
 /// glass effects: it lets neighbouring pills blend and morph into one another
 /// as they appear and disappear on a cue change, and it renders in one pass
 /// instead of one per pill.
@@ -201,14 +252,32 @@ struct DetailPillsRow: View {
         kinds.filter { DetailPill.content(for: $0, cue: cue) != nil }
     }
 
+    /// The short values, in the operator's order.
+    private var inlineKinds: [DetailPillKind] {
+        populated.filter { $0 != .notes }
+    }
+
+    /// Present only when notes are both enabled and non-empty. Its position in
+    /// `pillOrder` no longer affects anything, which is the one thing the
+    /// operator gives up by having it on its own line.
+    private var noteKind: DetailPillKind? {
+        populated.contains(.notes) ? .notes : nil
+    }
+
     var body: some View {
         if !populated.isEmpty {
             GlassEffectContainer(spacing: 14) {
-                HStack(spacing: 10) {
-                    ForEach(populated) { kind in
-                        DetailPill(kind: kind, cue: cue)
-                            .glassEffectID(kind, in: glassNamespace)
-                            .glassEffectTransition(.matchedGeometry)
+                VStack(spacing: 10) {
+                    if !inlineKinds.isEmpty {
+                        HStack(spacing: 10) {
+                            ForEach(inlineKinds) { kind in
+                                pill(kind)
+                            }
+                        }
+                    }
+
+                    if let noteKind {
+                        pill(noteKind)
                     }
                 }
             }
@@ -216,9 +285,15 @@ struct DetailPillsRow: View {
             .animation(Motion.pill, value: cue.uniqueID)
         }
     }
+
+    private func pill(_ kind: DetailPillKind) -> some View {
+        DetailPill(kind: kind, cue: cue)
+            .glassEffectID(kind, in: glassNamespace)
+            .glassEffectTransition(.matchedGeometry)
+    }
 }
 
-#Preview {
+#Preview("Action cue") {
     var cue = Cue(uniqueID: "c")
     cue.number = "12.5"
     cue.name = "Thunder Crash"
@@ -229,7 +304,25 @@ struct DetailPillsRow: View {
     cue.continueMode = .autoContinue
     cue.isFlagged = true
     cue.isArmed = false
-    cue.notes = "Cue the rain"
+    cue.notes = "Hold for the door slam, then go on the lighting cue"
+
+    return DetailPillsRow(cue: cue, kinds: DetailPillKind.defaultOrder)
+        .padding(40)
+        .frame(width: 900)
+}
+
+/// The outlined group pill, and the note wide on its own line.
+#Preview("Group cue") {
+    var child = Cue(uniqueID: "child")
+    child.number = "13.1"
+
+    var cue = Cue(uniqueID: "g")
+    cue.number = "13"
+    cue.name = "Act Two Preset"
+    cue.type = "Group"
+    cue.listName = "Main Cue List"
+    cue.children = [child]
+    cue.notes = "Fires the whole preset — check the deck is clear before this one"
 
     return DetailPillsRow(cue: cue, kinds: DetailPillKind.defaultOrder)
         .padding(40)

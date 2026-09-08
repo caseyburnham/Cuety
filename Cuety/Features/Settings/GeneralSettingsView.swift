@@ -13,9 +13,10 @@ struct GeneralSettingsView: View {
                     }
                 }
             } footer: {
+                // Section footers in a grouped Form are already set as
+                // secondary caption text; restyling them by hand only risks
+                // disagreeing with the system.
                 Text("Automatic follows the system setting. A dark display is usually the right choice in a booth.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -28,8 +29,6 @@ struct GeneralSettingsView: View {
                 ))
             } footer: {
                 Text("Prevents the screen from sleeping while Cuety is running, so the cue display stays visible through a long act.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

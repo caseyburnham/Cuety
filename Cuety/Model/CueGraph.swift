@@ -46,11 +46,6 @@ nonisolated struct CueGraph: Sendable {
         }
     }
 
-    var isEmpty: Bool { ordered.isEmpty }
-    var count: Int { ordered.count }
-
-    func index(of cueID: String) -> Int? { indexByID[cueID] }
-
     func cue(withID cueID: String) -> Cue? {
         indexByID[cueID].map { ordered[$0] }
     }
@@ -75,14 +70,17 @@ nonisolated struct CueGraph: Sendable {
         return Array(ordered[start..<end])
     }
 
-    /// Whether `cueID` is the last cue in the list — the drawer says so
-    /// explicitly rather than just showing nothing below the playhead.
+    /// Whether `cueID` is the first cue in the list. The drawer says so
+    /// explicitly rather than just showing nothing above the playhead — which
+    /// would otherwise be indistinguishable from a drawer configured to show no
+    /// previous cues at all.
+    func isFirst(_ cueID: String) -> Bool {
+        indexByID[cueID] == 0
+    }
+
+    /// Whether `cueID` is the last cue in the list.
     func isLast(_ cueID: String) -> Bool {
         guard let index = indexByID[cueID] else { return false }
         return index == ordered.count - 1
-    }
-
-    func isFirst(_ cueID: String) -> Bool {
-        indexByID[cueID] == 0
     }
 }

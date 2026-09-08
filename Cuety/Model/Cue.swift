@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 /// A QLab workspace as reported by `/workspaces`.
 nonisolated struct QLabWorkspaceInfo: Decodable, Hashable, Sendable, Identifiable {
@@ -68,6 +68,28 @@ nonisolated struct Cue: Hashable, Sendable, Identifiable {
     var displayName: String? {
         guard let name, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
         return name
+    }
+
+    /// The colour the operator gave this cue in QLab, or `nil` when they gave
+    /// it none.
+    ///
+    /// Mapped onto the system colours rather than sampled from QLab's own
+    /// palette: those are fixed sRGB values, while these adapt to light and
+    /// dark appearance and to Increase Contrast. A booth display has to stay
+    /// legible before it has to match QLab's inspector pixel for pixel.
+    ///
+    /// An unrecognised name — a colour a later QLab adds — also returns `nil`,
+    /// so the cue falls back to the standard text style instead of being
+    /// assigned a colour nobody chose.
+    var color: Color? {
+        switch colorName?.lowercased() {
+        case "red": .red
+        case "orange": .orange
+        case "green": .green
+        case "blue": .blue
+        case "purple": .purple
+        default: nil
+        }
     }
 }
 

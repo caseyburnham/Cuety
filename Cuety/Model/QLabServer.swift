@@ -29,16 +29,14 @@ nonisolated struct QLabServer: Identifiable, Hashable, Sendable {
     /// Set when a `/workspaces` query against this server failed.
     var lastError: String?
 
-    /// A host:port description for the inspector, when one is knowable.
-    var displayEndpoint: String {
-        switch endpoint {
-        case .hostPort(let host, let port):
-            "\(host):\(port.rawValue)"
-        case .service(let name, _, _, _):
-            name
-        default:
-            String(describing: endpoint)
-        }
+    /// A host:port description, when one is knowable.
+    ///
+    /// `nil` for a Bonjour service: the system resolves its address at connect
+    /// time, so Cuety has nothing truthful to report — and the service name is
+    /// already the row's title, so repeating it would say nothing.
+    var address: String? {
+        guard case .hostPort(let host, let port) = endpoint else { return nil }
+        return "\(host):\(port.rawValue)"
     }
 
     /// The standard QLab OSC port.

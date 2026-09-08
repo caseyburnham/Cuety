@@ -1,4 +1,3 @@
-import Network
 import SwiftUI
 
 /// Detailed transport, session, and health information for the current connection.
@@ -11,6 +10,12 @@ struct ConnectionInspectorView: View {
 
     private var client: QLabClient { model.client }
 
+    /// The server behind the current session, for the facts that belong to the
+    /// machine rather than to the workspace on it.
+    private var server: QLabServer? {
+        model.selection.flatMap { model.browser.server(withID: $0.serverID) }
+    }
+
     /// Nothing has been attempted yet, so there are no details to show.
     private var isIdle: Bool {
         if case .offline = client.status, client.workspace == nil { return true }
@@ -22,8 +27,8 @@ struct ConnectionInspectorView: View {
         // Form left the status section showing through behind it.
         if isIdle {
             ContentUnavailableView(
-                "Not Connected",
-                systemImage: "network.slash",
+                client.status.title,
+                systemImage: client.status.systemImage,
                 description: Text(client.status.detail)
             )
         } else {
@@ -73,7 +78,9 @@ struct ConnectionInspectorView: View {
             .animation(Motion.status, value: client.status)
 
             if client.workspace != nil || client.status.hasLiveData {
-                Button("Disconnect", role: .destructive) {
+                // Not a destructive role: dropping the connection loses nothing
+                // and is a click away from being undone.
+                Button("Disconnect") {
                     model.disconnect()
                 }
             }
@@ -82,7 +89,13 @@ struct ConnectionInspectorView: View {
 
     private var transportSection: some View {
         Section("Transport") {
-            LabeledContent("Server", value: serverDescription)
+            LabeledContent("Server", value: server?.name ?? "—")
+            LabeledContent(
+                "Address",
+                // A Bonjour service has no address of ours to report: the
+                // system resolves it at connect time.
+                value: server?.address ?? "Resolved by Bonjour"
+            )
             LabeledContent("Protocol", value: "TCP, SLIP-framed (OSC 1.1)")
             if let since = client.connectedSince {
                 LabeledContent("Connected") {
@@ -150,17 +163,15 @@ struct ConnectionInspectorView: View {
                 }
             }
 
-            LabeledContent("Messages") {
-                Text("↑ \(model.log.totalSent)   ↓ \(model.log.totalReceived)")
-                    .monospacedDigit()
-            }
-            LabeledContent("Data") {
-                Text(
-                    "↑ \(model.log.bytesSent.formatted(.byteCount(style: .memory)))   "
-                    + "↓ \(model.log.bytesReceived.formatted(.byteCount(style: .memory)))"
-                )
-                .monospacedDigit()
-            }
+            // One row per direction, each pairing the count with the bytes it
+            // accounts for. Two labelled rows say what a single row of arrow
+            // characters only implied.
+            LabeledContent("Sent", value: traffic(
+                messages: model.log.totalSent, bytes: model.log.bytesSent
+            ))
+            LabeledContent("Received", value: traffic(
+                messages: model.log.totalReceived, bytes: model.log.bytesReceived
+            ))
 
             if model.log.totalMalformed > 0 {
                 LabeledContent("Malformed Packets") {
@@ -194,14 +205,6 @@ struct ConnectionInspectorView: View {
 
     // MARK: - Derived values
 
-    private var serverDescription: String {
-        guard let workspace = client.workspace else { return "—" }
-        if let port = workspace.port {
-            return "\(workspace.displayName) : \(port)"
-        }
-        return workspace.displayName
-    }
-
     private var totalCueCount: Int {
         func count(_ cues: [Cue]) -> Int {
             cues.reduce(0) { $0 + 1 + count($1.children) }
@@ -211,7 +214,13 @@ struct ConnectionInspectorView: View {
 
     private var watchedCueListName: String? {
         guard let id = client.watchedCueListID else { return nil }
-        return client.cueLists.first { $0.uniqueID == id }?.name
+        return client.cueLists.first { $0.uniqueID == id }?.displayName
+    }
+
+    private func traffic(messages: Int, bytes: Int) -> String {
+        let count = messages.formatted()
+        let size = bytes.formatted(.byteCount(style: .memory))
+        return "\(count) messages · \(size)"
     }
 
     /// Round trips on a LAN are sub-millisecond to single-digit milliseconds,

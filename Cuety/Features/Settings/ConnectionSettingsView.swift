@@ -39,8 +39,6 @@ struct ConnectionSettingsView: View {
             }
         } footer: {
             Text("On launch Cuety looks for the workspace it last connected to and reopens it. Choosing a workspace yourself cancels the attempt.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -92,8 +90,6 @@ struct ConnectionSettingsView: View {
             Text("Timing")
         } footer: {
             Text("The port is the starting value when you add a server by hand; QLab's default is 53000. Timing changes apply to the current connection — a shorter heartbeat notices a dropped link sooner at the cost of more traffic.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -133,8 +129,6 @@ struct ConnectionSettingsView: View {
             Text("Saved Passcodes")
         } footer: {
             Text("Passcodes live in your Keychain, one per workspace. Only workspaces currently on the network can be listed individually.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
