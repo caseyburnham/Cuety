@@ -92,16 +92,20 @@ final class QLabBrowser {
             .compactMap { QLabServer.bonjour(endpoint: $0.endpoint) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
 
-        // Preserve any workspaces already fetched for servers that are still
-        // present, so the sidebar doesn't flicker empty when Bonjour reports a
-        // change unrelated to them.
-        let existingWorkspaces = Dictionary(
-            servers.map { ($0.id, $0.workspaces) },
+        // Preserve what we already know about servers that are still present,
+        // so the sidebar doesn't flicker empty — or back to "not yet asked" —
+        // when Bonjour reports a change unrelated to them.
+        let existing = Dictionary(
+            servers.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
         var merged = discovered.map { server -> QLabServer in
             var server = server
-            server.workspaces = existingWorkspaces[server.id] ?? []
+            if let known = existing[server.id] {
+                server.workspaces = known.workspaces
+                server.lastError = known.lastError
+                server.hasBeenProbed = known.hasBeenProbed
+            }
             return server
         }
 

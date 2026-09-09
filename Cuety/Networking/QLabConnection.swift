@@ -33,6 +33,15 @@ actor QLabConnection {
     private var connection: NWConnection?
     private var continuation: AsyncStream<Event>.Continuation?
 
+    /// How the current connection attempt resolved, once it has.
+    ///
+    /// Recorded rather than only signalled, so a caller that asks after the
+    /// fact still gets an answer instead of waiting for a state change that
+    /// has already been and gone.
+    private var readiness: Result<Void, any Error>?
+    private var readinessWaiters: [CheckedContinuation<Void, any Error>] = []
+    private var readinessTimeout: Task<Void, Never>?
+
     /// Serial queue for all `NWConnection` callbacks.
     private let queue = DispatchQueue(label: "com.caseyburnham.Cuety.connection")
 
@@ -66,6 +75,7 @@ actor QLabConnection {
             bufferingPolicy: .bufferingNewest(512)
         )
         self.continuation = continuation
+        readiness = nil
 
         let connection = NWConnection(to: endpoint, using: .qlabTCP())
         self.connection = connection
@@ -88,13 +98,78 @@ actor QLabConnection {
     }
 
     func cancel() {
+        readinessTimeout?.cancel()
+        readinessTimeout = nil
+
         connection?.stateUpdateHandler = nil
         connection?.viabilityUpdateHandler = nil
         connection?.cancel()
         connection = nil
 
+        resolveReadiness(.failure(ConnectFailure.cancelled))
+
         continuation?.finish()
         continuation = nil
+    }
+
+    // MARK: - Readiness
+
+    enum ConnectFailure: Error, CustomStringConvertible {
+        /// The connection never came up before the deadline.
+        ///
+        /// This is the shape most QLab disappearances take. A Bonjour endpoint
+        /// whose service record has gone leaves `NWConnection` resolving
+        /// forever in `.waiting`, and an unreachable host does the same: the
+        /// framework reports no failure because, as far as it is concerned,
+        /// the attempt is still in progress.
+        case timedOut
+        /// The connection was torn down before it was ready.
+        case cancelled
+
+        var description: String {
+            switch self {
+            case .timedOut: "QLab did not answer. It may have quit or moved."
+            case .cancelled: "The connection was closed before it was ready."
+            }
+        }
+    }
+
+    /// Waits for the connection to reach `.ready`, or gives up.
+    ///
+    /// Resolved from the state handler rather than by reading ``Event``s,
+    /// because the event stream has exactly one consumer for the life of the
+    /// session and `AsyncStream` terminates when the task iterating it is
+    /// cancelled. A timeout built by racing the stream would therefore take
+    /// the session's only event feed down with it.
+    func waitUntilReady(timeout: TimeInterval) async throws {
+        if let readiness { return try readiness.get() }
+
+        if readinessTimeout == nil {
+            readinessTimeout = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(timeout))
+                guard !Task.isCancelled else { return }
+                await self?.resolveReadiness(.failure(ConnectFailure.timedOut))
+            }
+        }
+
+        try await withCheckedThrowingContinuation { continuation in
+            readinessWaiters.append(continuation)
+        }
+    }
+
+    private func resolveReadiness(_ result: Result<Void, any Error>) {
+        // First answer wins. A connection that failed and was then cancelled
+        // should still report the failure, which is the useful half of the
+        // story.
+        guard readiness == nil else { return }
+        readiness = result
+
+        readinessTimeout?.cancel()
+        readinessTimeout = nil
+
+        let waiters = readinessWaiters
+        readinessWaiters.removeAll()
+        for waiter in waiters { waiter.resume(with: result) }
     }
 
     // MARK: - Sending
@@ -201,9 +276,17 @@ actor QLabConnection {
         case .ready:
             // Only safe to arm the receive loop once the stack is up.
             if let connection { receiveNextMessage(on: connection) }
+            resolveReadiness(.success(()))
         case .failed(let error):
             logger.error("Connection failed: \(error.localizedDescription, privacy: .public)")
+            resolveReadiness(.failure(error))
+        case .cancelled:
+            resolveReadiness(.failure(ConnectFailure.cancelled))
         default:
+            // `.waiting` is left alone deliberately: the system retries on its
+            // own and often succeeds, so the only thing that should end the
+            // wait early is a real failure. Everything else is the deadline's
+            // job.
             break
         }
         yield(.stateChanged(state))

@@ -121,6 +121,9 @@ final class Preferences {
     }
 
     /// Reconnect to the last-used workspace automatically at launch.
+    ///
+    /// Off by default: Cuety opens a socket to a show control machine, which is
+    /// the operator's call to make, not something to do before they've asked.
     var autoConnect: Bool {
         didSet { defaults.set(autoConnect, forKey: Key.autoConnect) }
     }
@@ -161,7 +164,7 @@ final class Preferences {
         defaultPort = defaults.object(forKey: Key.defaultPort) as? Int ?? 53000
         heartbeatInterval = defaults.object(forKey: Key.heartbeatInterval) as? TimeInterval ?? 5
         requestTimeout = defaults.object(forKey: Key.requestTimeout) as? TimeInterval ?? 5
-        autoConnect = defaults.object(forKey: Key.autoConnect) as? Bool ?? true
+        autoConnect = defaults.object(forKey: Key.autoConnect) as? Bool ?? false
 
         if let serverID = defaults.string(forKey: Key.lastServerID),
            let workspaceID = defaults.string(forKey: Key.lastWorkspaceID) {

@@ -28,6 +28,10 @@ nonisolated struct QLabServer: Identifiable, Hashable, Sendable {
     var workspaces: [QLabWorkspaceInfo] = []
     /// Set when a `/workspaces` query against this server failed.
     var lastError: String?
+    /// True once a `/workspaces` query has finished against this server, however
+    /// it turned out. Separates "nothing open" from "we haven't asked" — which
+    /// the sidebar must not conflate now that some servers go unprobed at launch.
+    var hasBeenProbed = false
 
     /// A host:port description, when one is knowable.
     ///

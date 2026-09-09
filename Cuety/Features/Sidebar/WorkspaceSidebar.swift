@@ -62,7 +62,10 @@ struct WorkspaceSidebar: View {
         }
         .contextMenu(forSelectionType: Selection.self) { items in
             if case .workspace(let selection) = items.first {
-                if model.selection == selection && model.client.status.hasLiveData {
+                // Offered for any session Cuety is holding open, not just a
+                // live one: a reconnect loop is exactly the situation where
+                // the operator needs a way to call it off.
+                if model.selection == selection && model.client.isSessionActive {
                     Button("Disconnect") { model.disconnect() }
                 } else {
                     Button("Connect") { connect(to: selection) }
@@ -144,7 +147,9 @@ struct WorkspaceSidebar: View {
                 if isCurrent {
                     if model.client.status.isTransitional {
                         ProgressView().controlSize(.small)
-                    } else if model.client.status.hasLiveData {
+                    } else if model.client.isSessionActive {
+                        // Includes a session that is retrying: the glyph shows
+                        // what is happening and hovering it offers the way out.
                         WorkspaceDisconnectButton(status: model.client.status) { model.disconnect() }
                     } else {
                         Image(systemName: model.client.status.systemImage)
@@ -186,7 +191,7 @@ struct WorkspaceSidebar: View {
 
     @ViewBuilder
     private func serverStatus(_ server: QLabServer) -> some View {
-        if model.isRefreshing || probingServerIDs.contains(server.id) {
+        if model.refreshingServerIDs.contains(server.id) || probingServerIDs.contains(server.id) {
             HStack {
                 ProgressView().controlSize(.small)
                 Text("Looking for workspaces…")
@@ -196,6 +201,12 @@ struct WorkspaceSidebar: View {
             Label("Unable to Reach QLab", systemImage: "exclamationmark.triangle")
                 .foregroundStyle(.secondary)
                 .help(error)
+        } else if !server.hasBeenProbed {
+            // Distinct from "No Open Workspaces": Cuety hasn't asked yet, and
+            // saying otherwise would report a fact it doesn't have.
+            Button("Check for Workspaces") { probeWorkspaces(on: server) }
+                .buttonStyle(.link)
+                .help("Cuety hasn't contacted \(server.name) yet.")
         } else {
             Text("No Open Workspaces")
                 .foregroundStyle(.secondary)
@@ -264,17 +275,16 @@ struct WorkspaceSidebar: View {
         guard !host.isEmpty, let port else { return }
         let server = model.browser.addManualServer(host: host, port: port)
         isAddingServer = false
+        probeWorkspaces(on: server)
+    }
+
+    /// Asks a single server what it has open, leaving the other servers and the
+    /// live connection alone — which a full refresh would not.
+    private func probeWorkspaces(on server: QLabServer) {
         guard probingServerIDs.insert(server.id).inserted else { return }
         Task {
             defer { probingServerIDs.remove(server.id) }
-            var updated = server
-            do {
-                updated.workspaces = try await model.client.fetchWorkspaces(from: server)
-                updated.lastError = nil
-            } catch {
-                updated.lastError = String(describing: error)
-            }
-            model.browser.update(updated)
+            await model.refreshWorkspaces(onServerWithID: server.id)
         }
     }
 }

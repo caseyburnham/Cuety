@@ -23,6 +23,11 @@ final class AppModel {
     /// True while workspace discovery is refreshing.
     private(set) var isRefreshing = false
 
+    /// The servers the in-flight refresh is actually contacting. Not every
+    /// refresh asks every server, so the sidebar needs this to avoid claiming
+    /// it's looking for workspaces on a machine it has decided to leave alone.
+    private(set) var refreshingServerIDs: Set<String> = []
+
     // MARK: Passcode prompting
 
     /// Set when a workspace needs a passcode we don't have, or rejected the one
@@ -70,6 +75,23 @@ final class AppModel {
             )
         }
 
+        self.client.onSessionEnded = { [weak self] end in
+            guard let self else { return }
+            switch end {
+            case .workspaceClosed:
+                // The workspace is gone, so the sidebar is now offering a row
+                // that would fail if it were clicked, and the selection points
+                // at something that no longer exists. Clear the selection and
+                // re-ask that one server what it actually has open — the rest
+                // of the network is not in question, and a full refresh would
+                // needlessly rebuild connections that are perfectly fine.
+                let serverID = self.selection?.serverID
+                self.selection = nil
+                guard let serverID else { return }
+                Task { await self.refreshWorkspaces(onServerWithID: serverID) }
+            }
+        }
+
         // Apply the persisted keep-awake preference at launch, so the setting
         // survives a relaunch rather than silently resetting.
         if preferences.keepsDisplayAwake {
@@ -82,7 +104,12 @@ final class AppModel {
     func start() {
         browser.start()
         Task {
-            await refresh()
+            // Launch discovery deliberately leaves "This Mac" alone. Bonjour
+            // servers are advertising QLab, so asking them costs nothing and
+            // tells us something; 127.0.0.1 is a permanent fixture of the
+            // sidebar whether or not QLab is running here, and probing it
+            // unasked just refuses a connection every launch.
+            await refresh(probingLocalhost: false)
             await autoConnectIfNeeded()
         }
     }
@@ -104,15 +131,30 @@ final class AppModel {
     /// cue display flickers through `connecting` on the way: the operator
     /// reaching for Refresh is usually doing it *because* something has gone
     /// stale in a way that asking politely won't fix.
-    func refresh() async {
+    ///
+    /// - Parameter probingLocalhost: Whether step 2 includes the built-in
+    ///   "This Mac" entry. Refresh is an explicit request, so it defaults to
+    ///   asking everything; launch passes `false` to leave localhost untouched.
+    func refresh(probingLocalhost: Bool = true) async {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
 
         browser.restartBrowsing()
 
+        let localhostID = QLabServer.localhost().id
         var updatedServers = browser.servers
+
+        let probedIDs = Set(
+            updatedServers.lazy
+                .filter { probingLocalhost || $0.id != localhostID }
+                .map(\.id)
+        )
+        refreshingServerIDs = probedIDs
+        defer { refreshingServerIDs = [] }
+
         for (index, server) in updatedServers.enumerated() {
+            guard probedIDs.contains(server.id) else { continue }
             do {
                 updatedServers[index].workspaces = try await client.fetchWorkspaces(from: server)
                 updatedServers[index].lastError = nil
@@ -120,12 +162,32 @@ final class AppModel {
                 updatedServers[index].workspaces = []
                 updatedServers[index].lastError = String(describing: error)
             }
+            updatedServers[index].hasBeenProbed = true
         }
         browser.update(updatedServers)
 
-        if client.status.hasLiveData {
+        // Any session Cuety is holding open, not just a live one. An operator
+        // reaching for Refresh while a reconnect is backing off wants it tried
+        // now — waiting out a thirty-second timer is the opposite of what they
+        // just asked for.
+        if client.isSessionActive {
             await client.reconnect()
         }
+    }
+
+    /// Re-asks one server what it has open, leaving the other servers and the
+    /// live session alone — which ``refresh(probingLocalhost:)`` would not.
+    func refreshWorkspaces(onServerWithID id: String) async {
+        guard var server = browser.server(withID: id) else { return }
+        do {
+            server.workspaces = try await client.fetchWorkspaces(from: server)
+            server.lastError = nil
+        } catch {
+            server.workspaces = []
+            server.lastError = String(describing: error)
+        }
+        server.hasBeenProbed = true
+        browser.update(server)
     }
 
     // MARK: - Auto-connect
@@ -149,6 +211,11 @@ final class AppModel {
     private func autoConnectIfNeeded() async {
         guard preferences.autoConnect, let target = preferences.lastWorkspace else { return }
 
+        // Localhost is otherwise left alone, but a remembered workspace on this
+        // Mac is the operator asking for it — polling has to look there or the
+        // window would expire without ever having checked.
+        let targetIsLocalhost = target.serverID == QLabServer.localhost().id
+
         let deadline = ContinuousClock.now + Self.autoConnectWindow
         while ContinuousClock.now < deadline {
             guard selection == nil else { return }
@@ -160,7 +227,7 @@ final class AppModel {
 
             try? await Task.sleep(for: Self.autoConnectPollInterval)
             guard selection == nil else { return }
-            await refresh()
+            await refresh(probingLocalhost: targetIsLocalhost)
         }
     }
 

@@ -33,7 +33,11 @@ final class QLabClient {
     private(set) var playheads: [String: String] = [:]
 
     /// Which cue list the display is following.
-    var watchedCueListID: String?
+    var watchedCueListID: String? {
+        didSet {
+            if let watchedCueListID { preferredCueListID = watchedCueListID }
+        }
+    }
 
     // MARK: Session facts, for the inspector
 
@@ -57,6 +61,26 @@ final class QLabClient {
 
     var onPasscodeRequired: ((Bool) -> Void)?
 
+    /// Why a session ended in a way Cuety is not going to try to undo.
+    enum SessionEnd: Hashable, Sendable {
+        /// The workspace is no longer open in QLab.
+        case workspaceClosed
+    }
+
+    /// Called when a session ends for good, so the app can bring the rest of
+    /// its state — the sidebar's workspace list, the current selection — back
+    /// in line with what QLab actually has open.
+    var onSessionEnded: ((SessionEnd) -> Void)?
+
+    /// Whether there is a session to end: live, mid-connect, or waiting out a
+    /// reconnect backoff.
+    ///
+    /// Deliberately broader than ``ConnectionStatus/hasLiveData``. A reconnect
+    /// loop has no data to show but very much needs a way for the operator to
+    /// call it off, and offering them "Connect" while Cuety is already trying
+    /// to connect is not that.
+    var isSessionActive: Bool { currentTarget != nil }
+
     // MARK: Private plumbing
 
     private var connection: QLabConnection?
@@ -70,6 +94,19 @@ final class QLabClient {
 
     /// The server and workspace to reconnect to after a drop.
     private var currentTarget: (server: QLabServer, workspaceID: String, passcode: String?)?
+
+    /// The cue list the operator last chose, remembered independently of any
+    /// one session.
+    ///
+    /// Teardown clears ``watchedCueListID`` along with the rest of the
+    /// session's derived state, and the handshake then falls back to whichever
+    /// list happens to be first. Without this, a dropped connection on a
+    /// multi-list show would quietly move the display off the list the
+    /// operator was watching — and they would find out during the show.
+    ///
+    /// Never cleared: reconnecting to the same workspace should land back on
+    /// the same list, and an ID from a different workspace simply won't match.
+    private var preferredCueListID: String?
 
     /// Successive failures, for exponential backoff.
     private var backoffAttempt = 0
@@ -90,7 +127,7 @@ final class QLabClient {
         defer { Task { await probe.cancel() } }
 
         let stream = await probe.start()
-        try await waitForReady(on: stream)
+        try await probe.waitUntilReady(timeout: preferences.requestTimeout)
 
         let reply = try await request(
             OSCMessage("/workspaces"),
@@ -103,7 +140,13 @@ final class QLabClient {
 
     /// Connects to a workspace and completes the full handshake.
     func connect(to server: QLabServer, workspaceID: String, passcode: String?) async {
-        disconnect(sendDisconnect: true)
+        // Tear down the socket but not the intent. `disconnect()` is for the
+        // operator changing their mind, and would throw away the very things
+        // an automatic reconnect depends on: the target it is heading for and
+        // the cue list it should land on.
+        tearDownSession(sendDisconnect: true)
+        reconnectTask?.cancel()
+        reconnectTask = nil
 
         currentTarget = (server, workspaceID, passcode)
         status = .connecting
@@ -113,7 +156,7 @@ final class QLabClient {
         let stream = await connection.start()
 
         do {
-            try await waitForReady(on: stream)
+            try await connection.waitUntilReady(timeout: preferences.requestTimeout)
             guard self.connection === connection else { return }
             // Once ready, one consumer owns all session events.
             eventTask = Task { [weak self] in
@@ -141,41 +184,56 @@ final class QLabClient {
     /// visible on purpose: the operator asked for the connection to be rebuilt,
     /// and a rebuild that gave no sign of happening would be worse than a
     /// moment of honest status.
+    ///
+    /// The watched cue list survives, via ``preferredCueListID``.
     func reconnect() async {
         guard let target = currentTarget else { return }
-
-        // A reconnection is not a change of mind. Teardown clears the watched
-        // list, and the handshake would then default to the first one — so on a
-        // multi-list show, refreshing would quietly move the display off the
-        // list the operator chose.
-        let watched = watchedCueListID
-
         await connect(
             to: target.server,
             workspaceID: target.workspaceID,
             passcode: target.passcode
         )
-
-        guard let watched, watched != watchedCueListID,
-              cueLists.contains(where: { $0.uniqueID == watched })
-        else { return }
-
-        watchedCueListID = watched
-        await refreshPlayheadCueDetails()
     }
 
-    /// Tears down the session, optionally telling QLab first.
+    /// Tears the session down for good, optionally telling QLab first.
+    ///
+    /// This is the operator saying "stop", so it drops the reconnect schedule
+    /// too — nothing should quietly re-establish what they just closed.
     func disconnect(sendDisconnect: Bool = true) {
+        reconnectTask?.cancel()
+        reconnectTask = nil
         currentTarget = nil
+        backoffAttempt = 0
+
+        tearDownSession(sendDisconnect: sendDisconnect)
+
+        status = .offline
+    }
+
+    /// Closes the socket and clears everything derived from the session,
+    /// leaving ``currentTarget``, the backoff, and ``preferredCueListID``
+    /// alone.
+    ///
+    /// Split from ``disconnect(sendDisconnect:)`` because a dropped session
+    /// and a deliberate one differ in exactly that respect: after a drop Cuety
+    /// still knows where it was and means to go back, and conflating the two
+    /// is what made a reconnect forget which workspace it was reconnecting to.
+    ///
+    /// Leaves `status` untouched. Every caller ends up somewhere different —
+    /// `connecting`, `needsPasscode`, `workspaceClosed`, `offline` — and each
+    /// says so itself rather than having this guess.
+    private func tearDownSession(sendDisconnect: Bool) {
         cueListRefreshTask?.cancel()
         cueListRefreshTask = nil
         heartbeatTask?.cancel()
         heartbeatTask = nil
-        reconnectTask?.cancel()
-        reconnectTask = nil
 
         let connection = self.connection
-        if sendDisconnect, let connection {
+        // Only worth saying goodbye down a socket that is actually up. After a
+        // drop these three sends can only fail, and would fill the Activity
+        // Log with errors that describe Cuety's own teardown rather than
+        // anything that happened to the show.
+        if sendDisconnect, status.hasLiveData, let connection {
             // Best effort and deliberately not awaited: QLab is told we're
             // going, but a wedged socket must not block teardown.
             Task {
@@ -203,10 +261,35 @@ final class QLabClient {
         playheads = [:]
         watchedCueListID = nil
         resetHeartbeatStatistics()
+    }
 
-        if case .failed = status {} else {
-            status = .offline
-        }
+    /// The session is gone as far as Cuety can tell: stop showing cue data as
+    /// though it were live, and start trying to get the session back.
+    ///
+    /// Keeps ``currentTarget``, which is the whole difference between this and
+    /// ``disconnect(sendDisconnect:)``. An involuntary drop is something to
+    /// recover from, not a decision to respect.
+    private func handleSessionLost(reason: String) {
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+        cueListRefreshTask?.cancel()
+        cueListRefreshTask = nil
+        failAllPendingRequests(with: RequestFailure.disconnected)
+
+        status = .failed(reason: reason)
+        scheduleReconnect()
+    }
+
+    /// Ends the session because the workspace itself has gone.
+    ///
+    /// Terminal on purpose, and the one drop that gets no reconnect: QLab is
+    /// answering perfectly well, it just doesn't have this workspace any more,
+    /// so retrying would only ask the same question again. The operator has to
+    /// choose something else, so say so plainly and let the sidebar catch up.
+    private func handleWorkspaceClosed() {
+        disconnect(sendDisconnect: false)
+        status = .workspaceClosed
+        onSessionEnded?(.workspaceClosed)
     }
 
     // MARK: - Handshake
@@ -305,6 +388,14 @@ final class QLabClient {
             // Leave `status` as set by the handshake so the UI can prompt, and
             // do not schedule a reconnect — that would re-trigger the delay.
             break
+
+        case RequestFailure.workspaceUnavailable(let id):
+            // QLab answered, and did not list this workspace. Retrying would
+            // only ask the same question again, so end the session and say
+            // what actually happened rather than blaming the network.
+            logger.info("Workspace \(id, privacy: .public) is no longer open")
+            handleWorkspaceClosed()
+
         default:
             status = .failed(reason: describe(error))
             scheduleReconnect()
@@ -324,7 +415,6 @@ final class QLabClient {
     enum RequestFailure: Error, CustomStringConvertible {
         case disconnected
         case timedOut(address: String)
-        case notReady
         case passcodeRequired
         case passcodeRejected
         case workspaceUnavailable(id: String)
@@ -335,7 +425,6 @@ final class QLabClient {
             switch self {
             case .disconnected: "Disconnected from QLab."
             case .timedOut(let address): "QLab did not answer \(address) in time."
-            case .notReady: "The connection is not ready."
             case .passcodeRequired: "This workspace needs a passcode."
             case .passcodeRejected: "That passcode was not accepted."
             case .workspaceUnavailable(let id): "Workspace \(id) is no longer open in QLab."
@@ -385,6 +474,14 @@ final class QLabClient {
     }
 
     private func requirePasscode() {
+        // Several requests can be in flight when QLab starts refusing them,
+        // and every one of them comes back denied. Only the first is news:
+        // running this again would rebuild the sheet and — because the target
+        // has already been cleared by then — quietly downgrade "that passcode
+        // was rejected" to "a passcode is required", losing the one detail
+        // that tells the operator they typed it wrong.
+        if case .needsPasscode = status { return }
+
         let rejected = currentTarget?.passcode != nil
         disconnect(sendDisconnect: false)
         status = .needsPasscode(rejected: rejected)
@@ -404,10 +501,22 @@ final class QLabClient {
         log.record(OSCEvent(message: message, direction: .outbound, byteCount: byteCount))
 
         // A probe has no long-lived event consumer, so read the stream inline
-        // until the matching reply shows up or we run out of patience.
-        let deadline = Date().addingTimeInterval(preferences.requestTimeout)
+        // until the matching reply shows up.
+        //
+        // Cancelling the connection is what enforces the deadline: that
+        // finishes the stream, which ends the loop below. A `Date` compared
+        // inside the loop cannot do the job, because a QLab that has stopped
+        // answering sends nothing to compare it on — the loop simply parks,
+        // and with it the sidebar refresh that is waiting on this.
+        let deadline = Task { [weak self] in
+            guard let timeout = self?.preferences.requestTimeout else { return }
+            try? await Task.sleep(for: .seconds(timeout))
+            guard !Task.isCancelled else { return }
+            await connection.cancel()
+        }
+        defer { deadline.cancel() }
+
         for await event in stream {
-            if Date() > deadline { break }
             guard case .received(let incoming, let bytes) = event else { continue }
             log.record(OSCEvent(message: incoming, direction: .inbound, byteCount: bytes))
 
@@ -492,22 +601,6 @@ final class QLabClient {
         }
     }
 
-    /// Waits for a probe connection to reach `.ready`.
-    private func waitForReady(on stream: AsyncStream<QLabConnection.Event>) async throws {
-        let deadline = Date().addingTimeInterval(preferences.requestTimeout)
-        for await event in stream {
-            if Date() > deadline { break }
-            guard case .stateChanged(let state) = event else { continue }
-            switch state {
-            case .ready: return
-            case .failed(let error): throw error
-            case .cancelled: throw RequestFailure.disconnected
-            default: continue
-            }
-        }
-        throw RequestFailure.notReady
-    }
-
     // MARK: - Event handling
 
     private func handle(_ event: QLabConnection.Event) async {
@@ -544,21 +637,34 @@ final class QLabClient {
             // `.waiting` means the system will retry on its own, so this is a
             // degraded state rather than a failure — don't stack our own
             // backoff on top of the framework's.
-            if status.hasLiveData || status == .connecting {
+            //
+            // Only meaningful once the session is up. Before that, `.waiting`
+            // belongs to a connection attempt that already has a deadline of
+            // its own, and the event can be buffered long enough to arrive
+            // after the handshake succeeded — which would leave a perfectly
+            // healthy session claiming to be degraded.
+            if status.hasLiveData {
                 status = .degraded(reason: "Waiting for the network: \(error.localizedDescription)")
             }
 
         case .failed(let error):
             recordError(error)
-            failAllPendingRequests(with: error)
-            status = .failed(reason: error.localizedDescription)
-            scheduleReconnect()
+            if status.hasLiveData {
+                handleSessionLost(reason: error.localizedDescription)
+            } else {
+                // Mid-handshake. `connect` is awaiting these requests and
+                // reports the failure itself, so recovering here as well would
+                // schedule two reconnects and double-count the backoff.
+                failAllPendingRequests(with: error)
+            }
 
         case .cancelled:
-            failAllPendingRequests(with: RequestFailure.disconnected)
+            // Once live, this is the shape a QLab quit usually takes: it
+            // closes the socket on its way out.
             if status.hasLiveData {
-                status = .failed(reason: "QLab closed the connection.")
-                scheduleReconnect()
+                handleSessionLost(reason: "QLab closed the connection.")
+            } else {
+                failAllPendingRequests(with: RequestFailure.disconnected)
             }
 
         default:
@@ -637,8 +743,7 @@ final class QLabClient {
 
         case "disconnect":
             logger.info("QLab asked us to disconnect")
-            status = .failed(reason: "QLab closed this workspace.")
-            disconnect(sendDisconnect: false)
+            handleWorkspaceClosed()
 
         case "cue_id":
             // QLab uses this form for cue edits, renames, and newly inserted
@@ -683,7 +788,12 @@ final class QLabClient {
         cueLists = reply.data ?? []
 
         if watchedCueListID == nil {
-            watchedCueListID = cueLists.first?.uniqueID
+            // Back to the list the operator was on, if this workspace still
+            // has it. Falling straight through to the first list would mean a
+            // dropped connection silently changed what the display follows.
+            watchedCueListID = preferredCueListID.flatMap { id in
+                cueLists.contains { $0.uniqueID == id } ? id : nil
+            } ?? cueLists.first?.uniqueID
         }
 
         // Cue lists and playheads are refreshed together on purpose. The push
@@ -813,6 +923,21 @@ final class QLabClient {
 
     // MARK: - Heartbeat
 
+    /// Missed heartbeats worth calling the connection degraded. One on a busy
+    /// show network is noise; three in a row is a real signal, and matches the
+    /// TCP keepalive count.
+    private static let degradedThumpThreshold = 3
+
+    /// Missed heartbeats worth calling the session dead.
+    ///
+    /// The backstop for a QLab that still answers TCP but no longer answers
+    /// *for this workspace* — a workspace closed without the push
+    /// notification arriving, or a passcode added mid-show that turns every
+    /// reply into a refusal. Without an upper bound the session sat in
+    /// `degraded` indefinitely, showing a playhead that had stopped moving
+    /// and calling it live data.
+    private static let lostThumpThreshold = 6
+
     private func startHeartbeat() {
         heartbeatTask?.cancel()
         heartbeatTask = Task { [weak self] in
@@ -844,9 +969,13 @@ final class QLabClient {
         } catch {
             guard status.hasLiveData else { return }
             missedThumps += 1
-            // One missed thump on a busy show network is noise. Three in a row
-            // is a real signal, and matches the TCP keepalive count.
-            if missedThumps >= 3, status.hasLiveData {
+
+            if missedThumps >= Self.lostThumpThreshold {
+                recordError(error)
+                handleSessionLost(
+                    reason: "QLab stopped answering heartbeats for this workspace."
+                )
+            } else if missedThumps >= Self.degradedThumpThreshold {
                 status = .degraded(
                     reason: "QLab has missed \(missedThumps) heartbeats in a row."
                 )
@@ -893,9 +1022,26 @@ final class QLabClient {
 
         logger.info("Reconnecting in \(delay, format: .fixed(precision: 1))s (attempt \(self.backoffAttempt))")
 
+        // Say so while the backoff runs. A static red glyph for the next
+        // thirty seconds reads as "Cuety has given up", which is the opposite
+        // of what is happening — and it gives the operator nothing to decide
+        // whether to intervene on.
+        let reason: String
+        if case .failed(let failureReason) = status {
+            reason = failureReason
+        } else {
+            reason = lastErrorDescription ?? "The connection to QLab dropped."
+        }
+        status = .reconnecting(attempt: backoffAttempt, reason: reason)
+
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled, let self else { return }
+            // Let go of the handle before connecting. `connect` cancels the
+            // pending reconnect, and this task *is* that reconnect — cancelling
+            // it from inside would propagate into the connection attempt it
+            // just started.
+            self.reconnectTask = nil
             self.reconnectCount += 1
             await self.connect(
                 to: target.server,

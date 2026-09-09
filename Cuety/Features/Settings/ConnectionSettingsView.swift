@@ -38,7 +38,7 @@ struct ConnectionSettingsView: View {
                     .foregroundStyle(preferences.lastWorkspace == nil ? .tertiary : .secondary)
             }
         } footer: {
-            Text("On launch Cuety looks for the workspace it last connected to and reopens it. Choosing a workspace yourself cancels the attempt.")
+            Text("When enabled, Cuety looks for the workspace it last connected to at launch and reopens it; choosing a workspace yourself cancels the attempt. Otherwise Cuety connects to nothing until you pick a workspace.")
         }
     }
 
