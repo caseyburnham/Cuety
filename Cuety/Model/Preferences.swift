@@ -71,14 +71,22 @@ final class Preferences {
         didSet { defaults.set(showsDrawer, forKey: Key.showsDrawer) }
     }
 
-    /// How many already-taken cues the drawer shows above the playhead.
-    var drawerPreviousCount: Int {
-        didSet { defaults.set(drawerPreviousCount, forKey: Key.drawerPreviousCount) }
+    /// How many rows of the cue list the drawer shows above the playhead.
+    ///
+    /// Rows, in two senses, neither of which is "cues". The drawer cannot know
+    /// which cues have been *taken*, so this counts positions rather than
+    /// history — the old name, "already-taken cues", described something Cuety
+    /// has no way to establish. And a group is a single row however many cues
+    /// are inside it, so three rows is three lines on screen rather than three
+    /// cues. The persisted key keeps its old spelling so an existing setting
+    /// is not silently reset.
+    var drawerRowsAboveCount: Int {
+        didSet { defaults.set(drawerRowsAboveCount, forKey: Key.drawerRowsAboveCount) }
     }
 
-    /// How many upcoming cues the drawer shows below the playhead.
-    var drawerUpcomingCount: Int {
-        didSet { defaults.set(drawerUpcomingCount, forKey: Key.drawerUpcomingCount) }
+    /// How many rows of the cue list the drawer shows below the playhead.
+    var drawerRowsBelowCount: Int {
+        didSet { defaults.set(drawerRowsBelowCount, forKey: Key.drawerRowsBelowCount) }
     }
 
     // MARK: Detail pills
@@ -153,8 +161,8 @@ final class Preferences {
 
         showsCueName = defaults.object(forKey: Key.showsCueName) as? Bool ?? true
         showsDrawer = defaults.object(forKey: Key.showsDrawer) as? Bool ?? true
-        drawerPreviousCount = defaults.object(forKey: Key.drawerPreviousCount) as? Int ?? 3
-        drawerUpcomingCount = defaults.object(forKey: Key.drawerUpcomingCount) as? Int ?? 3
+        drawerRowsAboveCount = defaults.object(forKey: Key.drawerRowsAboveCount) as? Int ?? 3
+        drawerRowsBelowCount = defaults.object(forKey: Key.drawerRowsBelowCount) as? Int ?? 3
 
         pillOrder = Self.loadPillOrder(from: defaults)
         enabledPills = Self.loadEnabledPills(from: defaults)
@@ -209,8 +217,10 @@ final class Preferences {
         static let usesRoundedSystemFont = "usesRoundedSystemFont"
         static let showsCueName = "showsCueName"
         static let showsDrawer = "showsDrawer"
-        static let drawerPreviousCount = "drawerPreviousCount"
-        static let drawerUpcomingCount = "drawerUpcomingCount"
+        // Spelled as they were first persisted. Renaming the properties above
+        // must not reset a setting the operator already chose.
+        static let drawerRowsAboveCount = "drawerPreviousCount"
+        static let drawerRowsBelowCount = "drawerUpcomingCount"
         static let pillOrder = "pillOrder"
         static let enabledPills = "enabledPills"
         static let keepsDisplayAwake = "keepsDisplayAwake"

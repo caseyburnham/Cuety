@@ -32,8 +32,19 @@ nonisolated struct Cue: Hashable, Sendable, Identifiable {
 
     /// The cue number. Optional — unnumbered cues are legal and common.
     var number: String?
+
+    /// The name the operator typed, empty for a cue they never named.
     var name: String?
+
+    /// The name QLab *displays* for this cue in its cue list.
+    ///
+    /// Not the name of the containing cue list, despite how it reads. QLab
+    /// fills this in for a cue with no name of its own — an audio cue shows
+    /// its file, a group shows its type — so it is the closest thing to "what
+    /// QLab calls this cue" and nothing more. Ask
+    /// ``Swift/Array/cueList(containing:)`` for the list a cue belongs to.
     var listName: String?
+
     /// QLab's cue type string, e.g. `"Audio"`, `"Group"`, `"Light"`.
     var type: String?
     var colorName: String?
@@ -65,9 +76,21 @@ nonisolated struct Cue: Hashable, Sendable, Identifiable {
         return number
     }
 
+    /// What to call this cue on screen.
+    ///
+    /// The operator's own ``name`` wins wherever they gave one. Failing that,
+    /// QLab's ``listName`` — the name it displays for an unnamed cue, such as
+    /// the audio file it plays — because that is the label the operator
+    /// already recognises from QLab's own window. Only when neither exists is
+    /// the cue genuinely nameless, and callers fall back to a placeholder or
+    /// promote the number instead.
     var displayName: String? {
-        guard let name, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-        return name
+        Self.trimmedNonEmpty(name) ?? Self.trimmedNonEmpty(listName)
+    }
+
+    private static func trimmedNonEmpty(_ value: String?) -> String? {
+        guard let value, !value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return value
     }
 
     /// The colour the operator gave this cue in QLab, or `nil` when they gave
@@ -168,6 +191,18 @@ nonisolated extension Array<Cue> {
             if let found = cue.children.firstCue(withID: cueID) { return found }
         }
         return nil
+    }
+
+    /// The cue list containing `cueID`, given the array of cue lists QLab
+    /// returned from `/cueLists`.
+    ///
+    /// Derived from the tree, because nothing on a ``Cue`` records it:
+    /// ``Cue/listName`` is the cue's own displayed name, so reading it as the
+    /// containing list's name put the cue's name in the "Cue List" pill and
+    /// was wrong for every cue that had a name at all. A group's children are
+    /// searched too, so a nested cue reports the list rather than the group.
+    func cueList(containing cueID: String) -> Cue? {
+        first { $0.children.firstCue(withID: cueID) != nil }
     }
 }
 

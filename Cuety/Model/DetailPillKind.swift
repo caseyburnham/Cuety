@@ -67,7 +67,7 @@ enum DetailPillKind: String, CaseIterable, Codable, Hashable, Sendable, Identifi
     var qlabKey: String? {
         switch self {
         case .cueType: nil          // present in /cueLists
-        case .cueList: nil          // present in /cueLists as listName
+        case .cueList: nil          // derived from the /cueLists tree
         case .armed: nil            // present in /cueLists
         case .flagged: nil          // present in /cueLists
         case .duration: "duration"

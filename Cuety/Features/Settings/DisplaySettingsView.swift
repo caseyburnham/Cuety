@@ -54,27 +54,38 @@ struct DisplaySettingsView: View {
                 Text("The name appears beneath the number. Turning it off gives the number the whole window.")
             }
 
-            Section("Cue Drawer") {
+            Section {
                 Toggle("Show the drawer", isOn: Binding(
                     get: { preferences.showsDrawer },
                     set: { _ in model.toggleDrawer() }
                 ))
 
+                // Rows, deliberately, not "previous" and "upcoming" cues. The
+                // drawer reads the cue list either side of the playhead; it
+                // has no way to know what has been taken or what the next GO
+                // will do, so the labels must not imply either.
                 Stepper(
-                    "Previous cues: \(preferences.drawerPreviousCount)",
-                    value: Bindable(preferences).drawerPreviousCount,
+                    "Rows above the playhead: \(preferences.drawerRowsAboveCount)",
+                    value: Bindable(preferences).drawerRowsAboveCount,
                     in: 0...10
                 )
                 .monospacedDigit()
                 .disabled(!preferences.showsDrawer)
 
                 Stepper(
-                    "Upcoming cues: \(preferences.drawerUpcomingCount)",
-                    value: Bindable(preferences).drawerUpcomingCount,
+                    "Rows below the playhead: \(preferences.drawerRowsBelowCount)",
+                    value: Bindable(preferences).drawerRowsBelowCount,
                     in: 0...10
                 )
                 .monospacedDigit()
                 .disabled(!preferences.showsDrawer)
+            } header: {
+                Text("Cue Drawer")
+            } footer: {
+                Text("""
+                The drawer shows the watched cue list either side of the playhead. \
+                A group counts as one row; the cues inside it are not listed.
+                """)
             }
         }
         .formStyle(.grouped)

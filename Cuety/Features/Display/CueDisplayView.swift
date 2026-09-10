@@ -14,7 +14,7 @@ struct CueDisplayView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let cue = client.playheadCue {
+            if let cue = liveCue {
                 cueContent(cue)
             } else {
                 emptyState
@@ -22,6 +22,34 @@ struct CueDisplayView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(Motion.cueChange, value: client.currentPlayheadCueID)
+    }
+
+    /// The cue at the playhead, and only while the session is live enough for
+    /// that to still be true.
+    ///
+    /// The client already discards its cue data on a drop, so this check is
+    /// redundant today — deliberately. A stale cue captioned "Standing By" on
+    /// a stage display is the worst thing this app can do, and the display
+    /// should not be one refactor of the networking layer away from doing it
+    /// again. The contract is enforced where it is visible.
+    private var liveCue: Cue? {
+        guard client.status.hasLiveData else { return nil }
+        return client.playheadCue
+    }
+
+    /// The name of the cue list the given cue actually sits in.
+    ///
+    /// Looked up in the cue tree rather than read off the cue, because
+    /// ``Cue/listName`` is the cue's own displayed name and not its list's.
+    /// The watched list is checked first: it is where the playhead cue lives
+    /// in every ordinary case, so the general search is the exception.
+    private func cueListName(containing cue: Cue) -> String? {
+        if let watchedID = client.watchedCueListID,
+           let watched = client.cueLists.first(where: { $0.uniqueID == watchedID }),
+           watched.children.firstCue(withID: cue.uniqueID) != nil {
+            return watched.displayName
+        }
+        return client.cueLists.cueList(containing: cue.uniqueID)?.displayName
     }
 
     // MARK: - Cue content
@@ -51,7 +79,11 @@ struct CueDisplayView: View {
             }
 
             if !model.isPresenting {
-                DetailPillsRow(cue: cue, kinds: model.preferences.visiblePills)
+                DetailPillsRow(
+                    cue: cue,
+                    kinds: model.preferences.visiblePills,
+                    cueListName: cueListName(containing: cue)
+                )
             }
         }
         .padding(.horizontal, 32)
@@ -137,10 +169,19 @@ struct CueDisplayView: View {
     @ViewBuilder
     private var emptyState: some View {
         if !client.status.hasLiveData {
-            ContentUnavailableView {
-                Label(client.status.title, systemImage: client.status.systemImage)
-            } description: {
-                Text(client.status.detail)
+            // Presentation mode hides the toolbar, and with it the status
+            // glyph that would otherwise be the operator's first sign of a
+            // drop. `ContentUnavailableView` is metricked for a window someone
+            // is sitting in front of, which is exactly not the case here, so
+            // stage mode states the loss at its own scale instead.
+            if model.isPresenting {
+                presentedStatusState
+            } else {
+                ContentUnavailableView {
+                    Label(client.status.title, systemImage: client.status.systemImage)
+                } description: {
+                    Text(client.status.detail)
+                }
             }
         } else if client.cueLists.isEmpty {
             ContentUnavailableView {
@@ -158,6 +199,40 @@ struct CueDisplayView: View {
                 Text("The playhead in this cue list is not set.")
             }
         }
+    }
+
+    /// The connection state at stage-display scale.
+    ///
+    /// Sized to be read from wherever the display is being watched from, and
+    /// tinted with the status's own colour so it cannot disagree with the
+    /// toolbar glyph the operator sees on leaving presentation mode.
+    private var presentedStatusState: some View {
+        VStack(spacing: 24) {
+            Image(systemName: client.status.systemImage)
+                .font(.system(size: 96))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(client.status.tint)
+
+            VStack(spacing: 10) {
+                // The operator's chosen family, as the cue name uses: this is
+                // standing in for the headline, not annotating it.
+                Text(client.status.title)
+                    .font(typography.cueName(size: 48))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.4)
+
+                Text(client.status.detail)
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.5)
+            }
+            .multilineTextAlignment(.center)
+        }
+        .padding(48)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(client.status.title). \(client.status.detail)")
     }
 }
 

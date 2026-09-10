@@ -253,14 +253,36 @@ final class QLabClient {
         failAllPendingRequests(with: RequestFailure.disconnected)
 
         workspace = nil
-        isSubscribedToUpdates = false
-        connectedSince = nil
         accessLevel = .unspecified
         usedPasscode = false
+        invalidateLiveSessionData()
+        resetHeartbeatStatistics()
+    }
+
+    /// Drops every fact that is only true while the session is live.
+    ///
+    /// Cue data first: QLab is no longer confirming any of it, and the display
+    /// has no business presenting a cue as standing by on the strength of a
+    /// reply that arrived before the socket died. Then the two session claims
+    /// that describe a *capability* rather than an intention — subscribed, and
+    /// connected since — because a dead session has neither.
+    ///
+    /// Shared by teardown and by an involuntary drop, which have to invalidate
+    /// exactly the same things. Only the drop used to skip this, which is how
+    /// the pre-drop cue survived the whole reconnect backoff, captioned
+    /// "Standing By", with the toolbar hidden in presentation mode and no way
+    /// for the operator to tell.
+    ///
+    /// ``preferredCueListID`` deliberately survives, so a reconnect lands back
+    /// on the list the operator was watching. So does ``workspace`` and the
+    /// heartbeat history: those describe where Cuety was and means to return,
+    /// and the inspector labels them in the past tense already.
+    private func invalidateLiveSessionData() {
+        isSubscribedToUpdates = false
+        connectedSince = nil
         cueLists = []
         playheads = [:]
         watchedCueListID = nil
-        resetHeartbeatStatistics()
     }
 
     /// The session is gone as far as Cuety can tell: stop showing cue data as
@@ -269,12 +291,19 @@ final class QLabClient {
     /// Keeps ``currentTarget``, which is the whole difference between this and
     /// ``disconnect(sendDisconnect:)``. An involuntary drop is something to
     /// recover from, not a decision to respect.
+    ///
+    /// Nothing here restores the cue data it discards. That is the reconnect's
+    /// job and it already does it: step 7 of the handshake refetches the cue
+    /// tree and the playheads, ``refreshCueLists()`` puts the display back on
+    /// ``preferredCueListID``, and step 8 refills the detail pills — so a
+    /// successful reconnect repopulates the display with no manual refresh.
     private func handleSessionLost(reason: String) {
         heartbeatTask?.cancel()
         heartbeatTask = nil
         cueListRefreshTask?.cancel()
         cueListRefreshTask = nil
         failAllPendingRequests(with: RequestFailure.disconnected)
+        invalidateLiveSessionData()
 
         status = .failed(reason: reason)
         scheduleReconnect()

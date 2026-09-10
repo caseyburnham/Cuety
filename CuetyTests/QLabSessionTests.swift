@@ -169,9 +169,27 @@ struct QLabDisconnectTests {
         #expect(started.duration(to: .now) < .seconds(3))
     }
 
+    /// A show with cues in it and a playhead parked on one of them.
+    ///
+    /// Every disconnect assertion about cue data is vacuous against an empty
+    /// workspace — which is how a drop that retained the whole cue tree passed
+    /// a test asserting the tree was cleared.
+    private static let populatedShow: [AuthorizationPeer.CueListStub] = [
+        .init(
+            id: "L1",
+            name: "Main",
+            cues: [
+                .init(id: "C1", number: "1", name: "House to Half"),
+                .init(id: "C2", number: "2", name: "Thunder Crash"),
+            ],
+            playheadCueID: "C1"
+        ),
+    ]
+
     @Test("A QLab that quits leaves a session that is visibly retrying")
     func quitPeerLeavesSessionRetrying() async throws {
         let peer = try AuthorizationPeer()
+        peer.cueLists = Self.populatedShow
         let port = try await peer.start()
         let client = QLabClient(
             preferences: try makePreferences(requestTimeout: 0.3), log: ActivityLog()
@@ -179,6 +197,7 @@ struct QLabDisconnectTests {
         defer { client.disconnect() }
         await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
         try #require(client.status == .connected)
+        try #require(!client.cueLists.isEmpty)
 
         peer.stop()
 
@@ -253,6 +272,66 @@ struct QLabDisconnectTests {
         #expect(!client.isSessionActive)
     }
 
+    @Test("A drop stops presenting the cue that was on screen as live")
+    func dropInvalidatesCueDataOnScreen() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = Self.populatedShow
+        let port = try await peer.start()
+        let client = QLabClient(
+            preferences: try makePreferences(requestTimeout: 0.3), log: ActivityLog()
+        )
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.status == .connected)
+        // There has to be a cue on the display for its disappearance to mean
+        // anything. This is the requirement the old disconnect test lacked.
+        try #require(client.playheadCue?.uniqueID == "C1")
+
+        peer.stop()
+
+        let deadline = ContinuousClock.now + .seconds(3)
+        while client.status.hasLiveData, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        // Not one of these survives a drop: the cue tree, the playhead that
+        // pointed into it, the list the display was following, or the two
+        // session claims that only hold while the socket is up.
+        #expect(!client.status.hasLiveData)
+        #expect(client.cueLists.isEmpty)
+        #expect(client.playheads.isEmpty)
+        #expect(client.watchedCueListID == nil)
+        #expect(client.currentPlayheadCueID == nil)
+        #expect(client.playheadCue == nil)
+        #expect(client.watchedGraph == nil)
+        #expect(!client.isSubscribedToUpdates)
+        #expect(client.connectedSince == nil)
+    }
+
+    @Test("A reconnect repopulates the display without a manual refresh")
+    func reconnectRepopulatesCueData() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = Self.populatedShow
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let client = QLabClient(preferences: try makePreferences(), log: ActivityLog())
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.playheadCue?.uniqueID == "C1")
+
+        // The other half of the contract: invalidating on a drop is only safe
+        // if getting the session back puts the cue tree, the playhead and the
+        // watched list back too.
+        await client.reconnect()
+
+        #expect(client.status == .connected)
+        #expect(client.watchedCueListID == "L1")
+        #expect(client.currentPlayheadCueID == "C1")
+        #expect(client.playheadCue?.displayNumber == "1")
+        #expect(client.isSubscribedToUpdates)
+        #expect(client.connectedSince != nil)
+    }
+
     @Test("Reconnecting keeps the cue list the operator was watching")
     func reconnectKeepsWatchedCueList() async throws {
         let peer = try AuthorizationPeer()
@@ -281,6 +360,16 @@ struct QLabDisconnectTests {
 private final class AuthorizationPeer {
     struct CueListStub {
         let id: String
+        let name: String
+        var cues: [CueStub] = []
+        /// What `playbackPositionID` answers for this list. `nil` is QLab's
+        /// `"none"` — a list with an unset playhead.
+        var playheadCueID: String?
+    }
+
+    struct CueStub {
+        let id: String
+        let number: String
         let name: String
     }
 
@@ -365,17 +454,34 @@ private final class AuthorizationPeer {
             return ("ok", NSNull())
         }
 
-        switch components.dropFirst(3).joined(separator: "/") {
+        let method = components.dropFirst(3).joined(separator: "/")
+
+        switch method {
         case "connect":
             return ("ok", "ok:view")
         case "cueLists":
             guard !denyCueLists else { return ("denied", "denied") }
-            return ("ok", cueLists.map {
-                ["uniqueID": $0.id, "name": $0.name, "cues": [Any]()] as [String: Any]
+            return ("ok", cueLists.map { list in
+                [
+                    "uniqueID": list.id,
+                    "name": list.name,
+                    "cues": list.cues.map {
+                        ["uniqueID": $0.id, "number": $0.number, "name": $0.name]
+                            as [String: Any]
+                    },
+                ] as [String: Any]
             })
         case "thump":
             return (denyHeartbeat ? "denied" : "ok", "thump")
         default:
+            // `/workspace/<id>/cue_id/<listID>/playbackPositionID`, which is
+            // what puts a cue on the display: without it a populated show
+            // still has nothing standing by.
+            let parts = method.split(separator: "/")
+            if parts.count == 3, parts[0] == "cue_id", parts[2] == "playbackPositionID" {
+                let list = cueLists.first { $0.id == String(parts[1]) }
+                return ("ok", list?.playheadCueID ?? "none")
+            }
             return ("ok", NSNull())
         }
     }

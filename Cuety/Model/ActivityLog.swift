@@ -46,6 +46,10 @@ nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
     /// The OSC address, or a short description for malformed packets.
     let address: String
     /// The arguments rendered for display; empty when there are none.
+    ///
+    /// Already redacted. Every entry built from an ``OSCMessage`` goes through
+    /// ``OSCRedaction``, so this string is safe to show, search, and copy —
+    /// and there is deliberately nowhere else to get the unredacted form from.
     let arguments: String
     /// Size of the packet on the wire, before SLIP framing.
     let byteCount: Int
@@ -66,16 +70,24 @@ nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
 
     /// Builds an entry from a message, splitting address from arguments so the
     /// table can align them in separate columns.
+    ///
+    /// Credentials are redacted here rather than at any of the three places
+    /// the entry is read from, so no call site can retain a passcode by
+    /// forgetting to ask for redaction — see ``OSCRedaction``.
     init(message: OSCMessage, direction: Direction, byteCount: Int, timestamp: Date = Date()) {
-        let rendered = message.description
-        let argumentText = rendered.hasPrefix(message.address)
-            ? String(rendered.dropFirst(message.address.count)).trimmingCharacters(in: .whitespaces)
+        let safe = OSCRedaction.redacting(message)
+        let rendered = safe.description
+        let argumentText = rendered.hasPrefix(safe.address)
+            ? String(rendered.dropFirst(safe.address.count)).trimmingCharacters(in: .whitespaces)
             : ""
         self.init(
             timestamp: timestamp,
             direction: direction,
-            address: message.address,
+            address: safe.address,
             arguments: argumentText,
+            // The real packet size, deliberately: it describes what went out
+            // on the wire, and measuring the placeholder instead would
+            // misreport the traffic totals in the connection inspector.
             byteCount: byteCount
         )
     }

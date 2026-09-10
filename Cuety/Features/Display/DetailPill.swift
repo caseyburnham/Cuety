@@ -11,8 +11,13 @@ struct DetailPill: View {
     let kind: DetailPillKind
     let cue: Cue
 
+    /// The name of the cue list this cue belongs to, which has to be supplied
+    /// because the cue itself does not carry it — see
+    /// ``Swift/Array/cueList(containing:)``.
+    let cueListName: String?
+
     var body: some View {
-        if let content = Self.content(for: kind, cue: cue) {
+        if let content = Self.content(for: kind, cue: cue, cueListName: cueListName) {
             Label {
                 Text(content.text)
                     .fontWeight(.medium)
@@ -83,7 +88,9 @@ struct DetailPill: View {
         var isOutlined = false
     }
 
-    static func content(for kind: DetailPillKind, cue: Cue) -> Content? {
+    static func content(
+        for kind: DetailPillKind, cue: Cue, cueListName: String?
+    ) -> Content? {
         switch kind {
         case .cueType:
             guard let type = cue.type, !type.isEmpty else { return nil }
@@ -143,9 +150,13 @@ struct DetailPill: View {
             )
 
         case .cueList:
-            guard let listName = cue.listName, !listName.isEmpty else { return nil }
+            // The containing list, worked out from the cue tree by the caller.
+            // This used to read `cue.listName`, which is QLab's *displayed
+            // name for the cue* — so a cue called "Thunder Crash" in the Main
+            // Cue List reported its cue list as "Thunder Crash".
+            guard let cueListName, !cueListName.isEmpty else { return nil }
             return Content(
-                text: listName,
+                text: cueListName,
                 systemImage: kind.systemImage,
                 help: "Cue list"
             )
@@ -244,12 +255,15 @@ struct DetailPill: View {
 struct DetailPillsRow: View {
     let cue: Cue
     let kinds: [DetailPillKind]
+    /// The name of the cue list the cue belongs to, which only the caller can
+    /// work out — see ``Swift/Array/cueList(containing:)``.
+    let cueListName: String?
 
     @Namespace private var glassNamespace
 
     /// Only the pills that actually have something to show for this cue.
     private var populated: [DetailPillKind] {
-        kinds.filter { DetailPill.content(for: $0, cue: cue) != nil }
+        kinds.filter { DetailPill.content(for: $0, cue: cue, cueListName: cueListName) != nil }
     }
 
     /// The short values, in the operator's order.
@@ -287,18 +301,23 @@ struct DetailPillsRow: View {
     }
 
     private func pill(_ kind: DetailPillKind) -> some View {
-        DetailPill(kind: kind, cue: cue)
+        DetailPill(kind: kind, cue: cue, cueListName: cueListName)
             .glassEffectID(kind, in: glassNamespace)
             .glassEffectTransition(.matchedGeometry)
     }
 }
 
+// The previews set `listName` the way QLab actually does — to the cue's own
+// displayed name — and pass the containing list separately. Setting it to
+// "Main Cue List" was the same mistake the Cue List pill used to make, which
+// meant the previews confirmed the bug instead of showing it.
+
 #Preview("Action cue") {
     var cue = Cue(uniqueID: "c")
     cue.number = "12.5"
     cue.name = "Thunder Crash"
+    cue.listName = "Thunder Crash"
     cue.type = "Audio"
-    cue.listName = "Main Cue List"
     cue.duration = 4.25
     cue.preWait = 1.5
     cue.continueMode = .autoContinue
@@ -306,9 +325,11 @@ struct DetailPillsRow: View {
     cue.isArmed = false
     cue.notes = "Hold for the door slam, then go on the lighting cue"
 
-    return DetailPillsRow(cue: cue, kinds: DetailPillKind.defaultOrder)
-        .padding(40)
-        .frame(width: 900)
+    return DetailPillsRow(
+        cue: cue, kinds: DetailPillKind.defaultOrder, cueListName: "Main Cue List"
+    )
+    .padding(40)
+    .frame(width: 900)
 }
 
 /// The outlined group pill, and the note wide on its own line.
@@ -319,12 +340,30 @@ struct DetailPillsRow: View {
     var cue = Cue(uniqueID: "g")
     cue.number = "13"
     cue.name = "Act Two Preset"
+    cue.listName = "Act Two Preset"
     cue.type = "Group"
-    cue.listName = "Main Cue List"
     cue.children = [child]
     cue.notes = "Fires the whole preset — check the deck is clear before this one"
 
-    return DetailPillsRow(cue: cue, kinds: DetailPillKind.defaultOrder)
-        .padding(40)
-        .frame(width: 900)
+    return DetailPillsRow(
+        cue: cue, kinds: DetailPillKind.defaultOrder, cueListName: "Main Cue List"
+    )
+    .padding(40)
+    .frame(width: 900)
+}
+
+/// An unnamed audio cue: QLab labels it with its file, and that is what the
+/// display should call it too — while the Cue List pill still names the list.
+#Preview("Unnamed cue") {
+    var cue = Cue(uniqueID: "u")
+    cue.number = "14"
+    cue.listName = "rain-loop.wav"
+    cue.type = "Audio"
+    cue.duration = 120
+
+    return DetailPillsRow(
+        cue: cue, kinds: DetailPillKind.defaultOrder, cueListName: "Effects"
+    )
+    .padding(40)
+    .frame(width: 900)
 }

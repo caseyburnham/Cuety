@@ -177,29 +177,48 @@ struct QLabReplyTests {
 
     // MARK: - Cue lists
 
+    /// A cue-list payload spelling `listName` the way QLab actually does.
+    ///
+    /// `listName` is the cue's *own displayed name* in the list, not the name
+    /// of the list containing it. The fixture used to set it to "Main Cue
+    /// List" on every cue, which is what let the Cue List pill read it as the
+    /// containing list and still pass its tests.
+    ///
+    /// `cue-3` is the interesting one: an audio cue the operator never named,
+    /// so QLab supplies the file as its display name.
+    private static let cueListsJSON = """
+    {"address":"/workspace/ABC/cueLists","status":"ok","data":[
+      {"uniqueID":"list-1","name":"Main Cue List","type":"Cue List","cues":[
+        {"uniqueID":"cue-1","number":"1","name":"House to Half","type":"Light",
+         "listName":"House to Half","colorName":"none","flagged":false,"armed":true},
+        {"uniqueID":"grp-1","number":"2","name":"Storm","type":"Group",
+         "listName":"Storm","flagged":true,"armed":true,"cues":[
+           {"uniqueID":"cue-2","number":"2.1","name":"Thunder","type":"Audio",
+            "listName":"Thunder","armed":true}
+         ]},
+        {"uniqueID":"cue-3","number":"3","name":"","type":"Audio",
+         "listName":"rain-loop.wav","armed":true}
+      ]},
+      {"uniqueID":"list-2","name":"Effects","type":"Cue List","cues":[
+        {"uniqueID":"cue-4","number":"90","name":"Panic","type":"Stop",
+         "listName":"Panic","armed":true}
+      ]}
+    ]}
+    """
+
     @Test("Decodes nested cue lists")
     func decodesCueLists() throws {
-        let json = """
-        {"address":"/workspace/ABC/cueLists","status":"ok","data":[
-          {"uniqueID":"list-1","name":"Main Cue List","type":"Cue List","cues":[
-            {"uniqueID":"cue-1","number":"1","name":"House to Half","type":"Light",
-             "listName":"Main Cue List","colorName":"none","flagged":false,"armed":true},
-            {"uniqueID":"grp-1","number":"2","name":"Storm","type":"Group",
-             "listName":"Main Cue List","flagged":true,"armed":true,"cues":[
-               {"uniqueID":"cue-2","number":"2.1","name":"Thunder","type":"Audio","armed":true}
-             ]}
-          ]}
-        ]}
-        """
-        let message = replyMessage(address: "/workspace/ABC/cueLists", json: json)
+        let message = replyMessage(
+            address: "/workspace/ABC/cueLists", json: Self.cueListsJSON
+        )
 
         let reply = try QLabReplyParser.parse(message, as: [Cue].self)
         let lists = try #require(reply.data)
 
-        #expect(lists.count == 1)
+        #expect(lists.count == 2)
         let list = lists[0]
         #expect(list.name == "Main Cue List")
-        #expect(list.children.count == 2)
+        #expect(list.children.count == 3)
 
         let first = list.children[0]
         #expect(first.number == "1")
@@ -213,6 +232,44 @@ struct QLabReplyTests {
         #expect(group.isFlagged == true)
         #expect(group.children.count == 1)
         #expect(group.children[0].number == "2.1")
+    }
+
+    @Test("The containing cue list comes from the tree, not from listName")
+    func containingCueListIsDerivedFromTheTree() throws {
+        let message = replyMessage(
+            address: "/workspace/ABC/cueLists", json: Self.cueListsJSON
+        )
+        let lists = try #require(QLabReplyParser.parse(message, as: [Cue].self).data)
+
+        // A top-level cue, a cue nested inside a group, and a cue in a second
+        // list. Under the old interpretation the first two would both have
+        // reported "House to Half" and "Thunder" as their cue lists.
+        #expect(lists.cueList(containing: "cue-1")?.displayName == "Main Cue List")
+        #expect(lists.cueList(containing: "cue-2")?.displayName == "Main Cue List")
+        #expect(lists.cueList(containing: "cue-4")?.displayName == "Effects")
+
+        // The group reports the list, not itself.
+        #expect(lists.cueList(containing: "grp-1")?.uniqueID == "list-1")
+
+        // A cue QLab has never heard of belongs to no list, rather than
+        // silently defaulting to one.
+        #expect(lists.cueList(containing: "nope") == nil)
+    }
+
+    @Test("An unnamed cue falls back to the name QLab displays for it")
+    func unnamedCueUsesQLabDisplayName() throws {
+        let message = replyMessage(
+            address: "/workspace/ABC/cueLists", json: Self.cueListsJSON
+        )
+        let lists = try #require(QLabReplyParser.parse(message, as: [Cue].self).data)
+        let named = try #require(lists.firstCue(withID: "cue-1"))
+        let unnamed = try #require(lists.firstCue(withID: "cue-3"))
+
+        // The operator's own name always wins.
+        #expect(named.displayName == "House to Half")
+        // With no name of their own, QLab's display name beats "Untitled".
+        #expect(unnamed.name?.isEmpty == true)
+        #expect(unnamed.displayName == "rain-loop.wav")
     }
 
     /// Unnumbered cues are legal in QLab, and the display has to cope.
