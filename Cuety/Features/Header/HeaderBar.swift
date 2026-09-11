@@ -17,45 +17,46 @@ struct StatusToolbarContent: ToolbarContent {
         // you tell the system these are two separate groupings.
         ToolbarSpacer(.fixed, placement: .primaryAction)
 
-        ToolbarItemGroup(placement: .primaryAction) {
-            ConnectionStatusIndicator()
+        // One `ToolbarItem` per button, rather than one item wrapping a view
+        // that returns both.
+        //
+        // These used to be a single `ConnectionStatusIndicator` whose body was
+        // a `Group` of two buttons inside one `ToolbarItemGroup`. The toolbar
+        // then saw *one* item holding custom content instead of two toolbar
+        // buttons, and custom content does not get the standard toolbar button
+        // treatment — the Liquid Glass press response included. Each button is
+        // now the direct content of its own item, which is how a toolbar is
+        // meant to be composed.
+        ToolbarItem(placement: .primaryAction) {
+            ActivityLogButton()
+        }
+
+        ToolbarItem(placement: .primaryAction) {
+            ConnectionStatusButton()
         }
     }
 }
 
-/// Adjacent controls for traffic activity and session status.
-struct ConnectionStatusIndicator: View {
+/// Opens the Activity Log, and beats once per received heartbeat.
+struct ActivityLogButton: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
 
     private var client: QLabClient { model.client }
-    private var status: ConnectionStatus { client.status }
 
     /// Whether there's a session that could produce a heartbeat at all.
-    private var isLive: Bool { status.hasLiveData }
+    private var isLive: Bool { client.status.hasLiveData }
 
     var body: some View {
-        Group {
-            Button {
-                openWindow(id: WindowID.activityLog.rawValue)
-            } label: {
-                heartbeat
-            }
-            .help("Activity Log. " + heartbeatHelpText)
-            .accessibilityLabel("Activity Log")
-            .accessibilityValue(heartbeatHelpText)
-            .accessibilityHint("Opens the activity log")
-
-            Button {
-                openWindow(id: WindowID.connectionInspector.rawValue)
-            } label: {
-                connection
-            }
-            .help("\(status.title). \(status.detail)")
-            .accessibilityLabel("Connection status")
-            .accessibilityValue(status.title)
-            .accessibilityHint("Opens the connection status window")
+        Button {
+            openWindow(id: WindowID.activityLog.rawValue)
+        } label: {
+            heartbeat
         }
+        .help("Activity Log. " + heartbeatHelpText)
+        .accessibilityLabel("Activity Log")
+        .accessibilityValue(heartbeatHelpText)
+        .accessibilityHint("Opens the activity log")
     }
 
     /// Beats once per received `/thump`.
@@ -82,26 +83,6 @@ struct ConnectionStatusIndicator: View {
             .animation(Motion.status, value: isLive)
     }
 
-    /// The session's state: symbol and tint both come from ``ConnectionStatus``,
-    /// so this glyph, the inspector, and the display's empty state cannot
-    /// disagree about what any given state looks like.
-    private var connection: some View {
-        Image(systemName: connectionSymbol)
-            .foregroundStyle(status.tint)
-            // `.replace` animates between two different symbols; the
-            // variable-color effect conveys ongoing work while connecting, and
-            // stops once settled.
-            .contentTransition(.symbolEffect(.replace))
-            .symbolEffect(.variableColor.iterative, isActive: status.isTransitional)
-            .animation(Motion.status, value: status)
-    }
-
-    private var connectionSymbol: String {
-        if case .offline = status { return "bolt.horizontal.circle" }
-        if case .needsPasscode = status { return "lock.fill" }
-        return status.systemImage
-    }
-
     private var heartTint: Color {
         guard isLive else { return .secondary }
         return client.missedThumps > 0 ? .orange : .pink
@@ -126,11 +107,53 @@ struct ConnectionStatusIndicator: View {
     }
 }
 
+/// Opens the connection inspector, and reports the session's state.
+struct ConnectionStatusButton: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
+
+    private var status: ConnectionStatus { model.client.status }
+
+    var body: some View {
+        Button {
+            openWindow(id: WindowID.connectionInspector.rawValue)
+        } label: {
+            // Symbol and tint both come from ``ConnectionStatus``, so this
+            // glyph, the inspector, and the display's empty state cannot
+            // disagree about what any given state looks like.
+            Image(systemName: connectionSymbol)
+                .foregroundStyle(status.tint)
+                // `.replace` animates between two different symbols; the
+                // variable-color effect conveys ongoing work while connecting,
+                // and stops once settled.
+                .contentTransition(.symbolEffect(.replace))
+                .symbolEffect(.variableColor.iterative, isActive: status.isTransitional)
+                .animation(Motion.status, value: status)
+        }
+        .help("\(status.title). \(status.detail)")
+        .accessibilityLabel("Connection status")
+        .accessibilityValue(status.title)
+        .accessibilityHint("Opens the connection status window")
+    }
+
+    private var connectionSymbol: String {
+        if case .offline = status { return "bolt.horizontal.circle" }
+        if case .needsPasscode = status { return "lock.fill" }
+        return status.systemImage
+    }
+}
+
 /// Toggles the keep-display-awake block.
 ///
-/// One stable symbol, because a toolbar toggle already shows its own on state:
-/// swapping the glyph as well would leave the operator guessing whether the
-/// icon reports the current state or the action a click would take.
+/// The glyph brightens with the state: `sun.min` when the display is free to
+/// sleep, `sun.max.fill` when it is being held awake, magic-replaced between
+/// the two so the rays grow rather than one symbol cutting to another.
+///
+/// This reverses an earlier decision to keep one stable symbol, on the
+/// reasoning that a toolbar toggle already shows its own on state and a
+/// changing glyph might read as the *action* rather than the state. In
+/// practice the brightness reads as state immediately — dim sun, bright sun —
+/// and the on state is the thing worth being able to see from across a booth.
 struct KeepAwakeToggle: View {
     @Environment(AppModel.self) private var model
 
@@ -144,10 +167,16 @@ struct KeepAwakeToggle: View {
             get: { isOn },
             set: { _ in model.toggleKeepAwake() }
         )) {
-            Label("Keep Display Awake", systemImage: "sun.max")
+            Label {
+                Text("Keep Display Awake")
+            } icon: {
+                Image(systemName: isOn ? "sun.max.fill" : "sun.min")
+                    .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp)))
+            }
         }
+        .animation(Motion.status, value: isOn)
         .help(isOn
-            ? "The display is being kept awake. Click to allow it to sleep."
-            : "The display can sleep. Click to keep it awake.")
+            ? "The display is being kept awake."
+            : "The display can sleep.")
     }
 }

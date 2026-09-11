@@ -6,7 +6,6 @@ struct WorkspaceSidebar: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var isAddingServer = false
     @State private var newHost = ""
     @State private var newPort = String(QLabServer.defaultPort)
     @State private var isConnecting = false
@@ -99,13 +98,15 @@ struct WorkspaceSidebar: View {
         .onChange(of: model.selection) { selectedRow = nil }
         .onChange(of: model.client.watchedCueListID) { selectedRow = nil }
         .listStyle(.sidebar)
+        // Let the window's own sidebar material through. A `List` draws an
+        // opaque background of its own by default, which sits on top of the
+        // translucency the system already provides and flattens it.
+        .scrollContentBackground(.hidden)
         .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             HStack {
                 Button {
-                    newHost = ""
-                    newPort = String(model.preferences.defaultPort)
-                    isAddingServer = true
+                    model.isAddingServer = true
                 } label: {
                     Label("Add Server…", systemImage: "plus")
                 }
@@ -113,30 +114,22 @@ struct WorkspaceSidebar: View {
                 Button {
                     Task { await model.refresh() }
                 } label: {
-                    // Magic-replaced into an indicator rather than spun. A
-                    // slowly rotating arrow reads as a stuck animation, and
-                    // says nothing about how long there is to wait.
+                    // The system's own indeterminate spinner, not a symbol
+                    // standing in for one.
                     //
-                    // `progress.indicator` is a symbol, which is what makes
-                    // this a real morph: a `ProgressView` is an
-                    // `NSProgressIndicator` and has nothing for `.replace` to
-                    // operate on. It is also the glyph `ConnectionStatus`
-                    // already uses for `connecting`, with the same effect on
-                    // it — so "Cuety is working" looks the same wherever it
-                    // appears.
-                    Label {
-                        Text("Refresh Everything")
-                    } icon: {
-                        Image(
-                            systemName: model.isRefreshing
-                                ? "progress.indicator"
-                                : "arrow.clockwise"
-                        )
-                        .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp)))
-                        .symbolEffect(
-                            .variableColor.iterative,
-                            isActive: model.isRefreshing && !reduceMotion
-                        )
+                    // Two earlier attempts got this wrong in the same way — a
+                    // rotating `arrow.clockwise`, then a magic replace into
+                    // `progress.indicator`. Both were glyphs *depicting*
+                    // progress. macOS already has the thing itself, everyone
+                    // recognises it, and it does not need to look like the
+                    // rest of Cuety to be understood.
+                    if model.isRefreshing {
+                        ProgressView()
+                            .controlSize(.small)
+                            .transition(.blurReplace)
+                    } else {
+                        Label("Refresh Connections", systemImage: "arrow.clockwise")
+                            .transition(.blurReplace)
                     }
                 }
                 .animation(reduceMotion ? nil : Motion.status, value: model.isRefreshing)
@@ -146,12 +139,12 @@ struct WorkspaceSidebar: View {
                 // rather than being ignored.
                 .help(model.isRefreshing
                     ? "Searching. Click again to start over."
-                    : "Refresh available workspaces and rebuild the current QLab connection.")
+                    : "Re-ask every server what it has open, and rebuild the current QLab connection.")
             }
             .padding(10)
             .background(.bar)
         }
-        .sheet(isPresented: $isAddingServer) {
+        .sheet(isPresented: Bindable(model).isAddingServer) {
             addServerSheet
         }
     }
@@ -303,7 +296,7 @@ struct WorkspaceSidebar: View {
             }
             HStack {
                 Spacer()
-                Button("Cancel", role: .cancel) { isAddingServer = false }
+                Button("Cancel", role: .cancel) { model.isAddingServer = false }
                     .keyboardShortcut(.cancelAction)
                 Button("Add", action: addServer)
                     .keyboardShortcut(.defaultAction)
@@ -312,7 +305,14 @@ struct WorkspaceSidebar: View {
         }
         .padding(20)
         .frame(width: 380)
-        .onAppear { hostIsFocused = true }
+        .onAppear {
+            // Reset here rather than in the button that opens the sheet, since
+            // ⌘K from the Connection menu opens it too and cannot reach this
+            // view's state. Both paths now get empty fields.
+            newHost = ""
+            newPort = String(model.preferences.defaultPort)
+            hostIsFocused = true
+        }
     }
 
     private var host: String { newHost.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -324,7 +324,7 @@ struct WorkspaceSidebar: View {
     private func addServer() {
         guard !host.isEmpty, let port else { return }
         let server = model.browser.addManualServer(host: host, port: port)
-        isAddingServer = false
+        model.isAddingServer = false
         probeWorkspaces(on: server)
     }
 

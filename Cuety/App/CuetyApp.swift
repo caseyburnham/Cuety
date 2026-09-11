@@ -34,6 +34,11 @@ struct CuetyApp: App {
                 .preferredColorScheme(model.preferences.appearance.colorScheme)
         }
         .defaultSize(width: 900, height: 560)
+        // Brings the cue display back after it has been closed. A `Window`
+        // scene contributes its own Window-menu item, and the shortcut binds
+        // to that item — ⌘0 because Mail uses it for the same job, reopening
+        // the one window the app is really about.
+        .keyboardShortcut("0", modifiers: .command)
         .commands {
             AppCommands(model: model)
         }

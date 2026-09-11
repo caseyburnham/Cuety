@@ -907,6 +907,76 @@ fix is aimed at a real failure. Prefer content-driven native layout throughout.
 - [x] The sidebar's Refresh button spun its glyph slowly enough to read as a stuck
       animation — now swaps to the standard indeterminate indicator (see `F12`'s
       2026-09-10 session notes).
+- [ ] **Toolbar buttons do not show the press/scale response.** Investigated at length on
+      2026-09-10 and concluded **not a Cuety defect** — see below. No action pending unless
+      new evidence appears.
+
+#### Toolbar press response — investigated, parked
+
+An operator reported that toolbar buttons never "grow a little" on click the way every
+other Mac app's do. Four hypotheses were tried and all four were wrong: a `Group` of two
+buttons inside one `ToolbarItemGroup` (fixed anyway — see below), `.animation(_:value:)`
+clamping the press transaction out of the label's subtree, press-time observable
+invalidation rebuilding the toolbar, and a design-system opt-out.
+
+What the evidence actually shows:
+
+- A **stock `Button` with a stock `Label` and no modifiers, in a plain `ToolbarItem`**, does
+  not respond. That rules out every per-button explanation.
+- All three windows are affected, including the Activity Log, which is a plain `Window`
+  with no `NavigationSplitView`.
+- The **system's own sidebar toggle** does not respond either, and Cuety does not create it.
+- `MACOSX_DEPLOYMENT_TARGET` is `27.0` against the current SDK; there is no
+  `UIDesignRequiresCompatibility` or equivalent opt-out in `MyApp/Info.plist` or the build
+  settings; no app-wide `buttonStyle`; every `.animation` uses the scoped `value:` form.
+- **The one toolbar control that behaves correctly is the Activity Log's segmented
+  `Picker`.** That is the tell: a `Picker` draws its own control chrome, while `Button` and
+  `Toggle` depend on the toolbar's glass treatment for theirs. The failure tracks exactly
+  that split.
+- Every app observed to behave correctly builds its toolbar with **AppKit**
+  `NSToolbarItem`, not SwiftUI's `ToolbarItem`. Finder, Mail and Xcode are AppKit outright.
+  CotEditor was raised as a SwiftUI counter-example and checked directly: it is a hybrid —
+  `DocumentWindowController` is an `NSToolbarDelegate` serving `NSToolbarItem`s
+  (`toolbar(_:itemForItemIdentifier:willBeInsertedIntoToolbar:)`), and SwiftUI appears only
+  as `NSHostingView` content *inside* those items. Its toolbar buttons therefore take
+  AppKit's path too.
+
+So the dividing line is not app-by-app, it is **AppKit `NSToolbarItem` vs SwiftUI
+`ToolbarItem`** — the one thing every failing control in Cuety shares and no working
+example does.
+
+That is consistent with filed reports of macOS 26+ toolbar glass problems affecting system
+toolbar buttons while custom `.glassEffect()` views are unaffected, including
+`NSGlassContainerView` intercepting hit-testing inside `NSToolbarView` and hit regions
+smaller than the visual capsule — which is also the best available explanation for the
+oddest symptom: clicking just outside a button pops the glass but does not invoke it, while
+clicking the glyph invokes it without a pop. Two different responders own those two
+regions.
+
+Kept from the investigation because it is correct regardless: `ConnectionStatusIndicator`
+was one `View` returning a `Group` of two `Button`s inside a single `ToolbarItemGroup`, so
+the toolbar saw one item of custom content rather than two toolbar buttons. It is now
+`ActivityLogButton` and `ConnectionStatusButton`, one `ToolbarItem` each.
+
+**Options, none of them free:**
+
+1. **Leave it and file a Feedback Assistant report.** Costs nothing, fixes nothing, and is
+   the only option that does not add code. Revisit when the SDK changes.
+2. **Host an AppKit `NSToolbar`** via an `NSWindow`/`NSToolbarDelegate` bridge, the way
+   CotEditor does. This is the option that demonstrably works — and it means an AppKit
+   window controller under a SwiftUI app for the sake of one animation. A large,
+   load-bearing change.
+3. **Hand-roll a scale-on-press `ButtonStyle`.** Rejected: a bespoke imitation of system
+   behaviour, which is exactly what this project avoids, and it would not fix the
+   hit-testing half of the symptom.
+
+Recorded as parked on option 1 unless the operator decides the press response is worth
+option 2.
+
+*Four wrong hypotheses before the right question got asked.* The one that finally split the
+problem open was not about Cuety at all — "does any **SwiftUI** toolbar do this correctly?"
+Checking the counter-example's source rather than trusting its reputation is what settled
+it.
 
 **Done when:** every exposed setting produces a visible, predictable result, and no layout
 truncates or overflows at the window sizes in `V10`/`V11`.

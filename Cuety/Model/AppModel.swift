@@ -33,6 +33,13 @@ final class AppModel {
     /// front made the same claim about machines that had not been asked yet.
     private(set) var refreshingServerIDs: Set<String> = []
 
+    /// Whether the Add Server sheet is up.
+    ///
+    /// Owned here rather than by the sidebar because two things open it — the
+    /// sidebar's button and ⌘K from the Connection menu — and a menu command
+    /// cannot reach a view's local state.
+    var isAddingServer = false
+
     // MARK: Passcode prompting
 
     /// Set when a workspace needs a passcode we don't have, or rejected the one
