@@ -348,12 +348,9 @@ revive obsolete state.
 **Phase exit criterion.** No code path can resurrect a session or overwrite fresh state
 with the result of an operation that has been superseded.
 
-**Status: met, and signed off.** All four items implemented and every sub-item closed;
-211 tests passing. Landed as `b75a758`.
-
-The one caveat carried forward: `F9`'s two recovery *branches* are covered at the policy
-level only — see `F9`. `V7`, against real QLab, is still the only thing that exercises the
-wiring between a report and the branch it selects.
+**Status: met, and signed off.** All four items implemented, every sub-item closed, and no
+caveats outstanding; 213 tests passing. Landed as `b75a758`, verified as `14a4356`, with
+`F9`'s recovery branches covered as of the commit following.
 
 ---
 
@@ -540,11 +537,24 @@ repeat inside the window, loss after the window, the window boundary in both dir
 two losses in one instant, and a cleared history after an escalation (the rule that makes
 teardown resetting `lastOverflowRecovery` correct rather than incidental).
 
-**Still not covered end to end:** the *wiring* between a report and the branch it selects.
-Reaching that needs `QLabClient`'s own event consumer stalled, which nothing outside the
-client can do without a hook that fakes the trigger — and a faked trigger tests the fake.
-What remains uncovered is now straight-line delegation rather than the decision itself.
-`V7` is still the only thing that exercises a real burst against real QLab.
+**Covered end to end, in two halves that meet at a seam.** A real overflow cannot be
+provoked from outside `QLabClient` — it needs that class's own event consumer stalled — and
+a hook that faked the trigger would only prove the hook worked. So the coverage meets in
+the middle at `handleEventLoss(_:)`, which is internal rather than private for exactly
+that reason:
+
+- **Trigger → report:** `stalledConsumerOverflowIsReported` overflows a real buffer with a
+  reader that genuinely stalls, and asserts the count and the coalescing.
+- **Report → effect:** `firstEventLossRefetchesCueData` changes the peer's show *without
+  notifying*, which is precisely what a dropped update means, then reports a loss and
+  asserts the new cue appears — which can only happen if the tree was really refetched.
+  `repeatEventLossRebuildsTheSession` lets the first recovery finish, reports a second loss
+  inside the window, and asserts the peer sees a **new socket** — a refetch reuses the one
+  it has, so only a rebuild can produce that.
+
+Both effect tests assert observable consequences rather than that a method ran, so neither
+can pass vacuously. `V7` against real QLab remains worthwhile as the only end-to-end burst,
+but it is no longer the only thing standing between this policy and a regression.
 
 ---
 

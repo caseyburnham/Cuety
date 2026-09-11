@@ -452,7 +452,25 @@ final class QLabClient {
     /// ``recovery(after:at:)``'s decision — see ``EventLossRecovery`` for the
     /// two outcomes and why a repeat escalates.
     private func handleEventsDropped(_ lost: Int, on connection: QLabConnection) {
+        // A report from a socket that has since been replaced describes a
+        // session that no longer exists.
         guard self.connection === connection else { return }
+        handleEventLoss(lost)
+    }
+
+    /// How long to let a burst settle before recovering from it.
+    private static let overflowRecoveryDelay: Duration = .milliseconds(250)
+
+    /// Records event loss against the current session and schedules recovery.
+    ///
+    /// Internal rather than private, deliberately: this is the seam where the
+    /// feature's two halves of coverage meet. That a real overflow is detected
+    /// and reported is proved against ``QLabConnection`` with a reader that
+    /// genuinely stalls; what happens to the session once a report lands is
+    /// proved by calling this and watching the session. Neither half fakes
+    /// what the other establishes, and nothing pretends an overflow happened.
+    func handleEventLoss(_ lost: Int) {
+        guard let connection else { return }
 
         droppedEventCount += lost
         logger.warning(
@@ -463,7 +481,7 @@ final class QLabClient {
         // arriving and recovering into it would only overflow again.
         overflowRecoveryTask?.cancel()
         overflowRecoveryTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(250))
+            try? await Task.sleep(for: Self.overflowRecoveryDelay)
             guard !Task.isCancelled, let self else { return }
             await self.recoverFromEventLoss(on: connection)
         }

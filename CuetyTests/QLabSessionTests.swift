@@ -635,6 +635,107 @@ struct QLabDisconnectTests {
         #expect(!log.entries.contains { $0.address == "/disconnect" })
     }
 
+    /// Cue data that changed in QLab while Cuety was not listening — which is
+    /// exactly what a dropped update means — is recovered by refetching.
+    @Test("A first event loss resynchronizes the cue data")
+    func firstEventLossRefetchesCueData() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = [
+            .init(
+                id: "L1",
+                name: "Main",
+                cues: [.init(id: "C1", number: "1", name: "House to Half")],
+                playheadCueID: "C1"
+            ),
+        ]
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let client = QLabClient(preferences: try makePreferences(), log: ActivityLog())
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.status == .connected)
+        try #require(client.cueLists.first?.children.count == 1)
+
+        // The show gains a cue, and QLab's notification is the event that got
+        // dropped. Cuety cannot know what it missed — only that it missed
+        // something.
+        peer.cueLists = [
+            .init(
+                id: "L1",
+                name: "Main",
+                cues: [
+                    .init(id: "C1", number: "1", name: "House to Half"),
+                    .init(id: "C2", number: "2", name: "Thunder Crash"),
+                ],
+                playheadCueID: "C1"
+            ),
+        ]
+
+        client.handleEventLoss(1)
+
+        // Asserting the *effect*, not that a method was called: the second cue
+        // can only appear here if the cue tree was genuinely refetched.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while client.cueLists.first?.children.count != 2, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(client.cueLists.first?.children.count == 2)
+        #expect(client.droppedEventCount == 1)
+        // Resynchronizing keeps the session; it does not rebuild it.
+        #expect(client.status == .connected)
+    }
+
+    @Test("A second event loss inside the window rebuilds the session")
+    func repeatEventLossRebuildsTheSession() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = Self.populatedShow
+        defer { peer.stop() }
+        let log = ActivityLog()
+        let port = try await peer.start()
+        let client = QLabClient(preferences: try makePreferences(), log: log)
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.status == .connected)
+
+        func cueListRequests() -> Int {
+            log.entries.filter {
+                $0.direction == .outbound && $0.address.hasSuffix("/cueLists")
+            }.count
+        }
+        let handshakeRequests = cueListRequests()
+
+        // First loss: resynchronize. Let it finish, or the second report would
+        // simply supersede this recovery instead of escalating past it.
+        client.handleEventLoss(1)
+        let resynced = ContinuousClock.now + .seconds(5)
+        while cueListRequests() == handshakeRequests, ContinuousClock.now < resynced {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(cueListRequests() > handshakeRequests)
+
+        // Second loss, well inside the escalation window: refetching did not
+        // hold, which is what a lapsed subscription looks like, so the socket
+        // and both subscriptions get rebuilt.
+        let socketsBefore = peer.connectionCount
+        client.handleEventLoss(1)
+
+        // A new socket on the peer is the observable proof of a rebuild — a
+        // refetch reuses the one it has.
+        let rebuilt = ContinuousClock.now + .seconds(5)
+        while peer.connectionCount == socketsBefore, ContinuousClock.now < rebuilt {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(peer.connectionCount > socketsBefore)
+
+        let settled = ContinuousClock.now + .seconds(5)
+        while client.status != .connected, ContinuousClock.now < settled {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(client.status == .connected)
+        #expect(client.isSubscribedToUpdates)
+        #expect(client.currentPlayheadCueID == "C1")
+    }
+
     @Test("Reconnecting keeps the cue list the operator was watching")
     func reconnectKeepsWatchedCueList() async throws {
         let peer = try AuthorizationPeer()
