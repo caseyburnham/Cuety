@@ -700,11 +700,16 @@ discovered servers miss that refresh's workspace probes.
 *Evidence:* `Cuety/Model/QLabServer.swift:46`, `Cuety/Networking/QLabBrowser.swift:156`,
 `Cuety/Model/AppModel.swift:143`.
 
-- [ ] Define a canonical server identity, separate from the display name.
-- [ ] Normalize manual host entry into that identity, including localhost aliases.
-- [ ] De-duplicate the UI on identity rather than name.
-- [x] Give discovery a clear lifecycle so servers found during a refresh are probed by it.
-- [ ] Test equivalent host spellings and a server discovered mid-refresh.
+- [x] Define a canonical server identity, separate from the display name.
+- [x] Normalize manual host entry into that identity, including localhost aliases.
+- [x] De-duplicate the UI on identity rather than name.
+- [ ] Give discovery a clear lifecycle so servers found during a refresh are probed by it.
+      **Previously ticked in error.** Phase 2 gave probes per-server *ownership*, which is
+      a different thing: `performRefresh` still snapshots `browser.servers` immediately
+      after `restartBrowsing()`, and Bonjour answers asynchronously, so anything found
+      during the pass goes unprobed.
+- [x] Test equivalent host spellings.
+- [ ] Test a server discovered mid-refresh.
 
 **Done when:** the same server entered two ways appears once, and a server discovered
 during a refresh gets its workspace probe.
@@ -769,12 +774,35 @@ control for that position.
 `skippedServersAreNotClobbered` was retired — with nothing skipped any more its premise no
 longer exists.
 
-**Still open from this session:** manual identity. `QLabServer.localhost()` has id
-`localhost:53000` while its endpoint host is `127.0.0.1`, so `manual(host: "127.0.0.1",
-port: 53000)` produces id `127.0.0.1:53000` — a second row for the same machine that the
-localhost filter in `loadManualServers` cannot match. That is the first three bullets
-above, and it is reachable by hand today: add `127.0.0.1` as a server and This Mac appears
-twice.
+**Manual identity — closed 2026-09-11.** `QLabServer.identity(host:port:)` is now the
+canonical form, separate from `name`, which stays whatever the operator typed.
+
+Folded away as spelling: case, surrounding whitespace, the DNS root dot, IPv6 brackets, and
+every alias for this machine — `localhost`, `127.0.0.1`, `::1` and its expansions, plus
+this Mac's own sharing and DNS names with or without `.local`. The port is *kept*, because
+two QLab instances on one machine are genuinely two servers.
+
+`127.0.0.1:53000` canonicalises to `localhost:53000` deliberately: that is the spelling the
+built-in entry has always used and the one persisted as `lastServerID`, so an existing
+remembered workspace still matches. It also means `loadManualServers`' localhost filter now
+catches the junk rows it previously let through — the four stale entries could not
+accumulate again.
+
+De-duplication moved out of the display. `QLabBrowser.apply(results:)` merges on
+`QLabServer.id` with manual entries winning, so one machine is one row however it was
+found; `bonjourServers` no longer filters by comparing *names*, which was identity by
+string match in the view layer. This Mac's own Bonjour advertisement collapses onto the
+built-in entry.
+
+**Known limit, deliberately not solved:** a *remote* machine discovered by Bonjour and also
+added by hand as an IP address still appears twice. Unifying them needs address resolution,
+and Cuety leaves resolution to the system at connect time on purpose. There is a test
+asserting the current behaviour so the limit is visible rather than surprising.
+
+*Tests:* `CuetyTests/ServerIdentityTests.swift`, 17 cases — nine spellings of this Mac,
+case and root-dot folding, port-as-identity, distinct hosts staying distinct, name kept
+separate from identity, adding `127.0.0.1` returning the existing "This Mac" row, and the
+remote Bonjour-vs-manual limit.
 
 ---
 

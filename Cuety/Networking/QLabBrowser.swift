@@ -99,18 +99,32 @@ final class QLabBrowser {
             servers.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        var merged = discovered.map { server -> QLabServer in
+
+        // Manual entries first, and they win on identity: "This Mac" is the
+        // operator's own row and must not be displaced by the same machine
+        // arriving over Bonjour. Deduplicating here rather than in the sidebar
+        // is what makes one machine one row no matter how it was found — the
+        // display used to filter discovered servers by comparing *names*,
+        // which was a guess dressed up as identity.
+        var merged: [QLabServer] = []
+        var seen: Set<String> = []
+
+        for server in servers where server.source == .manual {
+            guard seen.insert(server.id).inserted else { continue }
+            merged.append(server)
+        }
+
+        for server in discovered {
+            guard seen.insert(server.id).inserted else { continue }
             var server = server
             if let known = existing[server.id] {
                 server.workspaces = known.workspaces
                 server.lastError = known.lastError
                 server.hasBeenProbed = known.hasBeenProbed
             }
-            return server
+            merged.append(server)
         }
 
-        let manual = servers.filter { $0.source == .manual }
-        merged.append(contentsOf: manual)
         servers = merged
     }
 
@@ -157,32 +171,16 @@ final class QLabBrowser {
 
     // MARK: - Grouping
 
-    var bonjourServers: [QLabServer] {
-        let manualHosts = Set(
-            manualServers.map { Self.normalizedHost($0.name) }
-        )
-        let localComputerNames = Set([
-            Host.current().localizedName,
-            ProcessInfo.processInfo.hostName
-        ].compactMap { $0 }.map(Self.normalizedHost))
-
-        return servers.filter {
-            $0.source == .bonjour
-                && !manualHosts.contains(Self.normalizedHost($0.name))
-                && !localComputerNames.contains(Self.normalizedHost($0.name))
-        }
-    }
+    /// Discovered servers, with no filtering of its own.
+    ///
+    /// This used to exclude anything whose *name* matched a manual entry or
+    /// one of this Mac's names, which was identity by string comparison in the
+    /// display layer. ``apply(results:)`` now deduplicates on
+    /// ``QLabServer/id``, so by the time a server reaches here it is already
+    /// the only entry for its machine.
+    var bonjourServers: [QLabServer] { servers.filter { $0.source == .bonjour } }
 
     var manualServers: [QLabServer] { servers.filter { $0.source == .manual } }
-
-    private static func normalizedHost(_ host: String) -> String {
-        host
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .split(separator: ".")
-            .dropLast("local" == host.split(separator: ".").last?.lowercased() ? 1 : 0)
-            .joined(separator: ".")
-    }
 
     // MARK: - Persistence
 
