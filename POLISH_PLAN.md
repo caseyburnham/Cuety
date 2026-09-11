@@ -703,13 +703,10 @@ discovered servers miss that refresh's workspace probes.
 - [x] Define a canonical server identity, separate from the display name.
 - [x] Normalize manual host entry into that identity, including localhost aliases.
 - [x] De-duplicate the UI on identity rather than name.
-- [ ] Give discovery a clear lifecycle so servers found during a refresh are probed by it.
-      **Previously ticked in error.** Phase 2 gave probes per-server *ownership*, which is
-      a different thing: `performRefresh` still snapshots `browser.servers` immediately
-      after `restartBrowsing()`, and Bonjour answers asynchronously, so anything found
-      during the pass goes unprobed.
+- [x] Give discovery a clear lifecycle so servers found during a refresh are probed by it.
+      *Was ticked in error once — see below.*
 - [x] Test equivalent host spellings.
-- [ ] Test a server discovered mid-refresh.
+- [x] Test a server discovered mid-refresh.
 
 **Done when:** the same server entered two ways appears once, and a server discovered
 during a refresh gets its workspace probe.
@@ -803,6 +800,27 @@ asserting the current behaviour so the limit is visible rather than surprising.
 case and root-dot folding, port-as-identity, distinct hosts staying distinct, name kept
 separate from identity, adding `127.0.0.1` returning the existing "This Mac" row, and the
 remote Bonjour-vs-manual limit.
+
+**Discovery lifecycle — closed 2026-09-11, after being ticked in error.** This item was
+marked done during Phase 2 on the strength of work that did not address it: probes gained
+per-server *ownership*, which stops a superseded probe clobbering a fresher one, but
+`performRefresh` still took `browser.servers` once immediately after `restartBrowsing()`.
+Bonjour answers asynchronously, so a machine appearing mid-pass was never asked, and showed
+"Check for Workspaces" *immediately after a refresh* — which reads as the refresh having
+skipped it.
+
+Now probed in up to `refreshDiscoveryPasses` (3) passes, each asking only what the previous
+ones did not, so a server present from the start is still asked exactly once. Bounded
+deliberately: the point is to catch machines found *during* the pass, not to wait for the
+network to settle — that would hold the refresh indicator on, and a second press of Refresh
+is the honest way to ask again.
+
+*Test:* `serversFoundMidRefreshAreProbed`, and it was **falsified before being trusted** —
+with `refreshDiscoveryPasses` temporarily set to 1 it fails, with 3 it passes. It also had
+to be rewritten once: the first version added the server *before* the refresh task actually
+began (`Task { }` only schedules) so it passed against the very snapshotting it was meant
+to catch. It now blocks the first pass on an unroutable documentation-range address to open
+a real window.
 
 ---
 

@@ -210,6 +210,17 @@ final class AppModel {
         await task.value
     }
 
+    /// How many times a refresh re-checks for servers that appeared while it
+    /// was running.
+    ///
+    /// Bounded, and low. Each pass costs a round trip per newly found server,
+    /// and the point is only to catch machines Bonjour reported *during* the
+    /// first pass — not to sit and wait for the network to settle, which would
+    /// hold the refresh indicator on and is what a second press of Refresh is
+    /// for. Servers appearing after the last pass are left showing "Check for
+    /// Workspaces", which is honest.
+    private static let refreshDiscoveryPasses = 3
+
     private var refreshTask: Task<Void, Never>?
 
     /// Which refresh owns `isRefreshing`, so a superseded pass finishing late
@@ -223,15 +234,30 @@ final class AppModel {
 
         browser.restartBrowsing()
 
-        let targets = browser.servers
+        // Probed in passes rather than from one snapshot, because the list
+        // grows while this runs: `restartBrowsing()` above deliberately
+        // re-asks the network and Bonjour answers asynchronously, so a machine
+        // can appear halfway through. Taking the list once left those servers
+        // showing "Check for Workspaces" *immediately after a refresh*, which
+        // reads as the refresh having skipped them.
+        //
+        // Each pass only probes what the previous ones did not, so a server
+        // present from the start is still asked exactly once.
+        var probed: Set<String> = []
 
-        for target in targets {
-            // Checked before each request, not just at the top. A cancelled
-            // launch sequence — the operator disconnecting inside the
-            // auto-connect window — must stop asking, not work through the
-            // rest of the network first.
-            guard !Task.isCancelled else { return }
-            await probeWorkspaces(on: target)
+        for _ in 0..<Self.refreshDiscoveryPasses {
+            let pending = browser.servers.filter { !probed.contains($0.id) }
+            guard !pending.isEmpty else { break }
+
+            for target in pending {
+                // Checked before each request, not just at the top. A cancelled
+                // launch sequence — the operator disconnecting inside the
+                // auto-connect window — must stop asking, not work through the
+                // rest of the network first.
+                guard !Task.isCancelled else { return }
+                probed.insert(target.id)
+                await probeWorkspaces(on: target)
+            }
         }
 
         guard !Task.isCancelled else { return }

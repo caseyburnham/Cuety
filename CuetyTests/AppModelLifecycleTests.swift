@@ -10,14 +10,23 @@ import Testing
 struct AppModelLifecycleTests {
     private func makeModel(
         autoConnect: Bool = false,
-        lastWorkspace: WorkspaceSelection? = nil
+        lastWorkspace: WorkspaceSelection? = nil,
+        requestTimeout: TimeInterval? = nil
     ) throws -> AppModel {
         let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
         let preferences = Preferences(defaults: defaults)
         preferences.autoConnect = autoConnect
         preferences.lastWorkspace = lastWorkspace
+        if let requestTimeout { preferences.requestTimeout = requestTimeout }
         return AppModel(preferences: preferences)
     }
+
+    /// Addresses from the documentation range, which cannot be routed.
+    ///
+    /// A probe against one parks until the request timeout, which is how a
+    /// test gets a refresh to stay in flight long enough to do something to it.
+    private static let unroutableHost = "192.0.2.1"
+    private static let otherUnroutableHost = "192.0.2.2"
 
     @Test("Starting twice performs the launch sequence once")
     func startIsIdempotent() throws {
@@ -87,6 +96,38 @@ struct AppModelLifecycleTests {
         // running here, which is not this test's business. That it was asked
         // at all is.
         #expect(model.browser.server(withID: localhostID)?.hasBeenProbed == true)
+    }
+
+    @Test("A server that appears mid-refresh is probed by that refresh")
+    func serversFoundMidRefreshAreProbed() async throws {
+        let model = try makeModel(requestTimeout: 1)
+
+        // Something slow to probe, so the refresh is still working when the
+        // new server turns up. `Task { }` only *schedules* the refresh, so
+        // without this the addition below would land before the refresh body
+        // ran at all — and the test would pass against the snapshotting
+        // version it is meant to catch.
+        let blocking = model.browser.addManualServer(host: Self.unroutableHost, port: 53000)
+
+        let refreshing = Task { await model.refresh() }
+        try await Task.sleep(for: .milliseconds(200))
+        try #require(model.isRefreshing)
+
+        // Stands in for Bonjour reporting a machine partway through, which is
+        // the ordinary case: discovery is asynchronous and `restartBrowsing()`
+        // deliberately re-asks the network.
+        let late = model.browser.addManualServer(
+            host: Self.otherUnroutableHost, port: 53000
+        )
+        try #require(late.id != blocking.id)
+
+        await refreshing.value
+
+        // Asked at all is the claim. Whether it answered depends on there
+        // being a QLab at that address, which is not this test's business —
+        // and there is not, by construction.
+        #expect(model.browser.server(withID: late.id)?.hasBeenProbed == true)
+        #expect(model.browser.server(withID: blocking.id)?.hasBeenProbed == true)
     }
 
     @Test("Refresh stays available while a refresh is running")
