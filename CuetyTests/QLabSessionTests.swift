@@ -736,6 +736,92 @@ struct QLabDisconnectTests {
         #expect(client.currentPlayheadCueID == "C1")
     }
 
+    /// A show whose standing-by cue has detail values, so the pills have
+    /// something to lose.
+    private static func showWithDetails(
+        duration: Double, notes: String
+    ) -> [AuthorizationPeer.CueListStub] {
+        [
+            .init(
+                id: "L1",
+                name: "Main",
+                cues: [
+                    .init(
+                        id: "C1",
+                        number: "1",
+                        name: "House to Half",
+                        duration: duration,
+                        notes: notes
+                    ),
+                ],
+                playheadCueID: "C1"
+            ),
+        ]
+    }
+
+    @Test("Editing a cue does not leave the detail pills blank")
+    func cueEditKeepsDetailPillsPopulated() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = Self.showWithDetails(duration: 4.25, notes: "Hold for the door")
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let client = QLabClient(preferences: try makePreferences(), log: ActivityLog())
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.status == .connected)
+
+        // The pills are populated, which is the state that used to be lost.
+        try #require(client.playheadCue?.duration == 4.25)
+        try #require(client.playheadCue?.notes == "Hold for the door")
+
+        // The operator edits the cue in QLab. QLab reports the edit as a
+        // `cue_id` update and Cuety refetches the tree — and `/cueLists`
+        // carries none of these values, so a refetch that stopped there
+        // replaced a populated cue with a bare one.
+        peer.cueLists = Self.showWithDetails(duration: 9.5, notes: "Hold for the slam")
+        peer.push(OSCMessage("/update/workspace/W/cue_id/C1"))
+
+        let deadline = ContinuousClock.now + .seconds(5)
+        while client.playheadCue?.duration != 9.5, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        // Repopulated, and with the *new* values rather than the carried-over
+        // old ones: carrying forward only avoids the blank flicker, the
+        // refetch is what makes them true.
+        #expect(client.playheadCue?.duration == 9.5)
+        #expect(client.playheadCue?.notes == "Hold for the slam")
+    }
+
+    @Test("An unrelated cue edit never blanks the pills, even for an instant")
+    func cueEditDoesNotFlickerThePills() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = Self.showWithDetails(duration: 4.25, notes: "Hold for the door")
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let client = QLabClient(preferences: try makePreferences(), log: ActivityLog())
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.playheadCue?.duration == 4.25)
+
+        // Watch the value across the whole refetch. An edit elsewhere in the
+        // workspace refetches the entire tree, and on a stage display the
+        // pills dropping out for a round trip is a visible flicker caused by
+        // something that had nothing to do with the cue being shown.
+        let blanked = Task { @MainActor in
+            var sawBlank = false
+            for _ in 0..<200 {
+                if client.playheadCue?.duration == nil { sawBlank = true }
+                try? await Task.sleep(for: .milliseconds(5))
+            }
+            return sawBlank
+        }
+
+        peer.push(OSCMessage("/update/workspace/W/cue_id/C1"))
+        #expect(await blanked.value == false)
+        #expect(client.playheadCue?.duration == 4.25)
+    }
+
     @Test("Reconnecting keeps the cue list the operator was watching")
     func reconnectKeepsWatchedCueList() async throws {
         let peer = try AuthorizationPeer()
@@ -786,6 +872,14 @@ private final class AuthorizationPeer {
         let id: String
         let number: String
         let name: String
+        /// What `valuesForKeys` answers for this cue.
+        ///
+        /// Deliberately separate from the fields above: `/cueLists` does not
+        /// report duration, waits, notes or continue mode, and a peer that
+        /// served them together could not reproduce the detail pills blanking
+        /// after a cue edit.
+        var duration: Double?
+        var notes: String?
     }
 
     private let listener: NWListener
@@ -926,14 +1020,30 @@ private final class AuthorizationPeer {
         case "thump":
             return (denyHeartbeat ? "denied" : "ok", "thump")
         default:
+            let parts = method.split(separator: "/")
+            guard parts.count == 3, parts[0] == "cue_id" else {
+                return ("ok", NSNull())
+            }
+
             // `/workspace/<id>/cue_id/<listID>/playbackPositionID`, which is
             // what puts a cue on the display: without it a populated show
             // still has nothing standing by.
-            let parts = method.split(separator: "/")
-            if parts.count == 3, parts[0] == "cue_id", parts[2] == "playbackPositionID" {
+            if parts[2] == "playbackPositionID" {
                 let list = cueLists.first { $0.id == String(parts[1]) }
                 return ("ok", list?.playheadCueID ?? "none")
             }
+
+            // `…/cue_id/<cueID>/valuesForKeys`, which is the *only* place the
+            // detail pills' values come from — `/cueLists` never carries them.
+            if parts[2] == "valuesForKeys" {
+                let cueID = String(parts[1])
+                let cue = cueLists.lazy.flatMap(\.cues).first { $0.id == cueID }
+                var values: [String: Any] = [:]
+                if let duration = cue?.duration { values["duration"] = duration }
+                if let notes = cue?.notes { values["notes"] = notes }
+                return ("ok", values)
+            }
+
             return ("ok", NSNull())
         }
     }

@@ -506,9 +506,9 @@ final class QLabClient {
 
         case .resynchronize:
             logger.info("Resynchronizing after event loss")
-            try? await refreshCueLists()
-            guard self.connection === connection else { return }
-            await refreshPlayheadCueDetails()
+            // The same sequence as everywhere else: what was lost might have
+            // been a cue edit, so the details have to be refetched too.
+            try? await refreshCueData()
         }
     }
 
@@ -595,18 +595,24 @@ final class QLabClient {
         isSubscribedToUpdates = updatesReply.status.isSuccess
             && playheadReply.status.isSuccess
 
-        // 7. Fetch the cue lists, and with them the current playheads.
-        try await refreshCueLists()
+        // 7. Fetch the cue tree, every list's playhead, and the detail values
+        //    for wherever the playhead already sits — one sequence, the same
+        //    one every other trigger uses. See ``refreshCueData()``.
+        //
+        //    Deliberately all of it before `status = .connected`. This costs
+        //    one more round trip on the way in, which on a show network is
+        //    milliseconds, and in exchange the display appears complete
+        //    instead of appearing and then filling its pills in a beat later.
+        //    It also keeps the handshake out of the business of being a
+        //    special case: a sequence split around `status` would be one the
+        //    generation guard could not see the ends of.
+        try await refreshCueData()
         guard self.connection === connection else { throw RequestFailure.disconnected }
 
         connectedSince = Date()
         backoffAttempt = 0
         status = .connected
         startHeartbeat()
-
-        // 8. Fill in the detail pills for wherever the playhead already is,
-        //    rather than leaving them blank until the next cue.
-        await refreshPlayheadCueDetails()
 
         logger.info("Connected to workspace \(match.displayName, privacy: .public)")
         _ = connection
@@ -1073,6 +1079,13 @@ final class QLabClient {
                 let listID = tail[1]
                 setPlayhead(message.arguments.first?.stringValue, forCueListID: listID)
                 if watchedCueListID == nil { watchedCueListID = listID }
+
+                // The tree has not changed, so this needs details only — but
+                // it does need them. The broadcast path already refetched
+                // them; this one did not, so a playhead moving on a QLab that
+                // reports it this way left the pills describing the previous
+                // cue.
+                await refreshPlayheadCueDetails()
             }
 
         default:
@@ -1088,13 +1101,41 @@ final class QLabClient {
         cueListRefreshTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled, let self else { return }
-            try? await self.refreshCueLists()
+            // The whole sequence, not just the tree. This path is what QLab
+            // pushes on every cue edit, and stopping at the tree is what left
+            // the detail pills blank after one.
+            try? await self.refreshCueData()
         }
     }
 
-    /// Refetching a single cue is handled in Milestone 5, where the cue graph
-    /// knows whether the cue is on screen and therefore worth a round trip.
     // MARK: - Cue data
+
+    /// Which cue-data sequence is current, so a superseded one cannot apply
+    /// its details on top of a newer tree.
+    private var cueDataGeneration = 0
+
+    /// The one order cue data is fetched in: the cue tree, then every list's
+    /// playhead, then the detail values for the cue actually on screen.
+    ///
+    /// Every trigger goes through here — the handshake, a `/updates` push, and
+    /// overflow recovery — because the three steps are not independent.
+    /// `/cueLists` carries the tree and nothing else: duration, pre- and
+    /// post-wait, notes and continue mode come from `valuesForKeys` for one
+    /// cue at a time. A path that refetched the tree and stopped therefore
+    /// replaced populated cues with bare ones and blanked the detail pills
+    /// until something unrelated happened to ask again — which is exactly what
+    /// editing a cue in QLab used to do.
+    func refreshCueData() async throws {
+        cueDataGeneration += 1
+        let generation = cueDataGeneration
+
+        try await refreshCueLists()
+
+        // A newer sequence started while the tree was in flight. Its tree is
+        // the current one, and its details are the ones that belong on top.
+        guard generation == cueDataGeneration else { return }
+        await refreshPlayheadCueDetails()
+    }
 
     func refreshCueLists() async throws {
         guard let workspaceID = workspace?.uniqueID else { return }
@@ -1102,7 +1143,27 @@ final class QLabClient {
             OSCMessage("/workspace/\(workspaceID)/cueLists"),
             as: [Cue].self
         )
-        cueLists = reply.data ?? []
+        var refreshed = reply.data ?? []
+
+        // Carry the detail values for the cue on screen across the
+        // replacement, then let ``refreshCueData()`` refetch them.
+        //
+        // Both halves matter. Without the refetch the pills would keep showing
+        // whatever was true before the edit, which on a cue the operator just
+        // changed is the worst kind of wrong. Without the carry-forward they
+        // would blank for a round trip every time any cue in the workspace
+        // changed — a visible flicker on a stage display, caused by an edit
+        // that may have had nothing to do with the cue being shown.
+        //
+        // Only the playhead cue is carried because only the playhead cue ever
+        // has details: they are fetched one cue at a time, for the one on
+        // screen.
+        if let cueID = currentPlayheadCueID,
+           let previous = cueLists.firstCue(withID: cueID) {
+            refreshed.applyValues(previous.detailValues, toCueWithID: cueID)
+        }
+
+        cueLists = refreshed
 
         if watchedCueListID == nil {
             // Back to the list the operator was on, if this workspace still

@@ -153,6 +153,21 @@ nonisolated struct QLabCueValues: Decodable, Sendable {
 }
 
 nonisolated extension Cue {
+    /// The lazily-fetched detail values this cue is currently holding.
+    ///
+    /// The inverse of ``apply(_:)``, so values already fetched can be carried
+    /// across a replacement of the cue tree — `/cueLists` does not report any
+    /// of them, so a refetched tree arrives with them all absent.
+    var detailValues: QLabCueValues {
+        QLabCueValues(
+            notes: notes,
+            duration: duration,
+            preWait: preWait,
+            postWait: postWait,
+            continueMode: continueMode?.rawValue
+        )
+    }
+
     /// Merges fetched detail values into this cue.
     mutating func apply(_ values: QLabCueValues) {
         if let notes = values.notes { self.notes = notes }

@@ -631,17 +631,53 @@ those values vanish after an edit and stay absent until some other trigger fetch
 *Evidence:* `Cuety/Networking/QLabClient.swift:782`, `Cuety/Networking/QLabClient.swift:895`,
 [QLab OSC dictionary](https://qlab.app/docs/v5/scripting/osc-dictionary-v5/).
 
-- [ ] Establish one refresh sequence: cue tree → playheads → details for the visible cue
+- [x] Establish one refresh sequence: cue tree → playheads → details for the visible cue
       and its enabled pills.
-- [ ] Use that sequence from every trigger — handshake, `/updates`, broadcast, manual
+- [x] Use that sequence from every trigger — handshake, `/updates`, broadcast, manual
       refresh — so no path skips details.
-- [ ] Either preserve already-fetched detail values across a tree replacement or guarantee
+- [x] Either preserve already-fetched detail values across a tree replacement or guarantee
       they are refetched in the same sequence. State which, and why.
-- [ ] Coordinate with `F8` ownership so the sequence cannot interleave with itself.
-- [ ] Test: edit a cue while pills are visible; assert pills are repopulated.
+- [x] Coordinate with `F8` ownership so the sequence cannot interleave with itself.
+- [x] Test: edit a cue while pills are visible; assert pills are repopulated.
 
 **Done when:** editing a cue in QLab while the detail pills are on screen never leaves a
 pill blank once the refresh settles.
+
+**Landed.** `QLabClient.refreshCueData()` is the sequence: tree → playheads → details for
+the cue on screen. Every trigger goes through it — the handshake, the debounced `/updates`
+push, and overflow recovery. The debounced path was the bug: it stopped at the tree, and
+`/cueLists` carries none of duration, waits, notes or continue mode, so any cue edit
+anywhere in the workspace replaced a populated cue with a bare one and blanked the pills
+until something unrelated happened to ask again.
+
+**Both, not either** — the decision the item asked to be stated. Detail values are carried
+across the tree replacement *and* refetched:
+
+- Refetch alone blanks the pills for a round trip on every edit, including edits to cues
+  that have nothing to do with the one on screen. On a stage display that is a visible
+  flicker caused by someone else's work.
+- Carry-forward alone shows what was true *before* the edit. The falsification run
+  demonstrated this rather than asserting it: with carry-forward but no refetch, a cue
+  edited from 4.25s to 9.5s went on reading 4.25s.
+
+Only the playhead cue is carried, because only the playhead cue ever has details — they are
+fetched one cue at a time, for the one on screen.
+
+*Two further gaps found while mapping the triggers.* A playhead move reported via
+`/update/…/playbackPosition` set the playhead and stopped, so the pills went on describing
+the *previous* cue — the broadcast path refetched details, this one did not. And the
+handshake split the sequence around `status = .connected`; it now completes before the
+display appears, which costs one round trip on a show network and in exchange the display
+arrives complete rather than filling its pills in a beat later.
+
+*`F8` coordination:* `cueDataGeneration` means a superseded sequence cannot lay its details
+on top of a newer tree.
+
+*Tests:* `cueEditKeepsDetailPillsPopulated` and `cueEditDoesNotFlickerThePills`, both
+**falsified before being trusted** — disabling the carry-forward fails the flicker test,
+reverting the debounced path to tree-only fails the repopulation test. The peer gained
+`valuesForKeys` support with detail values held deliberately *apart* from its `/cueLists`
+payload, since a peer that served them together could not reproduce this bug at all.
 
 ---
 
