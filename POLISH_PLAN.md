@@ -38,7 +38,7 @@ changes must not land before `R2` (formatter configuration) is committed.
 |---|---|---|---|
 | 1 | Establish operator trust | 4 | 4 / 4 |
 | 2 | Stabilize lifecycle ownership | 4 | 4 / 4 |
-| 3 | Make data and Settings coherent | 4 | 0 / 4 |
+| 3 | Make data and Settings coherent | 4 | 4 / 4 |
 | 4 | Simplify and standardize | 17 | 0 / 17 |
 | 5 | Presentation and release readiness | 9 | 0 / 9 |
 | — | Verification sign-off | 13 | 0 / 13 |
@@ -749,14 +749,48 @@ only when "Remember in my Keychain" is selected, coupling two unrelated preferen
 
 *Evidence:* `Cuety/Model/AppModel.swift:271`, `Cuety/Features/Settings/ConnectionSettingsView.swift:146`.
 
-- [ ] Maintain observable credential metadata so Settings updates without a manual reload.
-- [ ] Surface Keychain save/delete failures to the operator instead of discarding them.
-- [ ] Record the last successful workspace independently of credential storage.
-- [ ] Verify Forget takes visible effect immediately.
-- [ ] Test the Keychain-failure path.
+- [x] Maintain observable credential metadata so Settings updates without a manual reload.
+- [x] Surface Keychain save/delete failures to the operator instead of discarding them.
+- [x] Record the last successful workspace independently of credential storage.
+- [ ] Verify Forget takes visible effect immediately. *Covered by test; still worth a click.*
+- [x] Test the Keychain-failure path.
 
 **Done when:** Forget updates the list at once, a Keychain failure is reported, and
 declining to remember a passcode still remembers the workspace.
+
+**Landed.** `AppModel.storedPasscodeSelections` is observable and is the only thing
+Settings reads. Settings used to ask the Keychain from a computed view property, which gave
+Forget nothing to invalidate — the credential went and the row stayed until something
+unrelated redrew the window. Membership now comes from the observable set; names still come
+from the browser.
+
+The set is rebuilt when a probe publishes and when the Settings pane appears, because it
+can only ever describe workspaces Cuety can *see*, and what it can see changes. A
+credential belonging to a machine that has gone away is still only reachable via Forget
+All, which is why that button exists.
+
+**Keychain failures are reported.** `try?` on save, remove and remove-all meant a passcode
+that failed to store looked stored and a Forget that failed looked done.
+`AppModel.credentialError` carries an action and a reason, presented as an alert from
+Settings, and the reason comes from `PasscodeStore.Failure` — which words the Keychain's own
+message — rather than `localizedDescription`, which for a Swift error is the useless "The
+operation couldn't be completed."
+
+**The two preferences are decoupled.** `preferences.lastWorkspace` was only written inside
+`if remember`, so declining to store a credential also quietly opted the operator out of
+reconnecting at launch — a setting they had turned on somewhere else entirely. The
+workspace is now recorded on any connection that reached a live session, and the passcode
+is stored or not on its own terms.
+
+*Testability:* `PasscodeStoring` was extracted so the failure paths can be exercised. That
+is the point of the abstraction rather than a side effect — the real Keychain cannot be made
+to fail on demand, which is how these paths came to be `try?` and silent. Untestable
+behaviour tends to stay untested.
+
+*Tests:* `CuetyTests/StoredPasscodeTests.swift`, six cases, all against an injected stub —
+none touch the real Keychain, which given this project has already written test data into
+real preferences once is not a hypothetical concern. The two failure-surfacing tests were
+falsified by restoring `try?`.
 
 ---
 

@@ -13,7 +13,7 @@ final class AppModel {
     let log: ActivityLog
     let client: QLabClient
     let browser: QLabBrowser
-    let passcodes = PasscodeStore()
+    let passcodes: any PasscodeStoring
 
     // MARK: Selection
 
@@ -32,6 +32,36 @@ final class AppModel {
     /// the truthful rendering. Marking every queued server as "refreshing" up
     /// front made the same claim about machines that had not been asked yet.
     private(set) var refreshingServerIDs: Set<String> = []
+
+    // MARK: Stored credentials
+
+    /// The workspaces Cuety holds a passcode for, as far as it can tell.
+    ///
+    /// Observable, and the only thing Settings reads. The Keychain has no
+    /// change notification, so a view that asked it directly had nothing to
+    /// invalidate it: Forget removed the credential and left the row on
+    /// screen until something unrelated redrew the window.
+    ///
+    /// Limited to workspaces Cuety can currently see, because `SecItem` offers
+    /// no listing that would give names to show. An item belonging to a
+    /// machine that has gone away can still only be cleared with Forget All —
+    /// which is why that button exists.
+    private(set) var storedPasscodeSelections: Set<WorkspaceSelection> = []
+
+    /// A credential-store failure worth telling the operator about.
+    ///
+    /// Keychain writes used to be `try?`, so a passcode that failed to save
+    /// looked saved, and a Forget that failed looked forgotten.
+    var credentialError: CredentialError?
+
+    struct CredentialError: Identifiable, Hashable {
+        let id = UUID()
+        /// What Cuety was attempting, in the operator's terms.
+        let action: String
+        let reason: String
+
+        var message: String { "\(action) \(reason)" }
+    }
 
     /// Whether the Add Server sheet is up.
     ///
@@ -78,8 +108,12 @@ final class AppModel {
     /// Holds the display awake while enabled.
     private let displaySleepBlocker = DisplaySleepBlocker()
 
-    init(preferences: Preferences = Preferences()) {
+    init(
+        preferences: Preferences = Preferences(),
+        passcodes: any PasscodeStoring = PasscodeStore()
+    ) {
         self.preferences = preferences
+        self.passcodes = passcodes
         let log = ActivityLog()
         self.log = log
         self.client = QLabClient(preferences: preferences, log: log)
@@ -328,6 +362,10 @@ final class AppModel {
         guard probeGenerationByServerID[target.id] == generation else { return }
         relinquishProbe(of: target.id, generation: generation)
         browser.update(server)
+
+        // Workspaces just became visible that may have credentials stored in
+        // an earlier session, and Settings can only list what Cuety can see.
+        refreshStoredPasscodes()
     }
 
     /// Hands back ownership of a server's probe, if this probe still holds it.
@@ -463,15 +501,38 @@ final class AppModel {
         selection = target
         await client.connect(to: server, workspaceID: prompt.workspaceID, passcode: passcode)
 
-        if client.status.hasLiveData {
-            if remember {
-                try? passcodes.save(
+        guard client.status.hasLiveData else { return }
+
+        // Remembering the *workspace* is not conditional on remembering the
+        // *passcode*. Those are two unrelated preferences, and coupling them
+        // meant declining to store a credential also quietly opted out of
+        // reconnecting at launch — a setting the operator had turned on
+        // somewhere else entirely.
+        preferences.lastWorkspace = target
+
+        if remember {
+            do {
+                try passcodes.save(
                     passcode, serverID: prompt.serverID, workspaceID: prompt.workspaceID
                 )
-                preferences.lastWorkspace = target
+                storedPasscodeSelections.insert(target)
+            } catch {
+                // The connection succeeded; only the saving failed. Say so,
+                // rather than leaving the operator believing a passcode is
+                // stored that will not be there next time.
+                credentialError = CredentialError(
+                    action: "Cuety connected, but could not save the passcode to your Keychain.",
+                    reason: describe(error)
+                )
             }
-            passcodePrompt = nil
         }
+
+        passcodePrompt = nil
+    }
+
+    /// Turns a credential-store error into something an operator can read.
+    private func describe(_ error: any Error) -> String {
+        (error as? any OperatorReadableError)?.description ?? error.localizedDescription
     }
 
     func disconnect() {
@@ -491,9 +552,19 @@ final class AppModel {
 
     /// Drops a stored passcode, for the Settings "forget" affordance.
     func forgetPasscode(for selection: WorkspaceSelection) {
-        try? passcodes.remove(
-            serverID: selection.serverID, workspaceID: selection.workspaceID
-        )
+        do {
+            try passcodes.remove(
+                serverID: selection.serverID, workspaceID: selection.workspaceID
+            )
+            // Updated here so Settings redraws. Reading the Keychain from a
+            // view gave Forget nothing to invalidate, so the row stayed.
+            storedPasscodeSelections.remove(selection)
+        } catch {
+            credentialError = CredentialError(
+                action: "Cuety could not remove that passcode from your Keychain.",
+                reason: describe(error)
+            )
+        }
     }
 
     /// Drops every stored passcode.
@@ -502,7 +573,39 @@ final class AppModel {
     /// workspaces it can currently see, so this is the only way to clear ones
     /// belonging to a machine that has since gone away.
     func forgetAllPasscodes() {
-        try? passcodes.removeAll()
+        do {
+            try passcodes.removeAll()
+            storedPasscodeSelections.removeAll()
+        } catch {
+            credentialError = CredentialError(
+                action: "Cuety could not clear the saved passcodes from your Keychain.",
+                reason: describe(error)
+            )
+        }
+    }
+
+    /// Rebuilds ``storedPasscodeSelections`` from the workspaces currently
+    /// visible.
+    ///
+    /// Needed because the set can only ever describe what Cuety can see, and
+    /// what it can see changes: a server appearing brings workspaces whose
+    /// credentials were stored in an earlier session. Called when a probe
+    /// publishes and when Settings appears.
+    func refreshStoredPasscodes() {
+        var found: Set<WorkspaceSelection> = []
+        for server in browser.servers {
+            for workspace in server.workspaces {
+                let selection = WorkspaceSelection(
+                    serverID: server.id, workspaceID: workspace.uniqueID
+                )
+                if passcodes.hasPasscode(
+                    serverID: selection.serverID, workspaceID: selection.workspaceID
+                ) {
+                    found.insert(selection)
+                }
+            }
+        }
+        storedPasscodeSelections = found
     }
 
     private func workspaceName(for selection: WorkspaceSelection) -> String? {

@@ -2,12 +2,27 @@ import Foundation
 import Security
 import os
 
+/// Where Cuety keeps workspace passcodes.
+///
+/// An abstraction over ``PasscodeStore`` for one reason: the failure paths.
+/// Keychain writes can fail, Cuety now tells the operator when they do, and
+/// there is no way to make the real Keychain fail on demand — so that
+/// behaviour would otherwise be untestable, which is how it came to be
+/// `try?` and silent in the first place.
+nonisolated protocol PasscodeStoring: Sendable {
+    func passcode(serverID: String, workspaceID: String) -> String?
+    func hasPasscode(serverID: String, workspaceID: String) -> Bool
+    func save(_ passcode: String, serverID: String, workspaceID: String) throws
+    func remove(serverID: String, workspaceID: String) throws
+    func removeAll() throws
+}
+
 /// Stores QLab workspace passcodes in the Keychain.
 ///
 /// The Keychain rather than `UserDefaults`: these are credentials to someone
 /// else's show file. A sandboxed app gets its own Keychain access group from its
 /// application identifier, so this needs no entitlement.
-nonisolated struct PasscodeStore {
+nonisolated struct PasscodeStore: PasscodeStoring {
     private let logger = Logger(subsystem: "com.caseyburnham.Cuety", category: "PasscodeStore")
 
     /// The Keychain service name all Cuety items share.

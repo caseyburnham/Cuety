@@ -15,6 +15,11 @@ struct ConnectionSettingsView: View {
             passcodeSection
         }
         .formStyle(.grouped)
+        // The Keychain is only consulted when this pane appears, not on every
+        // redraw. What Cuety can see changes as servers come and go, so the
+        // set is rebuilt here and then maintained by the actions that change
+        // it.
+        .task { model.refreshStoredPasscodes() }
         .confirmationDialog(
             "Forget every saved passcode?",
             isPresented: $isConfirmingForgetAll
@@ -24,6 +29,15 @@ struct ConnectionSettingsView: View {
             }
         } message: {
             Text("Cuety will ask for a passcode the next time it connects to a protected workspace.")
+        }
+        // Keychain writes used to be discarded, so a Forget that failed looked
+        // like a Forget that worked.
+        .alert(item: Bindable(model).credentialError) { error in
+            Alert(
+                title: Text("Keychain Problem"),
+                message: Text(error.message),
+                dismissButton: .default(Text("OK"))
+            )
         }
     }
 
@@ -138,20 +152,24 @@ struct ConnectionSettingsView: View {
         let serverName: String
     }
 
-    /// Workspaces Cuety can see that have a passcode in the Keychain.
+    /// Workspaces Cuety can see that have a passcode stored.
     ///
-    /// Derived from the browser rather than from the Keychain: `SecItem`
-    /// offers no listing that would give us names to show, so an item for a
-    /// machine that has gone away can only be cleared with "Forget All".
+    /// Names come from the browser, but *membership* comes from
+    /// ``AppModel/storedPasscodeSelections`` rather than from the Keychain
+    /// directly. That is the whole fix: asking `SecItem` from a computed view
+    /// property gave Forget nothing to invalidate, so removing a credential
+    /// left its row on screen until something unrelated redrew the window.
+    ///
+    /// `SecItem` still offers no listing that would give names to show, so an
+    /// item belonging to a machine that has gone away can only be cleared with
+    /// Forget All.
     private var savedPasscodes: [PasscodeEntry] {
         model.browser.servers.flatMap { server in
             server.workspaces.compactMap { workspace in
                 let selection = WorkspaceSelection(
                     serverID: server.id, workspaceID: workspace.uniqueID
                 )
-                guard model.passcodes.hasPasscode(
-                    serverID: selection.serverID, workspaceID: selection.workspaceID
-                ) else { return nil }
+                guard model.storedPasscodeSelections.contains(selection) else { return nil }
 
                 return PasscodeEntry(
                     selection: selection,
