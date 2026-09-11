@@ -348,9 +348,12 @@ revive obsolete state.
 **Phase exit criterion.** No code path can resurrect a session or overwrite fresh state
 with the result of an operation that has been superseded.
 
-**Status: met in code.** All four items implemented; 208 tests passing. One sub-item
-remains open — `F10`'s keyboard-shortcut click-through, which is a manual pass rather than
-a code change.
+**Status: met, and signed off.** All four items implemented and every sub-item closed;
+211 tests passing. Landed as `b75a758`.
+
+The one caveat carried forward: `F9`'s two recovery *branches* are covered at the policy
+level only — see `F9`. `V7`, against real QLab, is still the only thing that exercises the
+wiring between a report and the branch it selects.
 
 ---
 
@@ -559,7 +562,7 @@ Refresh can run during connection setup while sidebar Refresh is disabled.
 - [x] Point the menu, sidebar and inspector at those single definitions.
 - [x] Settle the intended behaviour for each action while reconnecting and while
       connecting, and document it.
-- [ ] Verify with keyboard shortcuts as well as clicks.
+- [x] Verify with keyboard shortcuts as well as clicks.
 
 **Done when:** for any session state, every control offering the same action agrees on
 whether it is enabled.
@@ -594,9 +597,8 @@ conditions. It is gone; `AppModel` owns probe bookkeeping.
 *Tests:* `connectionActionAvailability` (connected, then dropped and backing off),
 `availabilityDuringConnectionSetup` (held in `connecting` by a mute peer), `idleAvailability`.
 
-**Outstanding:** the keyboard-shortcut click-through — ⌘R in each state. The definitions
-are shared with the menu items that carry the shortcuts, so this is confirmation rather
-than discovery, but it has not been done.
+**Verified by the operator, 2026-09-10.** ⌘R behaves consistently with the sidebar button
+in each state. `F10` closed.
 
 ---
 
@@ -732,6 +734,10 @@ replacement — and `canRefresh` no longer consults `isRefreshing`.
 showed nothing at all while being re-probed, which reads as Refresh having skipped it. The
 in-flight indicator now lives in the section header, where it shows either way.
 
+*Verified by the operator, 2026-09-10:* Refresh now visibly updates This Mac. This had
+been the open question of whether the probe was genuinely being skipped as well as being
+invisible — it was not. Faults 2 and 4 together account for the whole symptom.
+
 **5. The Refresh button's spin.** Now magic-replaces between `arrow.clockwise` and
 `progress.indicator`, with `.variableColor.iterative` on the latter. A slowly rotating
 glyph reads as a stuck animation and says nothing about how long there is to wait.
@@ -791,8 +797,9 @@ to generic text.
       nothing, and `bytesSent` was short by exactly those packets. Now routed through the
       log via `QLabClient.goodbyeMessages`. `/alwaysReply false` is deliberately not among
       them: it is per-connection state that dies with the socket, and `/forgetMeNot false`
-      has already told QLab to remember nothing. Tests: `disconnectIsSentAndLogged`,
-      `lostSessionSendsNoGoodbye`.
+      has already told QLab to remember nothing — the operator confirmed that call on
+      2026-09-10, so the goodbye set is settled at three messages. Tests:
+      `disconnectIsSentAndLogged`, `lostSessionSendsNoGoodbye`.
 - [ ] Count packet bytes once for a bundle rather than per contained message.
 - [ ] Label counter scope accurately, or scope the counters to match the existing label.
 - [ ] Replace `OperatorReadableError` with Foundation's
