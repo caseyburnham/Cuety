@@ -11,7 +11,6 @@ struct WorkspaceSidebar: View {
     @State private var newPort = String(QLabServer.defaultPort)
     @State private var isConnecting = false
     @State private var selectedRow: Selection?
-    @State private var probingServerIDs: Set<String> = []
     @FocusState private var hostIsFocused: Bool
 
     private enum Selection: Hashable {
@@ -31,11 +30,28 @@ struct WorkspaceSidebar: View {
                             .selectionDisabled()
                     }
                 } header: {
-                    Text(server.name)
-                        .help(server.address ?? "Discovered on the local network")
-                        .contextMenu {
-                            removeServerButton(server)
+                    HStack(spacing: 6) {
+                        Text(server.name)
+                        // In the header, not in the rows: the "Looking for
+                        // workspaces…" row below only exists when a server has
+                        // *no* workspaces, so a server that already listed one
+                        // gave no sign of being re-probed at all — which read
+                        // as Refresh having skipped it.
+                        if model.refreshingServerIDs.contains(server.id) {
+                            ProgressView()
+                                .controlSize(.small)
+                                .transition(.blurReplace)
+                                .accessibilityLabel("Looking for workspaces on \(server.name)")
                         }
+                    }
+                    .animation(
+                        reduceMotion ? nil : Motion.status,
+                        value: model.refreshingServerIDs.contains(server.id)
+                    )
+                    .help(server.address ?? "Discovered on the local network")
+                    .contextMenu {
+                        removeServerButton(server)
+                    }
                 }
             }
 
@@ -65,11 +81,11 @@ struct WorkspaceSidebar: View {
                 // Offered for any session Cuety is holding open, not just a
                 // live one: a reconnect loop is exactly the situation where
                 // the operator needs a way to call it off.
-                if model.selection == selection && model.client.isSessionActive {
+                if model.selection == selection && model.canDisconnect {
                     Button("Disconnect") { model.disconnect() }
                 } else {
                     Button("Connect") { connect(to: selection) }
-                        .disabled(isConnecting || model.client.status.isTransitional)
+                        .disabled(!model.canConnect)
                 }
                 if let server = model.browser.server(withID: selection.serverID) {
                     removeServerButton(server)
@@ -97,12 +113,40 @@ struct WorkspaceSidebar: View {
                 Button {
                     Task { await model.refresh() }
                 } label: {
-                    Label("Refresh Everything", systemImage: "arrow.clockwise")
-                        .symbolEffect(.rotate, isActive: model.isRefreshing && !reduceMotion)
+                    // Magic-replaced into an indicator rather than spun. A
+                    // slowly rotating arrow reads as a stuck animation, and
+                    // says nothing about how long there is to wait.
+                    //
+                    // `progress.indicator` is a symbol, which is what makes
+                    // this a real morph: a `ProgressView` is an
+                    // `NSProgressIndicator` and has nothing for `.replace` to
+                    // operate on. It is also the glyph `ConnectionStatus`
+                    // already uses for `connecting`, with the same effect on
+                    // it — so "Cuety is working" looks the same wherever it
+                    // appears.
+                    Label {
+                        Text("Refresh Everything")
+                    } icon: {
+                        Image(
+                            systemName: model.isRefreshing
+                                ? "progress.indicator"
+                                : "arrow.clockwise"
+                        )
+                        .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp)))
+                        .symbolEffect(
+                            .variableColor.iterative,
+                            isActive: model.isRefreshing && !reduceMotion
+                        )
+                    }
                 }
+                .animation(reduceMotion ? nil : Motion.status, value: model.isRefreshing)
                 .labelStyle(.iconOnly)
-                .disabled(model.isRefreshing || isConnecting || model.client.status.isTransitional)
-                .help("Refresh available workspaces and rebuild the current QLab connection.")
+                .disabled(!model.canRefresh)
+                // Still enabled while refreshing: pressing it again starts over
+                // rather than being ignored.
+                .help(model.isRefreshing
+                    ? "Searching. Click again to start over."
+                    : "Refresh available workspaces and rebuild the current QLab connection.")
             }
             .padding(10)
             .background(.bar)
@@ -120,7 +164,7 @@ struct WorkspaceSidebar: View {
             }
             return model.selection.map(Selection.workspace)
         } set: { selection in
-            guard let selection, !isConnecting, !model.client.status.isTransitional else { return }
+            guard let selection, !isConnecting, model.canConnect else { return }
             selectedRow = selection
             switch selection {
             case .workspace:
@@ -168,7 +212,11 @@ struct WorkspaceSidebar: View {
     }
 
     private func connect(to selection: WorkspaceSelection) {
-        guard !isConnecting, !model.client.status.isTransitional else { return }
+        // `isConnecting` is a re-entrancy guard for this view's own async
+        // action, not a second opinion on availability: a double-click can
+        // land twice before `status` becomes `connecting`. Whether the action
+        // is *offered* is ``AppModel/canConnect``, everywhere.
+        guard !isConnecting, model.canConnect else { return }
         guard selection != model.selection || !model.client.status.hasLiveData else { return }
         selectedRow = nil
         isConnecting = true
@@ -185,13 +233,15 @@ struct WorkspaceSidebar: View {
                 if model.selection?.serverID == server.id { model.disconnect() }
                 model.browser.removeManualServer(id: server.id)
             }
-            .disabled(isConnecting || model.client.status.isTransitional)
+            // Removing a server can disconnect, so it answers to the same
+            // definition rather than inventing its own.
+            .disabled(!model.canConnect)
         }
     }
 
     @ViewBuilder
     private func serverStatus(_ server: QLabServer) -> some View {
-        if model.refreshingServerIDs.contains(server.id) || probingServerIDs.contains(server.id) {
+        if model.refreshingServerIDs.contains(server.id) {
             HStack {
                 ProgressView().controlSize(.small)
                 Text("Looking for workspaces…")
@@ -280,12 +330,13 @@ struct WorkspaceSidebar: View {
 
     /// Asks a single server what it has open, leaving the other servers and the
     /// live connection alone — which a full refresh would not.
+    ///
+    /// No local in-flight set any more. ``AppModel`` owns probe bookkeeping —
+    /// the indicator and which probe's answer wins — so this view kept a
+    /// second copy of state it did not own, and the two had already drifted
+    /// into showing spinners under different conditions.
     private func probeWorkspaces(on server: QLabServer) {
-        guard probingServerIDs.insert(server.id).inserted else { return }
-        Task {
-            defer { probingServerIDs.remove(server.id) }
-            await model.refreshWorkspaces(onServerWithID: server.id)
-        }
+        Task { await model.refreshWorkspaces(onServerWithID: server.id) }
     }
 }
 

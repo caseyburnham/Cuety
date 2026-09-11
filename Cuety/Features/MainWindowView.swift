@@ -13,6 +13,11 @@ struct MainWindowView: View {
         .task {
             // Browsing starts with the window, not with the app, so a launch
             // straight into a background scene doesn't hold the network open.
+            //
+            // Called unconditionally on purpose. `start()` is idempotent, so
+            // closing this window and reopening it from the Window menu — the
+            // one way this can run twice now that the scene is a single
+            // `Window` — does not restart discovery or re-run auto-connect.
             model.start()
         }
         .sheet(item: Bindable(model).passcodePrompt) { prompt in

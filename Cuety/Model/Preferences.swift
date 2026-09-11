@@ -41,7 +41,14 @@ enum AppearanceMode: String, CaseIterable, Codable, Hashable, Sendable, Identifi
 /// SwiftUI, and so defaults live in exactly one place.
 @Observable
 final class Preferences {
-    private let defaults: UserDefaults
+    /// The store these preferences persist to.
+    ///
+    /// Readable so that everything belonging to one ``AppModel`` shares one
+    /// store. ``QLabBrowser`` persists the manual server list, and it used to
+    /// reach for `.standard` on its own — so a test injecting an isolated
+    /// suite isolated the preferences and nothing else, and wrote real manual
+    /// servers into the real app's sidebar. It did exactly that.
+    let defaults: UserDefaults
 
     // MARK: Appearance and typography
 

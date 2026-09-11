@@ -50,6 +50,24 @@ final class QLabClient {
     private(set) var lastErrorDescription: String?
     private(set) var lastErrorDate: Date?
 
+    /// Events lost to buffer overflow during this session.
+    ///
+    /// Surfaced rather than counted quietly. A session that has dropped events
+    /// is one where Cuety's model of the show diverged from QLab's, however
+    /// briefly, and an operator deciding whether to trust the display deserves
+    /// to know that happened.
+    private(set) var droppedEventCount = 0
+
+    /// Replies that arrived after the request asking for them had timed out,
+    /// and were therefore dropped rather than handed to a later request.
+    ///
+    /// Worth surfacing rather than merely counting: a session accumulating
+    /// these is one where QLab is answering more slowly than the request
+    /// timeout allows, which is a setting the operator can actually do
+    /// something about. Silence here is what made the misattribution it
+    /// prevents so hard to notice.
+    private(set) var lateReplyCount = 0
+
     // MARK: Heartbeat
 
     private(set) var heartbeatCount = 0
@@ -91,6 +109,30 @@ final class QLabClient {
     private var pending: [UUID: PendingRequest] = [:]
     private var pendingByAddress: [String: [UUID]] = [:]
     private var timeoutTasks: [UUID: Task<Void, Never>] = [:]
+
+    /// Replies QLab still owes requests that have already timed out, keyed by
+    /// correlation key, each with the instant after which it stops being
+    /// credible.
+    ///
+    /// Replies are matched by address in FIFO order, because QLab's reply
+    /// envelope carries `workspace_id`, `address`, `status` and `data` and no
+    /// request identifier of any kind — there is nowhere to put one, so
+    /// correlating by ID is not available at this protocol. That leaves a
+    /// hole: a reply that arrives after its request timed out would be handed
+    /// to whatever request is next in line for the same address, which is a
+    /// stale answer presented as a fresh one.
+    ///
+    /// So a timeout records what it is still owed. The next reply on that key
+    /// is recognised as the abandoned request's and discarded. The common
+    /// cause of a timeout is a busy QLab answering late, which this handles
+    /// exactly.
+    ///
+    /// The entries expire, and that bound is the honest part of this. If QLab
+    /// truly never answers, the debt is spent on the *next* request instead —
+    /// costing one wasted request per genuine timeout, after which the entry
+    /// ages out. A session where that keeps happening is a session the
+    /// heartbeat's lost-thump threshold is already about to end.
+    private var abandonedReplyDeadlines: [String: [ContinuousClock.Instant]] = [:]
 
     /// The server and workspace to reconnect to after a drop.
     private var currentTarget: (server: QLabServer, workspaceID: String, passcode: String?)?
@@ -153,6 +195,11 @@ final class QLabClient {
 
         let connection = QLabConnection(endpoint: server.endpoint)
         self.connection = connection
+        // Installed before the stream exists, so no burst can overflow it
+        // before anyone is listening for the news.
+        await connection.setEventsDroppedHandler { [weak self] lost in
+            await self?.handleEventsDropped(lost, on: connection)
+        }
         let stream = await connection.start()
 
         do {
@@ -222,24 +269,54 @@ final class QLabClient {
     /// Leaves `status` untouched. Every caller ends up somewhere different —
     /// `connecting`, `needsPasscode`, `workspaceClosed`, `offline` — and each
     /// says so itself rather than having this guess.
+    /// What Cuety says to QLab on the way out, in order.
+    ///
+    /// `/forgetMeNot false` is the one that genuinely matters: `true` asks
+    /// QLab to *retain* this client's registration past the socket closing, so
+    /// leaving it set is how a client accumulates in QLab rather than leaving
+    /// cleanly. `/udpKeepAlive false` mirrors the handshake at no cost.
+    /// `/disconnect` states the intent outright.
+    ///
+    /// `/alwaysReply` is deliberately absent. It is per-connection state that
+    /// dies with the socket, and `/forgetMeNot false` has already told QLab
+    /// not to remember anything about this client — so resetting it would be a
+    /// packet sent purely for symmetry with the handshake.
+    private static let goodbyeMessages = [
+        OSCMessage("/forgetMeNot", [.false]),
+        OSCMessage("/udpKeepAlive", [.false]),
+        OSCMessage("/disconnect"),
+    ]
+
     private func tearDownSession(sendDisconnect: Bool) {
         cueListRefreshTask?.cancel()
         cueListRefreshTask = nil
         heartbeatTask?.cancel()
         heartbeatTask = nil
+        overflowRecoveryTask?.cancel()
+        overflowRecoveryTask = nil
+        // A fresh session starts with a clean escalation history, or a
+        // reconnect would arrive already one strike down.
+        lastOverflowRecovery = nil
+        droppedEventCount = 0
 
         let connection = self.connection
         // Only worth saying goodbye down a socket that is actually up. After a
-        // drop these three sends can only fail, and would fill the Activity
-        // Log with errors that describe Cuety's own teardown rather than
-        // anything that happened to the show.
+        // drop these sends can only fail, and would fill the Activity Log with
+        // errors that describe Cuety's own teardown rather than anything that
+        // happened to the show.
         if sendDisconnect, status.hasLiveData, let connection {
             // Best effort and deliberately not awaited: QLab is told we're
             // going, but a wedged socket must not block teardown.
-            Task {
-                _ = try? await connection.send(OSCMessage("/forgetMeNot", [.false]))
-                _ = try? await connection.send(OSCMessage("/udpKeepAlive", [.false]))
-                _ = try? await connection.send(OSCMessage("/disconnect"))
+            //
+            // `Task` inside a `@MainActor` method inherits that isolation, so
+            // the log is safe to touch from here.
+            Task { [weak self] in
+                for message in Self.goodbyeMessages {
+                    guard let byteCount = try? await connection.send(message) else { continue }
+                    self?.log.record(
+                        OSCEvent(message: message, direction: .outbound, byteCount: byteCount)
+                    )
+                }
                 await connection.cancel()
             }
         } else if let connection {
@@ -251,6 +328,8 @@ final class QLabClient {
         self.connection = nil
 
         failAllPendingRequests(with: RequestFailure.disconnected)
+        // A new socket owes nothing for what was sent down the old one.
+        abandonedReplyDeadlines.removeAll()
 
         workspace = nil
         accessLevel = .unspecified
@@ -302,11 +381,117 @@ final class QLabClient {
         heartbeatTask = nil
         cueListRefreshTask?.cancel()
         cueListRefreshTask = nil
+        overflowRecoveryTask?.cancel()
+        overflowRecoveryTask = nil
         failAllPendingRequests(with: RequestFailure.disconnected)
         invalidateLiveSessionData()
 
         status = .failed(reason: reason)
         scheduleReconnect()
+    }
+
+    // MARK: - Event loss
+
+    /// What to do about events the event buffer lost.
+    ///
+    /// A named decision rather than a condition buried in the method that acts
+    /// on it. The choice between these two is the whole policy, and keeping it
+    /// separable from the socket it needs is what makes it testable without
+    /// faking an overflow.
+    nonisolated enum EventLossRecovery: Hashable, Sendable {
+        /// Refetch the cue tree, the playheads, and the visible cue's details.
+        /// The cheap fix, and the right one for a burst.
+        case resynchronize
+        /// Rebuild the socket and both subscriptions. For when resynchronizing
+        /// has already been tried and did not hold.
+        case rebuildSession
+    }
+
+    /// How soon a second overflow counts as "resynchronizing did not work".
+    ///
+    /// One burst is a busy moment; another one straight after it means the
+    /// refetch is not keeping up with whatever is arriving, and a subscription
+    /// that has quietly lapsed looks exactly like that.
+    ///
+    /// `nonisolated` so ``recovery(after:at:)`` can read it without the main
+    /// actor, which is the point of that method being pure.
+    nonisolated static let overflowEscalationWindow: Duration = .seconds(10)
+
+    /// Decides how to recover from event loss, given when the last recovery
+    /// ran.
+    ///
+    /// - Parameters:
+    ///   - previous: When event loss was last recovered from in this session,
+    ///     or `nil` if this is the first time.
+    ///   - now: The current instant.
+    ///
+    /// Deliberately pure and `nonisolated`: no connection, no clock of its
+    /// own, no state to mutate. `/updates` and `/listen/playhead` can lapse
+    /// without QLab saying so, and this rule is the only thing standing
+    /// between that and a display that quietly stops changing — so it is worth
+    /// being able to assert directly rather than inferring from a burst.
+    nonisolated static func recovery(
+        after previous: ContinuousClock.Instant?,
+        at now: ContinuousClock.Instant
+    ) -> EventLossRecovery {
+        guard let previous, now - previous < overflowEscalationWindow else {
+            return .resynchronize
+        }
+        return .rebuildSession
+    }
+
+    /// When the last overflow recovery ran.
+    private var lastOverflowRecovery: ContinuousClock.Instant?
+
+    private var overflowRecoveryTask: Task<Void, Never>?
+
+    /// The event buffer overflowed: Cuety's model of the show may have
+    /// diverged from QLab's, and it cannot know how.
+    ///
+    /// Recovery is deliberate rather than hopeful, and which recovery is
+    /// ``recovery(after:at:)``'s decision — see ``EventLossRecovery`` for the
+    /// two outcomes and why a repeat escalates.
+    private func handleEventsDropped(_ lost: Int, on connection: QLabConnection) {
+        guard self.connection === connection else { return }
+
+        droppedEventCount += lost
+        logger.warning(
+            "Event buffer overflowed; \(lost, privacy: .public) event(s) lost"
+        )
+
+        // Coalesced, because the burst that caused this is probably still
+        // arriving and recovering into it would only overflow again.
+        overflowRecoveryTask?.cancel()
+        overflowRecoveryTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, let self else { return }
+            await self.recoverFromEventLoss(on: connection)
+        }
+    }
+
+    private func recoverFromEventLoss(on connection: QLabConnection) async {
+        guard self.connection === connection, status.hasLiveData else { return }
+
+        let now = ContinuousClock.now
+        let recovery = Self.recovery(after: lastOverflowRecovery, at: now)
+        lastOverflowRecovery = now
+
+        switch recovery {
+        case .rebuildSession:
+            logger.warning("Event buffer overflowed again; rebuilding the session")
+            // Let go of the handle before reconnecting. `connect` tears the
+            // session down, and teardown cancels this task — which is the one
+            // currently running, so cancelling it from inside would propagate
+            // into the connection attempt it had just started.
+            overflowRecoveryTask = nil
+            await reconnect()
+
+        case .resynchronize:
+            logger.info("Resynchronizing after event loss")
+            try? await refreshCueLists()
+            guard self.connection === connection else { return }
+            await refreshPlayheadCueDetails()
+        }
     }
 
     /// Ends the session because the workspace itself has gone.
@@ -434,7 +619,6 @@ final class QLabClient {
     // MARK: - Requests
 
     private struct PendingRequest {
-        let id: UUID
         /// The ``QLabReplyParser/correlationKey(for:)`` form, not the address as
         /// sent — see that method for why the two differ.
         let correlationKey: String
@@ -559,6 +743,13 @@ final class QLabClient {
                 throw RequestFailure.replyUnreadable(String(describing: error))
             }
         }
+
+        // The stream finished. Either the deadline above cancelled the
+        // connection, or this task was cancelled and took the loop down with
+        // it — and those must not report the same thing. Blaming a cancelled
+        // probe on QLab put "QLab did not answer" against a server nobody had
+        // finished asking.
+        try Task.checkCancellation()
         throw RequestFailure.timedOut(address: message.address)
     }
 
@@ -569,35 +760,61 @@ final class QLabClient {
         let id = UUID()
         let key = QLabReplyParser.correlationKey(for: message.address)
 
-        return try await withCheckedThrowingContinuation { continuation in
-            pending[id] = PendingRequest(
-                id: id, correlationKey: key, continuation: continuation
-            )
-            pendingByAddress[key, default: []].append(id)
-
-            Task { [weak self] in
-                guard let self else { return }
-                do {
-                    let byteCount = try await connection.send(message)
-                    self.log.record(
-                        OSCEvent(message: message, direction: .outbound, byteCount: byteCount)
-                    )
-                } catch {
-                    self.fail(requestID: id, with: error)
+        // The cancellation handler is what makes an awaited request abandonable.
+        // Without it, cancelling a task that was waiting here stopped nothing:
+        // the continuation stayed suspended for the full request timeout, its
+        // bookkeeping stayed in `pending`, and the caller — a debounced
+        // refresh, a superseded probe — went on waiting for an answer nobody
+        // wanted any more.
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                // Already cancelled before the continuation existed, so
+                // `onCancel` has run and found nothing to fail. Resume here or
+                // nothing ever will.
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
                     return
                 }
 
-                // Every request carries a deadline, so no call site can hang
-                // forever waiting on a QLab that has stopped answering.
-                self.timeoutTasks[id] = Task { [weak self] in
+                pending[id] = PendingRequest(correlationKey: key, continuation: continuation)
+                pendingByAddress[key, default: []].append(id)
+
+                Task { [weak self] in
                     guard let self else { return }
-                    try? await Task.sleep(for: .seconds(self.preferences.requestTimeout))
-                    guard !Task.isCancelled else { return }
-                    self.fail(
-                        requestID: id,
-                        with: RequestFailure.timedOut(address: message.address)
-                    )
+                    do {
+                        let byteCount = try await connection.send(message)
+                        self.log.record(
+                            OSCEvent(message: message, direction: .outbound, byteCount: byteCount)
+                        )
+                    } catch {
+                        self.fail(requestID: id, with: error)
+                        return
+                    }
+
+                    // Cancelled, failed, or answered while the send was in
+                    // flight. Arming a deadline for a request that is no
+                    // longer pending leaks a task and an entry in
+                    // `timeoutTasks` for the length of the timeout.
+                    guard self.pending[id] != nil else { return }
+
+                    // Every request carries a deadline, so no call site can
+                    // hang forever waiting on a QLab that has stopped
+                    // answering.
+                    self.timeoutTasks[id] = Task { [weak self] in
+                        guard let self else { return }
+                        try? await Task.sleep(for: .seconds(self.preferences.requestTimeout))
+                        guard !Task.isCancelled else { return }
+                        self.timeOut(requestID: id, address: message.address)
+                    }
                 }
+            }
+        } onCancel: {
+            // `onCancel` runs on whichever thread cancelled, so this has to
+            // hop. Both orderings are safe: if the hop wins, `fail` finds
+            // nothing and the guard above throws instead; if the body wins,
+            // this finds the installed continuation and fails it.
+            Task { @MainActor [weak self] in
+                self?.fail(requestID: id, with: CancellationError())
             }
         }
     }
@@ -610,6 +827,46 @@ final class QLabClient {
     private func fail(requestID id: UUID, with error: any Error) {
         guard let request = removePending(id) else { return }
         request.continuation.resume(throwing: error)
+    }
+
+    /// Gives up on a request, and remembers that QLab may yet answer it.
+    ///
+    /// Distinct from ``fail(requestID:with:)`` because a timeout is the one
+    /// failure whose reply might still be on its way — see
+    /// ``abandonedReplyDeadlines`` for why that has to be recorded rather than
+    /// forgotten.
+    private func timeOut(requestID id: UUID, address: String) {
+        guard let request = removePending(id) else { return }
+        abandonedReplyDeadlines[request.correlationKey, default: []]
+            .append(ContinuousClock.now + .seconds(preferences.requestTimeout))
+        request.continuation.resume(throwing: RequestFailure.timedOut(address: address))
+    }
+
+    /// Whether an incoming reply on `key` belongs to a request that already
+    /// timed out, and so must not be given to whatever is waiting now.
+    ///
+    /// Consuming is the point: each abandoned request accounts for exactly one
+    /// late reply. Expired entries are pruned on the way past, so a QLab that
+    /// went silent rather than slow does not leave this swallowing replies
+    /// indefinitely.
+    private func consumeAbandonedReply(forKey key: String) -> Bool {
+        guard var deadlines = abandonedReplyDeadlines[key] else { return false }
+
+        let now = ContinuousClock.now
+        deadlines.removeAll { $0 < now }
+        defer {
+            if deadlines.isEmpty {
+                abandonedReplyDeadlines.removeValue(forKey: key)
+            } else {
+                abandonedReplyDeadlines[key] = deadlines
+            }
+        }
+
+        guard !deadlines.isEmpty else { return false }
+        // FIFO, matching how replies are correlated: the oldest abandoned
+        // request is the one this reply answers.
+        deadlines.removeFirst()
+        return true
     }
 
     /// Removes a request from both indexes, returning it only the first time —
@@ -706,8 +963,21 @@ final class QLabClient {
         // Replies first: match against the oldest in-flight request for the
         // address the reply echoes.
         if QLabReplyParser.isReply(message) {
-            if let address = QLabReplyParser.correlationAddress(of: message),
-               let id = pendingByAddress[QLabReplyParser.correlationKey(for: address)]?.first {
+            guard let address = QLabReplyParser.correlationAddress(of: message) else { return }
+            let key = QLabReplyParser.correlationKey(for: address)
+
+            // A reply owed to a request that already timed out. It answers
+            // that request, not whichever one happens to be waiting on this
+            // address now, so it is dropped rather than misattributed.
+            if consumeAbandonedReply(forKey: key) {
+                lateReplyCount += 1
+                logger.debug(
+                    "Dropped a late reply for \(key, privacy: .public) after its request timed out"
+                )
+                return
+            }
+
+            if let id = pendingByAddress[key]?.first {
                 complete(requestID: id, with: message)
             }
             return
@@ -838,8 +1108,19 @@ final class QLabClient {
     /// from step 4 of the handshake reports *changes*, not current state.
     func refreshPlayheads() async {
         guard let workspaceID = workspace?.uniqueID else { return }
+        // The session this loop belongs to. `cueLists` is snapshotted by the
+        // `for` below, so without this check a loop that outlived its session
+        // would work through every list of a show that is no longer on screen.
+        let session = connection
 
         for list in cueLists {
+            // Checked before each request, not once at the top. A superseded
+            // debounced refresh and a torn-down session both have to stop
+            // here; the mutation side is already covered, because `request`
+            // re-checks the connection after its await and refuses to hand
+            // back a reply from a session that has ended.
+            guard !Task.isCancelled, connection === session else { return }
+
             do {
                 // `playbackPositionID`, not `…Id`. OSC addresses are
                 // case-sensitive and QLab 5 capitalises the `ID` — the QLab 4
@@ -867,6 +1148,11 @@ final class QLabClient {
                 }
 
                 setPlayhead(reply.data, forCueListID: list.uniqueID)
+            } catch is CancellationError {
+                // Cuety stopped asking. Nothing went wrong with the show, and
+                // logging a warning per remaining list would bury the ones
+                // that mean something.
+                return
             } catch {
                 // One list that won't answer must not stop the others: a cart,
                 // or a list QLab declines for, shouldn't blank the display.

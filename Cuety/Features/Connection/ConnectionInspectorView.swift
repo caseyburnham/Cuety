@@ -77,9 +77,14 @@ struct ConnectionInspectorView: View {
             }
             .animation(Motion.status, value: client.status)
 
-            if client.workspace != nil || client.status.hasLiveData {
+            if model.canDisconnect {
                 // Not a destructive role: dropping the connection loses nothing
                 // and is a click away from being undone.
+                //
+                // The condition is ``AppModel/canDisconnect``, not a third
+                // opinion of its own. This used to ask whether a workspace had
+                // been negotiated, which is neither what the menu asked nor
+                // what the sidebar asked.
                 Button("Disconnect") {
                     model.disconnect()
                 }
@@ -182,6 +187,33 @@ struct ConnectionInspectorView: View {
 
             if client.reconnectCount > 0 {
                 LabeledContent("Reconnections", value: client.reconnectCount.formatted())
+            }
+
+            if client.droppedEventCount > 0 {
+                LabeledContent("Dropped Events") {
+                    Text(client.droppedEventCount.formatted())
+                        .foregroundStyle(.orange)
+                }
+                .help("""
+                QLab sent updates faster than Cuety could read them, so some \
+                were lost. Cuety refetched the cue data to catch up, and \
+                rebuilds the session if it happens again straight away.
+                """)
+            }
+
+            // Only when it has happened. A permanent "Late Replies: 0" row
+            // would be one more number to scan past on a healthy session.
+            if client.lateReplyCount > 0 {
+                LabeledContent("Late Replies") {
+                    Text(client.lateReplyCount.formatted())
+                        .foregroundStyle(.orange)
+                }
+                .help("""
+                QLab answered these after Cuety had stopped waiting, so they \
+                were discarded rather than mistaken for the answer to a later \
+                request. A rising count means the request timeout is shorter \
+                than this QLab needs.
+                """)
             }
         }
     }

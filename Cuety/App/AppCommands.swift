@@ -33,18 +33,22 @@ struct AppCommands: Commands {
             // restarts discovery and rebuilds the session, which momentarily
             // interrupts the cue display. ⌘R is easy to hit by accident, so the
             // menu item should not undersell it.
+            // Both of these read their availability from ``AppModel`` rather
+            // than testing connection state here, so the menu and its
+            // keyboard shortcut cannot disagree with the sidebar or the
+            // inspector about whether the same action is possible.
             Button("Refresh Everything") {
                 Task { await model.refresh() }
             }
             .keyboardShortcut("r", modifiers: .command)
-            .disabled(model.isRefreshing)
+            .disabled(!model.canRefresh)
 
             Divider()
 
             Button("Disconnect") {
                 model.disconnect()
             }
-            .disabled(!model.client.status.hasLiveData)
+            .disabled(!model.canDisconnect)
         }
     }
 }

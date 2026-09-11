@@ -23,9 +23,14 @@ final class AppModel {
     /// True while workspace discovery is refreshing.
     private(set) var isRefreshing = false
 
-    /// The servers the in-flight refresh is actually contacting. Not every
-    /// refresh asks every server, so the sidebar needs this to avoid claiming
-    /// it's looking for workspaces on a machine it has decided to leave alone.
+    /// The servers a probe is contacting *right now*.
+    ///
+    /// Not every refresh asks every server, so the sidebar needs this to avoid
+    /// claiming it is looking for workspaces on a machine it has decided to
+    /// leave alone. Probes run one at a time, so in practice this holds one ID
+    /// during a global refresh and the spinner walks down the list — which is
+    /// the truthful rendering. Marking every queued server as "refreshing" up
+    /// front made the same claim about machines that had not been asked yet.
     private(set) var refreshingServerIDs: Set<String> = []
 
     // MARK: Passcode prompting
@@ -45,6 +50,13 @@ final class AppModel {
     }
 
     // MARK: Presentation
+    //
+    // Both of these describe *the* main window, and there is now exactly one
+    // of those — a single `Window` scene. They always lived here, which under
+    // a `WindowGroup` meant two main windows shared one presentation state and
+    // one sidebar visibility: entering presentation mode in either collapsed
+    // the sidebar in both. That is fixed by there being one window, not by
+    // moving state, because per-window state is not what this app wants.
 
     /// Full-screen stage mode: sidebar, header, and drawer hidden, cue number
     /// scaled to fill the window.
@@ -64,7 +76,11 @@ final class AppModel {
         let log = ActivityLog()
         self.log = log
         self.client = QLabClient(preferences: preferences, log: log)
-        self.browser = QLabBrowser()
+        // The same store the preferences use, not `.standard`. The browser
+        // persists the manual server list, so reaching for the shared domain
+        // here made test isolation a fiction — an isolated `Preferences` still
+        // left tests adding servers to whatever the real app would read back.
+        self.browser = QLabBrowser(defaults: preferences.defaults)
         self.client.onPasscodeRequired = { [weak self] rejected in
             guard let self, let selection = self.selection else { return }
             if rejected { self.forgetPasscode(for: selection) }
@@ -101,16 +117,48 @@ final class AppModel {
 
     // MARK: - Lifecycle
 
+    /// The launch sequence: discovery, one probe of the network, and the
+    /// automatic reconnect to the last-used workspace.
+    ///
+    /// Held rather than fired and forgotten, for two reasons. It has to be
+    /// stoppable — see ``disconnect()`` — and holding it is what makes
+    /// ``start()`` idempotent.
+    ///
+    /// Never cleared on completion: the guard below asks "has this launched?",
+    /// not "is it running?". Clearing it would let a second call re-run
+    /// discovery and auto-connect after the first had finished, which is the
+    /// same fault by a slower route.
+    ///
+    /// Readable rather than fully private so the two properties that make it
+    /// safe can be asserted: that it is created once, and that it is cancelled
+    /// when the operator disconnects.
+    private(set) var startupTask: Task<Void, Never>?
+
+    /// Starts discovery and the launch reconnect. Safe to call more than once;
+    /// only the first call does anything.
+    ///
+    /// The main window is a single `Window` now, so in practice this runs once
+    /// — but the guarantee must not rest on the scene type. Closing the window
+    /// and reopening it from the Window menu runs the view's `task` again, and
+    /// a future scene change should not be able to quietly restore the old
+    /// behaviour where every window started its own untracked launch sequence.
     func start() {
+        guard startupTask == nil else { return }
+
         browser.start()
-        Task {
-            // Launch discovery deliberately leaves "This Mac" alone. Bonjour
-            // servers are advertising QLab, so asking them costs nothing and
-            // tells us something; 127.0.0.1 is a permanent fixture of the
-            // sidebar whether or not QLab is running here, and probing it
-            // unasked just refuses a connection every launch.
-            await refresh(probingLocalhost: false)
-            await autoConnectIfNeeded()
+        startupTask = Task { [weak self] in
+            guard let self else { return }
+            // Every server, This Mac included. Launch used to skip it, on the
+            // grounds that probing 127.0.0.1 unasked "just refuses a
+            // connection every launch" — but QLab on this Mac is the single
+            // most common setup, so the usual outcome was the operator having
+            // to click Check for Workspaces before Cuety would look at the
+            // machine it is running on. Meanwhile every Bonjour server was
+            // probed automatically, which made the exclusion inconsistent as
+            // well as unhelpful. A refused connection on loopback is
+            // immediate and the sidebar has honest wording for it.
+            await self.refresh()
+            await self.autoConnectIfNeeded()
         }
     }
 
@@ -132,39 +180,54 @@ final class AppModel {
     /// reaching for Refresh is usually doing it *because* something has gone
     /// stale in a way that asking politely won't fix.
     ///
-    /// - Parameter probingLocalhost: Whether step 2 includes the built-in
-    ///   "This Mac" entry. Refresh is an explicit request, so it defaults to
-    ///   asking everything; launch passes `false` to leave localhost untouched.
-    func refresh(probingLocalhost: Bool = true) async {
-        guard !isRefreshing else { return }
+    /// Asking again **supersedes** the refresh in progress rather than being
+    /// refused. A refresh can take a while — one unreachable server costs a
+    /// full request timeout, and they are probed one after another — and
+    /// refusing for the duration meant a stale sidebar the operator could see
+    /// was stale and could not do anything about. Pressing it again is the
+    /// clearest possible statement of intent, so it starts over.
+    func refresh() async {
+        // Cancel first: the in-flight pass stops at its next server, and its
+        // cancelled probe publishes nothing.
+        refreshTask?.cancel()
+
+        refreshGeneration += 1
+        let generation = refreshGeneration
         isRefreshing = true
-        defer { isRefreshing = false }
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performRefresh(generation: generation)
+        }
+        refreshTask = task
+        await task.value
+    }
+
+    private var refreshTask: Task<Void, Never>?
+
+    /// Which refresh owns `isRefreshing`, so a superseded pass finishing late
+    /// cannot switch the indicator off under the one that replaced it.
+    private var refreshGeneration = 0
+
+    private func performRefresh(generation: Int) async {
+        defer {
+            if generation == refreshGeneration { isRefreshing = false }
+        }
 
         browser.restartBrowsing()
 
-        let localhostID = QLabServer.localhost().id
-        var updatedServers = browser.servers
+        let targets = browser.servers
 
-        let probedIDs = Set(
-            updatedServers.lazy
-                .filter { probingLocalhost || $0.id != localhostID }
-                .map(\.id)
-        )
-        refreshingServerIDs = probedIDs
-        defer { refreshingServerIDs = [] }
-
-        for (index, server) in updatedServers.enumerated() {
-            guard probedIDs.contains(server.id) else { continue }
-            do {
-                updatedServers[index].workspaces = try await client.fetchWorkspaces(from: server)
-                updatedServers[index].lastError = nil
-            } catch {
-                updatedServers[index].workspaces = []
-                updatedServers[index].lastError = String(describing: error)
-            }
-            updatedServers[index].hasBeenProbed = true
+        for target in targets {
+            // Checked before each request, not just at the top. A cancelled
+            // launch sequence — the operator disconnecting inside the
+            // auto-connect window — must stop asking, not work through the
+            // rest of the network first.
+            guard !Task.isCancelled else { return }
+            await probeWorkspaces(on: target)
         }
-        browser.update(updatedServers)
+
+        guard !Task.isCancelled else { return }
 
         // Any session Cuety is holding open, not just a live one. An operator
         // reaching for Refresh while a reconnect is backing off wants it tried
@@ -176,18 +239,69 @@ final class AppModel {
     }
 
     /// Re-asks one server what it has open, leaving the other servers and the
-    /// live session alone — which ``refresh(probingLocalhost:)`` would not.
+    /// live session alone — which ``refresh()`` would not.
     func refreshWorkspaces(onServerWithID id: String) async {
-        guard var server = browser.server(withID: id) else { return }
+        guard let server = browser.server(withID: id) else { return }
+        await probeWorkspaces(on: server)
+    }
+
+    /// Which probe currently owns each server's result.
+    ///
+    /// Ownership is per *server*, which is the level the conflict actually
+    /// happens at. A global refresh used to snapshot the whole server list,
+    /// probe some of it, and publish the entire snapshot at the end — so a
+    /// single-server refresh that landed in between was overwritten by values
+    /// the global refresh had never even re-asked for. Superseding the whole
+    /// global refresh instead would be the opposite mistake: re-asking one
+    /// machine is no reason to abandon the other five.
+    private var probeGenerationByServerID: [String: Int] = [:]
+    private var lastProbeGeneration = 0
+
+    /// Asks one server what it has open and publishes the answer, unless a
+    /// newer probe of the same server has taken over.
+    ///
+    /// The single place server-probe bookkeeping lives: the fetch, the error
+    /// capture, the `hasBeenProbed` flag, and the in-flight indicator. It was
+    /// written out twice before, once per caller, and the two copies had
+    /// already drifted.
+    private func probeWorkspaces(on target: QLabServer) async {
+        lastProbeGeneration += 1
+        let generation = lastProbeGeneration
+        probeGenerationByServerID[target.id] = generation
+
+        refreshingServerIDs.insert(target.id)
+
+        var server = target
         do {
-            server.workspaces = try await client.fetchWorkspaces(from: server)
+            server.workspaces = try await client.fetchWorkspaces(from: target)
             server.lastError = nil
+        } catch is CancellationError {
+            // Cuety stopped asking. That is not a fault of the server's, and
+            // recording it as one would put "the operation was cancelled"
+            // under a machine that was answering perfectly well. Clear the
+            // indicator here rather than relying on a caller's cleanup, or an
+            // abandoned probe leaves a spinner running for good.
+            relinquishProbe(of: target.id, generation: generation)
+            return
         } catch {
             server.workspaces = []
             server.lastError = String(describing: error)
         }
         server.hasBeenProbed = true
+
+        // Superseded while the request was in flight. The newer probe's answer
+        // is the current one, and it owns the indicator too — so this one
+        // publishes nothing and touches nothing.
+        guard probeGenerationByServerID[target.id] == generation else { return }
+        relinquishProbe(of: target.id, generation: generation)
         browser.update(server)
+    }
+
+    /// Hands back ownership of a server's probe, if this probe still holds it.
+    private func relinquishProbe(of serverID: String, generation: Int) {
+        guard probeGenerationByServerID[serverID] == generation else { return }
+        probeGenerationByServerID.removeValue(forKey: serverID)
+        refreshingServerIDs.remove(serverID)
     }
 
     // MARK: - Auto-connect
@@ -205,20 +319,19 @@ final class AppModel {
     /// when the app finishes starting. Instead this re-asks over a bounded
     /// window and gives up quietly when it closes.
     ///
-    /// Every path out checks `selection` first. An automatic connection must
-    /// never overrule the operator — if they pick a workspace themselves while
-    /// this is still polling, that choice stands and this stops.
+    /// Every path out checks cancellation and `selection` first. An automatic
+    /// connection must never overrule the operator — if they pick a workspace
+    /// themselves while this is still polling, that choice stands and this
+    /// stops. And if they *disconnect* while it is polling, cancellation is
+    /// what stops it: clearing the selection would otherwise read as "nothing
+    /// chosen yet" and hand the show straight back to the workspace they just
+    /// left.
     private func autoConnectIfNeeded() async {
         guard preferences.autoConnect, let target = preferences.lastWorkspace else { return }
 
-        // Localhost is otherwise left alone, but a remembered workspace on this
-        // Mac is the operator asking for it — polling has to look there or the
-        // window would expire without ever having checked.
-        let targetIsLocalhost = target.serverID == QLabServer.localhost().id
-
         let deadline = ContinuousClock.now + Self.autoConnectWindow
         while ContinuousClock.now < deadline {
-            guard selection == nil else { return }
+            guard !Task.isCancelled, selection == nil else { return }
 
             if isKnown(target) {
                 await connect(to: target, useSavedPasscode: true)
@@ -226,8 +339,8 @@ final class AppModel {
             }
 
             try? await Task.sleep(for: Self.autoConnectPollInterval)
-            guard selection == nil else { return }
-            await refresh(probingLocalhost: targetIsLocalhost)
+            guard !Task.isCancelled, selection == nil else { return }
+            await refresh()
         }
     }
 
@@ -238,6 +351,45 @@ final class AppModel {
             .workspaces.contains { $0.uniqueID == selection.workspaceID }
             ?? false
     }
+
+    // MARK: - Connection action availability
+    //
+    // One definition per action, stated in terms of what the operator is
+    // trying to do rather than what data happens to be on screen. Three
+    // surfaces offer these actions — the Connection menu, the sidebar, and the
+    // connection inspector — and they disagreed about all of them.
+    //
+    // The rule for every one: `hasLiveData` answers "is there anything to
+    // show", which is not the same question as "is there a session here". A
+    // reconnect backoff has nothing to show and is emphatically a session.
+
+    /// Whether Disconnect should be offered.
+    ///
+    /// Any session Cuety is holding open — live, mid-connect, or waiting out a
+    /// reconnect backoff. The menu tested `hasLiveData`, which greyed
+    /// Disconnect out for the whole thirty-second backoff: precisely the
+    /// stretch in which an operator wants to call it off, and during which the
+    /// alternative on offer was a Connect button for the workspace Cuety was
+    /// already trying to reach.
+    var canDisconnect: Bool { client.isSessionActive }
+
+    /// Whether starting a *new* connection should be offered.
+    ///
+    /// Blocked only while an attempt is genuinely in flight. `reconnecting` is
+    /// deliberately not blocked: its backoff can run for half a minute, and an
+    /// operator who has decided to go somewhere else should not have to wait
+    /// it out — see ``ConnectionStatus/isTransitional``.
+    var canConnect: Bool { !client.status.isTransitional }
+
+    /// Whether Refresh should be offered.
+    ///
+    /// Deliberately *not* blocked by a refresh already running — pressing it
+    /// again supersedes that one, so the operator is never stuck watching a
+    /// sidebar they know is stale. It is blocked during connection setup,
+    /// because Refresh rebuilds the live session and would tear down the very
+    /// attempt it was racing. The menu allowed exactly that, while the
+    /// sidebar's button did not.
+    var canRefresh: Bool { !client.status.isTransitional }
 
     // MARK: - Connecting
 
@@ -290,6 +442,15 @@ final class AppModel {
     }
 
     func disconnect() {
+        // Stop the launch reconnect first, and before `selection` is cleared.
+        //
+        // ``autoConnectIfNeeded()`` polls for up to ten seconds and stands
+        // down as soon as the operator has chosen a workspace — but clearing
+        // the selection is exactly what re-arms it. Disconnecting inside that
+        // window therefore used to be undone a second or two later by Cuety
+        // reconnecting to the workspace the operator had just left.
+        startupTask?.cancel()
+
         passcodePrompt = nil
         client.disconnect()
         selection = nil

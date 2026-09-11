@@ -21,6 +21,15 @@ Trust the named symbol, not the number.
 **Landing rule.** One concern per commit, small enough to review. Phase 4's mechanical
 changes must not land before `R2` (formatter configuration) is committed.
 
+> **Broken once, deliberately recorded.** Phase 2 landed as a single commit of roughly
+> 1,600 lines spanning `F7`–`F10` plus six faults found by running the app. By the time it
+> was ready to land, the concerns could no longer be separated: `AppModel.refresh()` holds
+> `F8`'s per-server probe ownership and the later supersession rewrite in the same few
+> lines, `QLabClient.tearDownSession` holds `F8`, `F9` and the disconnect-logging fix, and
+> the tests reference API from several concerns at once — so no intermediate commit would
+> have built. The rule has to be followed *while* working, not retrofitted. Phase 3 onward:
+> commit at each item's **Done when**, before starting the next.
+
 ---
 
 ## Progress
@@ -28,7 +37,7 @@ changes must not land before `R2` (formatter configuration) is committed.
 | Phase | Scope | Items | Done |
 |---|---|---|---|
 | 1 | Establish operator trust | 4 | 4 / 4 |
-| 2 | Stabilize lifecycle ownership | 4 | 0 / 4 |
+| 2 | Stabilize lifecycle ownership | 4 | 4 / 4 |
 | 3 | Make data and Settings coherent | 4 | 0 / 4 |
 | 4 | Simplify and standardize | 17 | 0 / 17 |
 | 5 | Presentation and release readiness | 9 | 0 / 9 |
@@ -54,15 +63,13 @@ does not have to be rediscovered.
 | 2026-09-09 | Drawer vocabulary (`F3`) | Positional: rows above / rows below the playhead | Applies to the `Role` cases, `CueGraph`'s methods, accessibility labels and the Settings steppers. Persisted preference keys keep their original spellings so no existing setting is reset. |
 | 2026-09-09 | Drawer granularity (`F3`) | A group is one row; its children are not rows | Operator's call. The drawer shows the list as QLab draws it — a group is a single line until opened — instead of expanding a four-cue show with one group into a dozen rows. `CueGraph.rows` is top-level only, but every nested cue stays indexed against its top-level row, so a playhead inside a group still has a position and the display can still name the actual cue. Boundary claims became strict, which removes a real falsehood: "End of List" no longer appears for a playhead inside the final group. |
 | 2026-09-09 | Redaction layer (`F2`) | At `OSCEvent` construction, on structured arguments | Makes redaction impossible to forget rather than a rule every log surface has to remember, and lands it above the rendering that `S5` will remove. |
+| 2026-09-09 | Event-buffer overflow (`F9`) | Resynchronize; escalate to a forced reconnect on a repeat | First overflow refetches cue lists, playheads and pill details and keeps the session — cheap, and invisible mid-show. A second overflow inside a short window means resynchronizing did not fix it, which points at a lapsed subscription rather than a burst, so the socket and both subscriptions get rebuilt. Never unbounded buffering. |
+| 2026-09-09 | Ambiguous late replies (`F8`) | Retire the request ID on timeout; drop the late reply | A timed-out request can never be satisfied afterwards, so a delayed reply cannot be attributed to a later request for the same address. The reply is logged and discarded rather than triggering a refresh, which on a slow QLab would turn every timeout into a refresh storm. Correlating by an explicit request ID was investigated as part of this — see `F8`'s findings for whether QLab's envelope can carry one. |
 
 ### Still open
 
-| ID | Question | Blocks |
-|---|---|---|
-| — | Recovery policy for event-buffer overflow: full resynchronization vs. forced reconnect (`F9`) | `F9` implementation |
-| — | Recovery policy for ambiguous late replies: drop vs. resync-and-retry (`F8`) | `F8` implementation |
-
-Resolve both during Phase 2 design, before writing the code, and record the answer above.
+None. Both Phase 2 policy questions were settled on 2026-09-09 and are recorded in the
+decisions log above.
 
 ---
 
@@ -341,6 +348,10 @@ revive obsolete state.
 **Phase exit criterion.** No code path can resurrect a session or overwrite fresh state
 with the result of an operation that has been superseded.
 
+**Status: met in code.** All four items implemented; 208 tests passing. One sub-item
+remains open — `F10`'s keyboard-shortcut click-through, which is a manual pass rather than
+a code change.
+
 ---
 
 ### F7 · P2 — Opening another main window can reconnect the shared session
@@ -354,16 +365,41 @@ session. Presentation state and sidebar visibility are shared across windows reg
 *Evidence:* `Cuety/App/CuetyApp.swift:16`, `Cuety/Features/MainWindowView.swift:14`,
 `Cuety/Model/AppModel.swift:104`.
 
-- [ ] Replace the main `WindowGroup` with a single `Window`.
-- [ ] Make `model.start()` idempotent anyway — the guarantee should not depend on the scene
+- [x] Replace the main `WindowGroup` with a single `Window`.
+- [x] Make `model.start()` idempotent anyway — the guarantee should not depend on the scene
       type alone.
-- [ ] Track the startup task so it can be cancelled, and ensure a second call cannot start
+- [x] Track the startup task so it can be cancelled, and ensure a second call cannot start
       a second one.
-- [ ] Confirm presentation state and sidebar visibility now have exactly one owner.
-- [ ] Check menu commands and any `openWindow` call sites still behave with a single window.
+- [x] Confirm presentation state and sidebar visibility now have exactly one owner.
+- [x] Check menu commands and any `openWindow` call sites still behave with a single window.
 
 **Done when:** there is no user action that produces a second main window, and calling
 startup twice performs the work once.
+
+**Landed.** `Window("Cuety", id: WindowID.main.rawValue)` replaces the group, which removes
+File ▸ New Window as a matter of scene type rather than by disabling a command.
+`AppModel.startupTask` makes `start()` idempotent independently of that: the guard asks
+"has this launched?" and the handle is never cleared on completion, so a second call after
+the first has finished cannot re-run discovery and auto-connect either.
+
+*A real fault found while wiring the cancellation up.* `autoConnectIfNeeded()` polls for ten
+seconds and stands down once a workspace is selected — but `disconnect()` clears the
+selection, which reads as "nothing chosen yet". Disconnecting inside the launch window was
+therefore undone a second or two later by Cuety reconnecting to the workspace the operator
+had just left. `disconnect()` now cancels the startup task first, and the poll checks
+`Task.isCancelled` as well as the selection. This is what the tracked task is *for*, rather
+than cancellability for its own sake.
+
+*Ownership:* `isPresenting` and `sidebarVisibility` always lived on `AppModel`, which under
+a `WindowGroup` meant two main windows shared one presentation state — entering stage mode
+in either collapsed the sidebar in both. One window fixes it; per-window state is not what
+this app wants. `openWindow` is only ever called for the two auxiliary `Window` scenes,
+which were already single, and `AppCommands` contributes no window commands.
+
+*Tests:* `CuetyTests/AppModelLifecycleTests.swift` — `startIsIdempotent`,
+`disconnectCancelsAutoConnect`, `cancellationIsNotUndoneByAnotherStart`. `V8` (confirming a
+second window cannot be opened) is now a property of the scene type rather than of
+behaviour, but still wants a click-through.
 
 ---
 
@@ -379,19 +415,68 @@ request to the same address.
 *Evidence:* `Cuety/Networking/QLabClient.swift:536` (confirmed: continuation with no
 `onCancel`; `pendingByAddress` FIFO at `:547`), `Cuety/Model/AppModel.swift:138`.
 
-- [ ] Add a cancellation handler to the request primitive so an awaited request fails
+- [x] Add a cancellation handler to the request primitive so an awaited request fails
       promptly on cancellation and its bookkeeping is cleaned up.
-- [ ] Give every refresh operation explicit ownership — a generation token or single owning
+- [x] Give every refresh operation explicit ownership — a generation token or single owning
       task — so a superseded refresh cannot mutate state.
-- [ ] Stop obsolete multi-request loops before their next request *and* before their next
+- [x] Stop obsolete multi-request loops before their next request *and* before their next
       state mutation, not only at loop entry.
-- [ ] Define the recovery policy for ambiguous late replies (see **Still open**) and
+- [x] Define the recovery policy for ambiguous late replies (see **Still open**) and
       implement it; at minimum a timed-out request's ID must not be satisfiable later.
-- [ ] Reconcile global vs. single-server refresh so neither clobbers the other.
-- [ ] Tests: cancel mid-request; late reply after timeout; overlapping refreshes.
+- [x] Reconcile global vs. single-server refresh so neither clobbers the other.
+- [x] Tests: cancel mid-request; late reply after timeout; overlapping refreshes.
 
 **Done when:** teardown and supersession both stop in-flight work deterministically, and a
 late reply cannot be attributed to the wrong request.
+
+**Landed.** `sendAndAwaitReply` is wrapped in `withTaskCancellationHandler`, so cancelling
+a task that was awaiting a reply now fails it at once instead of leaving the continuation
+suspended for the full timeout with its bookkeeping intact. The continuation body also
+handles being already-cancelled before it was installed, which is the one ordering that
+would otherwise never resume. The deadline is armed only if the request is still pending
+after the send, which stops a leaked timeout task per cancelled request.
+
+*Late replies — protocol finding first.* Correlating by an explicit request ID is **not
+available at this protocol**: QLab's reply envelope carries `workspace_id`, `address`,
+`status` and `data`, and there is nowhere to round-trip an identifier of Cuety's own. So
+the agreed policy is what is implemented. A timeout retires its request ID *and* records
+what QLab still owes on that correlation key; the next reply on the key is recognised as
+the abandoned request's and dropped rather than handed to whatever is waiting now. The
+entries expire after one request timeout, and that bound is stated honestly in
+`abandonedReplyDeadlines`: if QLab never answers at all, the debt is spent on the next
+request instead, costing one wasted request per genuine timeout before it ages out. Drops
+are counted in `lateReplyCount` and shown in the connection inspector — a rising count
+means the request timeout is shorter than this QLab needs, which is something the operator
+can act on.
+
+*Refresh ownership is per **server**, which is the level the conflict was at.* The global
+refresh used to snapshot the whole server list, probe part of it, and publish the entire
+snapshot at the end — overwriting fresh results for servers it had never re-asked. It now
+publishes each server as its probe completes, and `probeWorkspaces(on:)` is the single
+owner of probe bookkeeping: the fetch, the error capture, `hasBeenProbed`, and the
+in-flight indicator, all in one place instead of written out once per caller. A
+generation per server means a superseded probe publishes nothing and touches nothing.
+Superseding the *whole* global refresh would have been the opposite mistake — re-asking one
+machine is no reason to abandon the other five.
+
+*Obsolete loops:* `refresh` checks `Task.isCancelled` before each probe, and
+`refreshPlayheads` checks both cancellation and connection identity before each request.
+The mutation half was already safe — `request` re-checks the connection after its await and
+refuses to return a reply from a session that has ended — which is now stated where the
+loop is. A cancelled probe no longer records "the operation was cancelled" as a *server*
+error, and a cancelled `refreshPlayheads` returns instead of logging a warning per
+remaining list.
+
+*Side effects:* `D6` (`PendingRequest.id`) is removed, and the probe-consolidation half of
+`S2` is done. `refreshingServerIDs` now holds only what is genuinely in flight, so the
+sidebar spinner walks the list instead of appearing on machines that have not been asked
+yet — the truthful rendering, and noted on the property.
+
+*Tests:* `cancellingProbeFailsPromptly`, `cancellingSessionRequestFailsPromptly`,
+`lateReplyIsNotGivenToALaterRequest` (withholds `/thump` replies past their timeout, then
+releases them — the heartbeat is where identical replies on one address collide),
+`skippedServersAreNotClobbered`. The test peer gained `withholdRepliesTo` /
+`releaseWithheldReplies`: a QLab that is slow rather than silent.
 
 ---
 
@@ -405,15 +490,58 @@ updates, so a burst can drop a reply.
 *Evidence:* `Cuety/Networking/QLabConnection.swift:70`,
 [buffering policy](https://developer.apple.com/documentation/swift/asyncstream/continuation/bufferingpolicy).
 
-- [ ] Inspect the `yield` result and detect the dropped/terminated cases.
-- [ ] Decide the recovery policy (see **Still open**) — resynchronize or force reconnect.
+- [x] Inspect the `yield` result and detect the dropped/terminated cases.
+- [x] Decide the recovery policy (see **Still open**) — resynchronize or force reconnect.
       Do **not** switch to unbounded buffering.
-- [ ] Implement recovery, and surface the event so it is diagnosable rather than silent.
-- [ ] Correct the "buffer rather than drop" comment (tracked jointly with `S6`).
-- [ ] Test: burst enough events to overflow and assert recovery runs.
+- [x] Implement recovery, and surface the event so it is diagnosable rather than silent.
+- [x] Correct the "buffer rather than drop" comment (tracked jointly with `S6`).
+- [x] Test: burst enough events to overflow and assert recovery runs.
 
 **Done when:** overflow triggers a deliberate, observable recovery and the comment matches
 the code.
+
+**Landed.** `yield` now switches on its result. `.dropped` counts the loss and reports it;
+`.terminated` is deliberately not treated as an overflow, because whoever finished the
+stream is already tearing the connection down. The capacity is a named constant and the
+buffering stays bounded. The old comment claimed a burst "must not lose the playhead change
+hiding inside it" — with `bufferingNewest` that is exactly what it does, and the comment
+now says so and points at the recovery.
+
+Reporting does not go through the stream, which is the channel that is full at the moment
+the news needs to travel; it goes through a handler installed before `start()`. Reports are
+coalesced into 100 ms episodes, so one burst produces one report with a total rather than
+one call per lost event.
+
+*Policy, as agreed:* first overflow resynchronizes — cue tree, playheads, then the visible
+cue's details, which is `F5`'s sequence — and a second within ten seconds forces a
+reconnect, on the grounds that a refetch which did not hold is the signature of a lapsed
+subscription rather than a busy moment. Recovery is debounced 250 ms so it does not run
+into the burst that caused it. `droppedEventCount` is shown in the connection inspector.
+
+The choice itself is `QLabClient.recovery(after:at:)` returning `EventLossRecovery`
+(`.resynchronize` / `.rebuildSession`) — pure, `nonisolated`, no socket and no clock of its
+own. Extracted deliberately: the rule was three lines of instant arithmetic inside the
+async method that acted on it, which made the policy unreachable except through a real
+overflow. Separated, it is both a named thing and directly assertable.
+
+**A finding worth recording: overflow needs a stalled *consumer*, not a fast producer.**
+The receive loop only re-arms after handing each packet to the actor, so inbound traffic
+paces itself and the buffer stays about one event deep however hard QLab pushes — a burst
+of four thousand messages does not overflow it. What does overflow it is the reading side
+stopping while messages keep arriving, which on a real show means the main actor held up
+behind a redraw. `stalledConsumerOverflowIsReported` reproduces exactly that, and asserts
+both the detection and the coalescing.
+
+*Tests:* `CuetyTests/EventLossRecoveryTests.swift` covers the policy directly — first loss,
+repeat inside the window, loss after the window, the window boundary in both directions,
+two losses in one instant, and a cleared history after an escalation (the rule that makes
+teardown resetting `lastOverflowRecovery` correct rather than incidental).
+
+**Still not covered end to end:** the *wiring* between a report and the branch it selects.
+Reaching that needs `QLabClient`'s own event consumer stalled, which nothing outside the
+client can do without a hook that fakes the trigger — and a faked trigger tests the fake.
+What remains uncovered is now straight-line delegation rather than the decision itself.
+`V7` is still the only thing that exercises a real burst against real QLab.
 
 ---
 
@@ -426,15 +554,49 @@ Refresh can run during connection setup while sidebar Refresh is disabled.
 *Evidence:* `Cuety/App/AppCommands.swift:34`, `Cuety/Features/Sidebar/WorkspaceSidebar.swift:64`,
 `Cuety/Features/Connection/ConnectionInspectorView.swift:84`.
 
-- [ ] Define availability in one place, expressed in terms of *session intent* rather than
+- [x] Define availability in one place, expressed in terms of *session intent* rather than
       "is live data present".
-- [ ] Point the menu, sidebar and inspector at those single definitions.
-- [ ] Settle the intended behaviour for each action while reconnecting and while
+- [x] Point the menu, sidebar and inspector at those single definitions.
+- [x] Settle the intended behaviour for each action while reconnecting and while
       connecting, and document it.
 - [ ] Verify with keyboard shortcuts as well as clicks.
 
 **Done when:** for any session state, every control offering the same action agrees on
 whether it is enabled.
+
+**Landed.** Three definitions on `AppModel`, each stated in terms of what the operator is
+trying to do:
+
+| Action | Definition | Behaviour while *connecting* | Behaviour while *reconnecting* |
+|---|---|---|---|
+| `canDisconnect` | `client.isSessionActive` | Available — mid-connect is a session to call off | Available |
+| `canConnect` | `!client.status.isTransitional` | Blocked | Available |
+| `canRefresh` | `!client.status.isTransitional` | Blocked | Available |
+
+The common thread: `hasLiveData` answers "is there anything to show", which is not the
+question. A reconnect backoff has nothing to show and is emphatically a session — so the
+menu's old `hasLiveData` test greyed Disconnect out for the whole thirty-second backoff,
+the one stretch in which an operator most wants it, while offering Connect for the
+workspace Cuety was already trying to reach. Refresh rebuilds the session as well as
+re-asking the network, so it stands down during setup; the menu used to permit it and the
+sidebar's button did not.
+
+Menu, sidebar (context menu, Refresh button, Remove Server, and the selection binding) and
+inspector now all read these. The inspector's third condition — whether a workspace had
+been negotiated — is gone. The sidebar keeps `isConnecting` as a re-entrancy guard for its
+own async action, since a double-click can land twice before `status` becomes `connecting`,
+and that is now stated as distinct from availability.
+
+*`S2`'s other half done here:* the sidebar's `probingServerIDs` was a second copy of
+`refreshingServerIDs`, and the two had drifted into showing spinners under different
+conditions. It is gone; `AppModel` owns probe bookkeeping.
+
+*Tests:* `connectionActionAvailability` (connected, then dropped and backing off),
+`availabilityDuringConnectionSetup` (held in `connecting` by a mute peer), `idleAvailability`.
+
+**Outstanding:** the keyboard-shortcut click-through — ⌘R in each state. The definitions
+are shared with the menu items that carry the shortcuts, so this is confirmation rather
+than discovery, but it has not been done.
 
 ---
 
@@ -529,11 +691,74 @@ discovered servers miss that refresh's workspace probes.
 - [ ] Define a canonical server identity, separate from the display name.
 - [ ] Normalize manual host entry into that identity, including localhost aliases.
 - [ ] De-duplicate the UI on identity rather than name.
-- [ ] Give discovery a clear lifecycle so servers found during a refresh are probed by it.
+- [x] Give discovery a clear lifecycle so servers found during a refresh are probed by it.
 - [ ] Test equivalent host spellings and a server discovered mid-refresh.
 
 **Done when:** the same server entered two ways appears once, and a server discovered
 during a refresh gets its workspace probe.
+
+### Found by running the app, 2026-09-10
+
+Five faults from one session with QLab open locally. Four are fixed; the fifth is the
+identity work still listed above.
+
+**1. Four spurious `127.0.0.1` rows — a test-isolation hole, not a discovery bug.**
+`AppModel.init` built `QLabBrowser()` against `.standard` regardless of the `Preferences`
+it was handed, so injecting an isolated defaults suite isolated the preferences and nothing
+the *browser* persisted. The `F10` tests added manual servers on the peer's ephemeral ports
+and wrote them into the real app's sidebar, where four of them accumulated. Now
+`QLabBrowser(defaults: preferences.defaults)` — one store per model — and
+`Preferences.defaults` is readable for exactly that reason. The four stale entries were
+deleted from the container plist.
+
+This is worth remembering as a class of bug: partial injection reads as isolation and
+isn't. Anything persisting under an `AppModel` has to take the same store.
+
+**2. This Mac was not probed at launch.** Deliberate, and wrong. The rationale was that
+probing loopback unasked "just refuses a connection every launch" — but QLab on this Mac
+is the most common setup of all, so the usual outcome was the operator clicking *Check for
+Workspaces* before Cuety would look at the machine it was running on, while every Bonjour
+server got probed automatically. The `probingLocalhost` parameter is gone entirely, along
+with the `targetIsLocalhost` special case it forced on `autoConnectIfNeeded`.
+
+**3. Refresh was locked out for the duration of a refresh.** With four unreachable servers
+probed one after another at a full request timeout each, that was a long time to stare at a
+sidebar you knew was stale. `refresh()` now supersedes the pass in progress —
+`refreshGeneration` keeps a superseded pass from switching the indicator off under its
+replacement — and `canRefresh` no longer consults `isRefreshing`.
+
+**4. Refresh gave no sign of touching a server that already had workspaces.** The
+"Looking for workspaces…" row only renders when a server has *no* workspaces, so This Mac
+showed nothing at all while being re-probed, which reads as Refresh having skipped it. The
+in-flight indicator now lives in the section header, where it shows either way.
+
+**5. The Refresh button's spin.** Now magic-replaces between `arrow.clockwise` and
+`progress.indicator`, with `.variableColor.iterative` on the latter. A slowly rotating
+glyph reads as a stuck animation and says nothing about how long there is to wait.
+
+Reached the right answer on the second try, which is worth writing down. The first attempt
+swapped in a `ProgressView` with a `blurReplace` transition, on the reasoning that
+`.replace.magic` is a *symbol* effect and a `ProgressView` is an `NSProgressIndicator`
+with nothing to morph. True, but the wrong conclusion: `progress.indicator` **is** a
+symbol, and `ConnectionStatus.connecting` was already using it with the same effect. So a
+genuine morph was available all along, and taking it means "Cuety is working" now looks
+identical wherever it appears instead of having two visual dialects. Reduce Motion
+suppresses the effect but keeps the glyph swap.
+
+The section-header indicator (fault 4) stays a `ProgressView` with a `blurReplace`: it
+appears and disappears rather than replacing anything, and a spinner is the standard
+control for that position.
+
+*Tests:* `refreshProbesThisMac`, `refreshIsNotLockedOutByItself`. The superseded test
+`skippedServersAreNotClobbered` was retired — with nothing skipped any more its premise no
+longer exists.
+
+**Still open from this session:** manual identity. `QLabServer.localhost()` has id
+`localhost:53000` while its endpoint host is `127.0.0.1`, so `manual(host: "127.0.0.1",
+port: 53000)` produces id `127.0.0.1:53000` — a second row for the same machine that the
+localhost filter in `loadManualServers` cannot match. That is the first three bullets
+above, and it is reachable by hand today: add `127.0.0.1` as a server and This Mac appears
+twice.
 
 ---
 
@@ -558,6 +783,16 @@ to generic text.
 *Evidence:* `Cuety/Networking/QLabConnection.swift:256`,
 `Cuety/Features/ActivityLog/ActivityLogView.swift:248`, `Cuety/Networking/QLabClient.swift:1068`.
 
+- [x] Teardown's goodbye messages never reached the log at all — found by an operator
+      looking for `/disconnect` and not finding it. `/forgetMeNot false`,
+      `/udpKeepAlive false` and `/disconnect` called `connection.send` directly, bypassing
+      the only place outbound traffic is recorded, so they were sent and acted on while the
+      Activity Log — which presents itself as *every* message sent and received — showed
+      nothing, and `bytesSent` was short by exactly those packets. Now routed through the
+      log via `QLabClient.goodbyeMessages`. `/alwaysReply false` is deliberately not among
+      them: it is per-connection state that dies with the socket, and `/forgetMeNot false`
+      has already told QLab to remember nothing. Tests: `disconnectIsSentAndLogged`,
+      `lostSessionSendsNoGoodbye`.
 - [ ] Count packet bytes once for a bundle rather than per contained message.
 - [ ] Label counter scope accurately, or scope the counters to match the existing label.
 - [ ] Replace `OperatorReadableError` with Foundation's
@@ -582,7 +817,7 @@ Framework-required framer callbacks are **not** dead code and stay.
 | D3 | `QLabServer.Source.sectionTitle` | `Model/QLabServer.swift:13` | [ ] |
 | D4 | `CueGraph.cueListID` / `cueListName` — stored, never read | `Model/CueGraph.swift:17` | [ ] |
 | D5 | `ActivityLog.reset()` — no call sites | `Model/ActivityLog.swift:155` | [ ] |
-| D6 | `PendingRequest.id` — dictionary key already identifies the request | `Networking/QLabClient.swift:408` | [ ] |
+| D6 | `PendingRequest.id` — dictionary key already identifies the request | `Networking/QLabClient.swift:408` | [x] removed with `F8` |
 | D7 | Trailing `_ = connection` no-op | `Networking/QLabClient.swift:380` | [ ] |
 | D8 | Playhead reply success check — unreachable, `request()` already rejects failures | `Networking/QLabClient.swift:830` | [ ] |
 
@@ -601,7 +836,7 @@ not forcing every function into one shape. A wholesale rewrite is explicitly out
 | ID | Work | Done |
 |---|---|---|
 | S1 | Replace bindings that ignore their incoming value and call `toggle()` with explicit setters | [ ] |
-| S2 | Consolidate duplicated server-probe bookkeeping (pairs with `F12`) and connection-action availability (pairs with `F10`) | [ ] |
+| S2 | ~~Consolidate duplicated server-probe bookkeeping~~ (done with `F8`/`F10`; `F12`'s discovery-lifecycle half remains) and ~~connection-action availability~~ (done with `F10`) | [x] |
 | S3 | Remove redundant `async` propagation where a method only schedules work synchronously | [ ] |
 | S4 | Narrow internal-only helper visibility | [ ] |
 | S5 | Retain structured log arguments instead of rendering to strings and re-parsing them for the inspector (pairs with `F2`) | [ ] |
@@ -652,6 +887,9 @@ fix is aimed at a real failure. Prefer content-driven native layout throughout.
 - [ ] Notes are reorderable in Settings although their position is ignored on screen —
       either honour the order or stop offering it.
 - [ ] Run the VoiceOver and contrast audits over the display, drawer, pills and sidebar.
+- [x] The sidebar's Refresh button spun its glyph slowly enough to read as a stuck
+      animation — now swaps to the standard indeterminate indicator (see `F12`'s
+      2026-09-10 session notes).
 
 **Done when:** every exposed setting produces a visible, predictable result, and no layout
 truncates or overflows at the window sizes in `V10`/`V11`.

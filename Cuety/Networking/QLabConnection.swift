@@ -45,8 +45,37 @@ actor QLabConnection {
     /// Serial queue for all `NWConnection` callbacks.
     private let queue = DispatchQueue(label: "com.caseyburnham.Cuety.connection")
 
+    /// How many events the stream holds when the consumer falls behind.
+    ///
+    /// Bounded on purpose. Unbounded buffering turns a burst Cuety cannot keep
+    /// up with into unbounded memory growth in an app that is meant to be left
+    /// running all night, and it would not fix anything: an event queued
+    /// behind ten thousand others is not news any more either.
+    static let eventBufferCapacity = 512
+
+    /// Events lost to buffer overflow and not yet reported.
+    ///
+    /// Reset each time the tally is handed to ``onEventsDropped``, which keeps
+    /// the running total in one place — the client's, which is where it is
+    /// shown.
+    private(set) var droppedEventCount = 0
+
+    /// Called when the buffer overflows, with the number of events lost since
+    /// the last call.
+    ///
+    /// Deliberately *not* delivered as an ``Event``. The buffer is full at the
+    /// exact moment this needs saying, so the one channel that cannot carry
+    /// the news is the stream itself.
+    private var onEventsDropped: (@Sendable (Int) async -> Void)?
+
     init(endpoint: NWEndpoint) {
         self.endpoint = endpoint
+    }
+
+    /// Installs the overflow handler. Set before ``start()`` so no burst can
+    /// slip through unreported.
+    func setEventsDroppedHandler(_ handler: (@Sendable (Int) async -> Void)?) {
+        onEventsDropped = handler
     }
 
     /// Convenience for a host and port.
@@ -70,9 +99,14 @@ actor QLabConnection {
         cancel()
 
         let (stream, continuation) = AsyncStream<Event>.makeStream(
-            // Buffer rather than drop: a burst of cue updates during a group
-            // cue must not lose the playhead change hiding inside it.
-            bufferingPolicy: .bufferingNewest(512)
+            // Buffer deeply, and *notice* when that is not enough. This policy
+            // discards the oldest buffered event once the buffer is full, so a
+            // burst of cue updates during a group cue can lose the playhead
+            // change hiding inside it — which the old comment here claimed
+            // could not happen. It can; ``yield(_:)`` now reports it, and
+            // ``QLabClient`` resynchronizes rather than carrying on with a
+            // model that has quietly diverged from the show.
+            bufferingPolicy: .bufferingNewest(Self.eventBufferCapacity)
         )
         self.continuation = continuation
         readiness = nil
@@ -100,6 +134,8 @@ actor QLabConnection {
     func cancel() {
         readinessTimeout?.cancel()
         readinessTimeout = nil
+        dropReportTask?.cancel()
+        dropReportTask = nil
 
         connection?.stateUpdateHandler = nil
         connection?.viabilityUpdateHandler = nil
@@ -292,7 +328,63 @@ actor QLabConnection {
         yield(.stateChanged(state))
     }
 
+    /// Hands an event to the consumer, and reports it if one was lost.
+    ///
+    /// The result of `yield` used to be discarded, which is what made the
+    /// overflow silent. This stream carries replies and connection state
+    /// changes as well as playhead updates, so a dropped event is not merely a
+    /// missed cue change — it can be the reply a request is waiting on.
     private func yield(_ event: Event) {
-        continuation?.yield(event)
+        guard let continuation else { return }
+
+        switch continuation.yield(event) {
+        case .enqueued:
+            break
+
+        case .dropped:
+            // `bufferingNewest` discards the *oldest* buffered event to make
+            // room, so the event named here is the one lost, not this one.
+            droppedEventCount += 1
+            notifyEventsDropped()
+
+        case .terminated:
+            // Nobody is consuming any more. Not an overflow, and not worth
+            // recovering from: whoever finished the stream is already tearing
+            // this connection down.
+            break
+
+        @unknown default:
+            break
+        }
+    }
+
+    /// How long to let a burst finish before reporting what it cost.
+    private static let dropReportDelay: Duration = .milliseconds(100)
+
+    private var dropReportTask: Task<Void, Never>?
+
+    /// Reports the overflow once per episode rather than once per lost event.
+    ///
+    /// A burst that overruns the buffer overruns it for as long as it lasts —
+    /// thousands of times on a big one. Reporting each would ask the client to
+    /// recover from a single episode over and over, so drops accumulate while
+    /// a report is pending and go over as one number.
+    private func notifyEventsDropped() {
+        guard onEventsDropped != nil, dropReportTask == nil else { return }
+
+        dropReportTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.dropReportDelay)
+            await self?.reportDroppedEvents()
+        }
+    }
+
+    private func reportDroppedEvents() async {
+        dropReportTask = nil
+
+        let lost = droppedEventCount
+        droppedEventCount = 0
+        guard lost > 0, let onEventsDropped else { return }
+
+        await onEventsDropped(lost)
     }
 }

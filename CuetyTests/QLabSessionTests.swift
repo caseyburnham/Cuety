@@ -332,6 +332,309 @@ struct QLabDisconnectTests {
         #expect(client.connectedSince != nil)
     }
 
+    @Test("Cancelling a workspace probe fails it at once, not at its deadline")
+    func cancellingProbeFailsPromptly() async throws {
+        let peer = try AuthorizationPeer()
+        peer.isMute = true
+        defer { peer.stop() }
+        let port = try await peer.start()
+        // Deliberately generous, so waiting the timeout out is unmistakably
+        // different from being cancelled.
+        let client = QLabClient(
+            preferences: try makePreferences(requestTimeout: 5), log: ActivityLog()
+        )
+        defer { client.disconnect() }
+
+        let started = ContinuousClock.now
+        let probe = Task { try await client.fetchWorkspaces(from: .localhost(port: port)) }
+        try await Task.sleep(for: .milliseconds(100))
+        probe.cancel()
+
+        await #expect(throws: CancellationError.self) { _ = try await probe.value }
+        // A cancelled probe must not report itself as a QLab timeout either —
+        // that put "QLab did not answer" against a server nobody had finished
+        // asking.
+        #expect(started.duration(to: .now) < .seconds(1))
+    }
+
+    @Test("Cancelling an awaited session request stops it at once")
+    func cancellingSessionRequestFailsPromptly() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = Self.populatedShow
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let client = QLabClient(
+            preferences: try makePreferences(requestTimeout: 5), log: ActivityLog()
+        )
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.status == .connected)
+
+        // QLab has gone quiet on this one address: the request goes out and is
+        // simply never answered.
+        peer.withholdRepliesTo = ["cueLists"]
+
+        let started = ContinuousClock.now
+        let refresh = Task { try await client.refreshCueLists() }
+        try await Task.sleep(for: .milliseconds(100))
+        refresh.cancel()
+
+        // The request layer installed no cancellation handler before, so this
+        // sat suspended for the whole five seconds with its bookkeeping intact.
+        await #expect(throws: CancellationError.self) { try await refresh.value }
+        #expect(started.duration(to: .now) < .seconds(1))
+    }
+
+    @Test("A reply arriving after its request timed out is dropped, not reused")
+    func lateReplyIsNotGivenToALaterRequest() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = Self.populatedShow
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let preferences = try makePreferences(requestTimeout: 0.4)
+        preferences.heartbeatInterval = 0.05
+        let client = QLabClient(preferences: preferences, log: ActivityLog())
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.status == .connected)
+
+        // The heartbeat asks the same address over and over, which is exactly
+        // where a late reply can be mistaken for a newer request's answer:
+        // every `/thump` reply looks identical.
+        peer.withholdRepliesTo = ["thump"]
+
+        let missed = ContinuousClock.now + .seconds(3)
+        while client.missedThumps == 0, ContinuousClock.now < missed {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(client.missedThumps >= 1)
+
+        // QLab was slow, not dead. The withheld reply now arrives, after the
+        // request that asked for it has already given up.
+        peer.withholdRepliesTo = []
+        peer.releaseWithheldReplies()
+
+        let counted = ContinuousClock.now + .seconds(3)
+        while client.lateReplyCount == 0, ContinuousClock.now < counted {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        // Correlation is by address in FIFO order and QLab's envelope carries
+        // no request identifier, so without this the late reply would satisfy
+        // whichever request was next in line for `/thump`.
+        #expect(client.lateReplyCount >= 1)
+    }
+
+    /// Overflow needs a *stalled consumer*, not a fast producer.
+    ///
+    /// The receive loop only re-arms after handing each packet to the actor,
+    /// so inbound traffic paces itself and the buffer stays about one event
+    /// deep however hard QLab pushes — a burst of four thousand messages does
+    /// not overflow it. What does is the reading side stopping while messages
+    /// keep arriving: the main actor held up behind a redraw on a large show.
+    /// That is what this reproduces, by never iterating the stream.
+    @Test("A consumer that stops reading overflows the buffer and is told what it lost")
+    func stalledConsumerOverflowIsReported() async throws {
+        let peer = try AuthorizationPeer()
+        defer { peer.stop() }
+        let port = try await peer.start()
+
+        let connection = QLabConnection(endpoint: QLabServer.localhost(port: port).endpoint)
+        let losses = EventLossRecorder()
+        await connection.setEventsDroppedHandler { count in
+            await losses.record(count)
+        }
+
+        let stream = await connection.start()
+        try await connection.waitUntilReady(timeout: 5)
+
+        // A consumer that reads one event and then stops — and one that keeps
+        // hold of the stream while it does. Simply discarding the stream would
+        // *terminate* it, and a terminated stream reports `.terminated`
+        // rather than dropping anything, so it would prove nothing.
+        let stalledReader = Task {
+            for await _ in stream {
+                try? await Task.sleep(for: .seconds(30))
+            }
+        }
+        defer { stalledReader.cancel() }
+
+        // The peer registers accepted connections on a hop of its own, so
+        // pushing the instant our socket is ready broadcasts to nobody.
+        let accepted = ContinuousClock.now + .seconds(5)
+        while peer.connectionCount == 0, ContinuousClock.now < accepted {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(peer.connectionCount > 0)
+
+        peer.pushBurst(
+            OSCMessage("/update/workspace/W/cue_id/C1"),
+            count: QLabConnection.eventBufferCapacity * 4
+        )
+
+        let deadline = ContinuousClock.now + .seconds(10)
+        while await losses.total == 0, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        await connection.cancel()
+
+        // `yield`'s result was discarded before, so this was completely
+        // silent — and the comment on the buffer claimed it could not happen.
+        #expect(await losses.total > 0)
+        // Coalesced into episodes rather than one report per lost event.
+        // Without the reporting window this was one call per drop — over a
+        // thousand of them for this burst, each asking the client to recover
+        // from the same episode again.
+        let reports = await losses.reportCount
+        let lost = await losses.total
+        #expect(reports <= 25)
+        #expect(reports < lost)
+    }
+
+    /// Connection-action availability, driven by real session states.
+    ///
+    /// The Connection menu, the sidebar and the connection inspector all read
+    /// `canDisconnect` / `canConnect` / `canRefresh` and nothing else, so this
+    /// is what "every control agrees" means in practice. They previously
+    /// applied three different conditions.
+    @Test("Every connection action agrees with itself across session states")
+    func connectionActionAvailability() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = Self.populatedShow
+        defer { peer.stop() }
+        let port = try await peer.start()
+
+        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let preferences = Preferences(defaults: defaults)
+        preferences.requestTimeout = 0.4
+        let model = AppModel(preferences: preferences)
+        defer { model.disconnect() }
+        let server = model.browser.addManualServer(host: "127.0.0.1", port: port)
+        let target = WorkspaceSelection(serverID: server.id, workspaceID: "W")
+
+        await model.connect(to: target)
+        try #require(model.client.status == .connected)
+        #expect(model.canDisconnect)
+        #expect(model.canRefresh)
+
+        // Dropped, and now backing off. No live data — which is what the menu
+        // used to test — so Disconnect was greyed out for the whole backoff,
+        // the one stretch in which an operator most wants it, while the
+        // sidebar went on offering it.
+        peer.stop()
+        let dropped = ContinuousClock.now + .seconds(3)
+        while model.client.status.hasLiveData, ContinuousClock.now < dropped {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(!model.client.status.hasLiveData)
+        try #require(model.client.isSessionActive)
+
+        #expect(model.canDisconnect)
+        // Both stay available through a backoff: waiting out a thirty-second
+        // timer is the opposite of what someone reaching for these wants.
+        #expect(model.canConnect)
+        #expect(model.canRefresh)
+    }
+
+    @Test("Refresh and Connect stand down while a connection is being set up")
+    func availabilityDuringConnectionSetup() async throws {
+        // A peer that accepts the socket and never answers holds the client in
+        // `connecting` for the whole request timeout, which is the window to
+        // observe.
+        let peer = try AuthorizationPeer()
+        peer.isMute = true
+        defer { peer.stop() }
+        let port = try await peer.start()
+
+        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let preferences = Preferences(defaults: defaults)
+        preferences.requestTimeout = 2
+        let model = AppModel(preferences: preferences)
+        defer { model.disconnect() }
+        let server = model.browser.addManualServer(host: "127.0.0.1", port: port)
+
+        let attempt = Task {
+            await model.connect(
+                to: WorkspaceSelection(serverID: server.id, workspaceID: "W")
+            )
+        }
+        defer { attempt.cancel() }
+
+        let setup = ContinuousClock.now + .seconds(3)
+        while !model.client.status.isTransitional, ContinuousClock.now < setup {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(model.client.status == .connecting)
+
+        // Refresh rebuilds the session as well as re-asking the network, so
+        // running it here would tear down the attempt it was racing. The menu
+        // permitted exactly that; the sidebar's button did not.
+        #expect(!model.canRefresh)
+        #expect(!model.canConnect)
+        // Mid-connect is still a session Cuety is holding, so calling it off
+        // has to be possible.
+        #expect(model.canDisconnect)
+    }
+
+    @Test("Disconnecting says goodbye to QLab, and the log shows it")
+    func disconnectIsSentAndLogged() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = Self.populatedShow
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let log = ActivityLog()
+        let client = QLabClient(preferences: try makePreferences(), log: log)
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.status == .connected)
+
+        let sentBefore = log.bytesSent
+        client.disconnect()
+
+        // The goodbye is best-effort and not awaited, so teardown cannot be
+        // blocked by a wedged socket — which means waiting for it here.
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !log.entries.contains(where: { $0.address == "/disconnect" }),
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        // These three used to call `connection.send` directly, bypassing the
+        // only place outbound traffic is recorded. They were sent and QLab
+        // acted on them, but the Activity Log — which presents itself as every
+        // message sent and received — showed nothing, and the inspector's
+        // sent-bytes total was short by exactly these packets.
+        let outbound = log.entries.filter { $0.direction == .outbound }.map(\.address)
+        #expect(outbound.contains("/forgetMeNot"))
+        #expect(outbound.contains("/udpKeepAlive"))
+        #expect(outbound.contains("/disconnect"))
+        #expect(log.bytesSent > sentBefore)
+    }
+
+    @Test("A dropped session says nothing on the way out")
+    func lostSessionSendsNoGoodbye() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = Self.populatedShow
+        let port = try await peer.start()
+        let log = ActivityLog()
+        let client = QLabClient(
+            preferences: try makePreferences(requestTimeout: 0.3), log: log
+        )
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.status == .connected)
+
+        peer.stop()
+        let dropped = ContinuousClock.now + .seconds(3)
+        while client.status.hasLiveData, ContinuousClock.now < dropped {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(!client.status.hasLiveData)
+
+        // Down a socket that is already gone these can only fail, and logging
+        // three failures per drop would describe Cuety's own teardown rather
+        // than anything that happened to the show.
+        #expect(!log.entries.contains { $0.address == "/disconnect" })
+    }
+
     @Test("Reconnecting keeps the cue list the operator was watching")
     func reconnectKeepsWatchedCueList() async throws {
         let peer = try AuthorizationPeer()
@@ -352,6 +655,17 @@ struct QLabDisconnectTests {
         // first one, so without a remembered preference a drop mid-show would
         // silently move the display back to "Main".
         #expect(client.watchedCueListID == "L2")
+    }
+}
+
+/// Collects what the connection reports losing to buffer overflow.
+private actor EventLossRecorder {
+    private(set) var total = 0
+    private(set) var reportCount = 0
+
+    func record(_ count: Int) {
+        total += count
+        reportCount += 1
     }
 }
 
@@ -388,6 +702,25 @@ private final class AuthorizationPeer {
     /// Answer nothing at all, while leaving the socket up: a QLab that is
     /// still running and has stopped talking.
     var isMute = false
+
+    /// Address suffixes whose replies are queued instead of sent, until
+    /// ``releaseWithheldReplies()`` lets them go.
+    ///
+    /// A QLab that is slow rather than silent, which is the case that matters:
+    /// a reply held past its request's timeout and then delivered is exactly
+    /// the late reply that must not be given to a later request.
+    var withholdRepliesTo: Set<String> = []
+
+    private var withheldReplies: [(connection: NWConnection, packet: Data)] = []
+
+    /// Sends everything held back so far, all at once.
+    func releaseWithheldReplies() {
+        let queued = withheldReplies
+        withheldReplies.removeAll()
+        for held in queued {
+            held.connection.send(content: held.packet, completion: .contentProcessed { _ in })
+        }
+    }
 
     init() throws { listener = try NWListener(using: .qlabTCP(), on: .any) }
 
@@ -434,6 +767,24 @@ private final class AuthorizationPeer {
         let packet = OSCEncoder().encode(message)
         for connection in connections {
             connection.send(content: packet, completion: .contentProcessed { _ in })
+        }
+    }
+
+    /// How many clients the peer has accepted.
+    ///
+    /// Registration happens on a hop from the listener's callback, so a test
+    /// that pushes as soon as its own socket is ready can beat the peer to it
+    /// and broadcast to nobody.
+    var connectionCount: Int { connections.count }
+
+    /// Pushes the same message `count` times as fast as the socket takes it —
+    /// a group cue firing far more updates than a display can read.
+    func pushBurst(_ message: OSCMessage, count: Int) {
+        let packet = OSCEncoder().encode(message)
+        for connection in connections {
+            for _ in 0..<count {
+                connection.send(content: packet, completion: .contentProcessed { _ in })
+            }
         }
     }
 
@@ -501,10 +852,16 @@ private final class AuthorizationPeer {
                         "/reply" + message.address,
                         [.string(String(decoding: json, as: UTF8.self))]
                     )
-                    connection.send(
-                        content: OSCEncoder().encode(outgoing),
-                        completion: .contentProcessed { _ in }
-                    )
+                    let packet = OSCEncoder().encode(outgoing)
+
+                    if self.withholdRepliesTo.contains(where: message.address.hasSuffix) {
+                        self.withheldReplies.append((connection, packet))
+                    } else {
+                        connection.send(
+                            content: packet,
+                            completion: .contentProcessed { _ in }
+                        )
+                    }
                 }
                 self.receive(connection)
             }
