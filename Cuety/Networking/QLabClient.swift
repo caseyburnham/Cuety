@@ -28,9 +28,13 @@ final class QLabClient {
     /// are the cues within.
     private(set) var cueLists: [Cue] = []
 
-    /// Playhead per cue list ID. A missing entry means the playhead is unset
-    /// for that list, which is distinct from "we haven't asked yet".
-    private(set) var playheads: [String: String] = [:]
+    /// What is known about each cue list's playhead, by cue list ID.
+    ///
+    /// A **missing** entry means Cuety has not asked about that list yet. An
+    /// entry says what the answer was, including that the answer was "the
+    /// query failed" — see ``PlayheadState``. The old form was
+    /// `[String: String]`, where all three of those were one absent key.
+    private(set) var playheads: [String: PlayheadState] = [:]
 
     /// Which cue list the display is following.
     var watchedCueListID: String? {
@@ -290,6 +294,8 @@ final class QLabClient {
     private func tearDownSession(sendDisconnect: Bool) {
         cueListRefreshTask?.cancel()
         cueListRefreshTask = nil
+        playheadDetailsTask?.cancel()
+        playheadDetailsTask = nil
         heartbeatTask?.cancel()
         heartbeatTask = nil
         overflowRecoveryTask?.cancel()
@@ -381,6 +387,8 @@ final class QLabClient {
         heartbeatTask = nil
         cueListRefreshTask?.cancel()
         cueListRefreshTask = nil
+        playheadDetailsTask?.cancel()
+        playheadDetailsTask = nil
         overflowRecoveryTask?.cancel()
         overflowRecoveryTask = nil
         failAllPendingRequests(with: RequestFailure.disconnected)
@@ -983,6 +991,14 @@ final class QLabClient {
     }
 
     /// Dispatches an incoming message to a pending request or an update handler.
+    ///
+    /// **Nothing reached from here may await a request.** This runs on the
+    /// session's one event consumer, and replies arrive as events on the same
+    /// stream — so an `await` on a round trip here waits for something that
+    /// cannot be delivered until this returns. Work that needs the network
+    /// gets scheduled instead: see ``schedulePlayheadDetailsRefresh()`` and
+    /// ``scheduleCueListRefresh()``, both of which hand off to a task and
+    /// return immediately.
     private func route(_ message: OSCMessage) async {
         // Replies first: match against the oldest in-flight request for the
         // address the reply echoes.
@@ -1027,20 +1043,65 @@ final class QLabClient {
               let cueID = message.arguments[2].stringValue
         else { return }
 
-        // Broadcast identifies the cue, but not its cue list. Prefer the list
-        // containing that cue; fall back to the list the operator is watching.
-        let listID = cueLists.first {
-            CueGraph(cueList: $0).cue(withID: cueID) != nil
-        }?.uniqueID ?? watchedCueListID
+        // Broadcast identifies the cue but not its cue list, so the list has
+        // to be found in the tree.
+        //
+        // There is no fallback to the watched list. Assigning an unrecognised
+        // cue to whatever the operator happens to be watching puts a cue on
+        // screen under a list that may well not contain it — a guess rendered
+        // as a fact. The realistic cause is a cue added since the last tree
+        // fetch, so ask for the tree again and let the cue-data sequence place
+        // it properly.
+        guard let listID = cueLists.first(where: {
+            $0.children.firstCue(withID: cueID) != nil
+        })?.uniqueID else {
+            logger.info(
+                """
+                Broadcast playhead names cue \(cueID, privacy: .public), which is in no \
+                known cue list; refetching
+                """
+            )
+            scheduleCueListRefresh()
+            return
+        }
 
-        guard let listID else { return }
         setPlayhead(cueID, forCueListID: listID)
         if watchedCueListID == nil {
             watchedCueListID = listID
         }
 
-        Task { [weak self] in
-            await self?.refreshPlayheadCueDetails()
+        schedulePlayheadDetailsRefresh()
+    }
+
+    /// How long to let the playhead settle before asking about the cue it
+    /// landed on.
+    ///
+    /// Short enough to read as immediate, long enough that walking a stack
+    /// with GO does not put a round trip on the wire per press.
+    private static let playheadDetailsDebounce: Duration = .milliseconds(60)
+
+    private var playheadDetailsTask: Task<Void, Never>?
+
+    /// Refetches the detail values for the cue at the playhead, coalescing a
+    /// run of moves into one request for the cue that ends up standing by.
+    ///
+    /// **Never await network work from inside event handling.** Replies arrive
+    /// as events on the stream that ``route(_:)`` is itself being driven by,
+    /// and that stream has exactly one consumer — so awaiting a request there
+    /// parks the consumer until the reply it wants can be read, which it never
+    /// can. It resolves as a request timeout every time, and on a fast cue
+    /// sequence the timeouts stack until the display is seconds behind the
+    /// show. That is precisely what a direct `await` here did.
+    ///
+    /// Coalescing matters independently: the `/updates` and Show Control
+    /// Broadcast feeds both report a playhead move, so a single GO can arrive
+    /// twice, and only the cue that ends up standing by is worth asking about.
+    private func schedulePlayheadDetailsRefresh() {
+        playheadDetailsTask?.cancel()
+        playheadDetailsTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.playheadDetailsDebounce)
+            guard !Task.isCancelled, let self else { return }
+            await self.refreshPlayheadCueDetails()
         }
     }
 
@@ -1062,7 +1123,7 @@ final class QLabClient {
 
         switch tail.first {
         case nil:
-            await debouncedCueListRefresh()
+            scheduleCueListRefresh()
 
         case "disconnect":
             logger.info("QLab asked us to disconnect")
@@ -1072,7 +1133,7 @@ final class QLabClient {
             // QLab uses this form for cue edits, renames, and newly inserted
             // cues. Refresh the list model regardless of whether the changed
             // cue is currently on the playhead.
-            await debouncedCueListRefresh()
+            scheduleCueListRefresh()
 
         case "cueList":
             if tail.count >= 3, tail[2] == "playbackPosition" {
@@ -1081,11 +1142,13 @@ final class QLabClient {
                 if watchedCueListID == nil { watchedCueListID = listID }
 
                 // The tree has not changed, so this needs details only — but
-                // it does need them. The broadcast path already refetched
-                // them; this one did not, so a playhead moving on a QLab that
-                // reports it this way left the pills describing the previous
+                // it does need them. A playhead moving on a QLab that reports
+                // it this way used to leave the pills describing the previous
                 // cue.
-                await refreshPlayheadCueDetails()
+                //
+                // Scheduled, never awaited. See
+                // ``schedulePlayheadDetailsRefresh()``.
+                schedulePlayheadDetailsRefresh()
             }
 
         default:
@@ -1096,7 +1159,15 @@ final class QLabClient {
     /// Coalesces bursts of workspace-level updates into one refetch.
     private var cueListRefreshTask: Task<Void, Never>?
 
-    private func debouncedCueListRefresh() async {
+    /// Schedules a full cue-data refresh, coalescing a burst of updates into
+    /// one.
+    ///
+    /// Not `async`, deliberately: it starts a task and returns, so awaiting it
+    /// only ever meant awaiting the scheduling. Worse, being `async` made it
+    /// *look* like something event handling should await — and the caller that
+    /// took that hint and awaited the work itself deadlocked the session. See
+    /// ``route(_:)``.
+    private func scheduleCueListRefresh() {
         cueListRefreshTask?.cancel()
         cueListRefreshTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
@@ -1165,19 +1236,46 @@ final class QLabClient {
 
         cueLists = refreshed
 
-        if watchedCueListID == nil {
-            // Back to the list the operator was on, if this workspace still
-            // has it. Falling straight through to the first list would mean a
-            // dropped connection silently changed what the display follows.
-            watchedCueListID = preferredCueListID.flatMap { id in
-                cueLists.contains { $0.uniqueID == id } ? id : nil
-            } ?? cueLists.first?.uniqueID
-        }
+        // Playheads for lists that no longer exist are not facts about
+        // anything. Keeping them would let a deleted list's last known cue
+        // linger in the inspector's counts and in the sidebar.
+        let liveListIDs = Set(cueLists.map(\.uniqueID))
+        playheads = playheads.filter { liveListIDs.contains($0.key) }
+
+        reconcileWatchedCueList()
 
         // Cue lists and playheads are refreshed together on purpose. The push
         // feed only reports a playhead when it *moves*, so for a list we have
         // just learned about nothing else would ever fill this in.
         await refreshPlayheads()
+    }
+
+    /// Keeps ``watchedCueListID`` pointing at a cue list that exists.
+    ///
+    /// Run on **every** change to the collection, not only when nothing is
+    /// selected. Deleting the watched list in QLab used to leave the selection
+    /// pointing at it: nothing matched, so `playheadCue` found nothing, and
+    /// the display reported that the playhead was unset — a confident
+    /// statement about a cue list that no longer existed.
+    private func reconcileWatchedCueList() {
+        if let watchedCueListID,
+           cueLists.contains(where: { $0.uniqueID == watchedCueListID }) {
+            return
+        }
+
+        // Back to the list the operator was on, if this workspace still has
+        // it. Falling straight through to the first list would mean a dropped
+        // connection silently changed what the display follows.
+        let preferred = preferredCueListID
+        watchedCueListID = preferred.flatMap { id in
+            cueLists.contains { $0.uniqueID == id } ? id : nil
+        } ?? cueLists.first?.uniqueID
+
+        // Landing somewhere by fallback is not the operator choosing it, so
+        // keep remembering what they actually chose. Otherwise deleting
+        // "Effects" would rewrite their preference to "Main", and bringing
+        // "Effects" back would not return the display to it.
+        preferredCueListID = preferred
     }
 
     /// Asks every cue list where its playhead currently sits.
@@ -1223,6 +1321,9 @@ final class QLabClient {
                         answered \(String(describing: reply.status), privacy: .public)
                         """
                     )
+                    playheads[list.uniqueID] = .unknown(
+                        reason: "QLab answered \(reply.status) for this cue list."
+                    )
                     continue
                 }
 
@@ -1230,17 +1331,24 @@ final class QLabClient {
             } catch is CancellationError {
                 // Cuety stopped asking. Nothing went wrong with the show, and
                 // logging a warning per remaining list would bury the ones
-                // that mean something.
+                // that mean something. Deliberately leaves the existing state
+                // alone: abandoning a question is not learning an answer.
                 return
             } catch {
                 // One list that won't answer must not stop the others: a cart,
                 // or a list QLab declines for, shouldn't blank the display.
+                //
+                // Recorded as unknown rather than skipped. Leaving no entry is
+                // what let a failed query read as "this list has no cue
+                // standing by" — a confident statement about a list Cuety
+                // could not reach.
                 logger.warning(
                     """
                     playbackPositionID failed for \(list.uniqueID, privacy: .public): \
                     \(String(describing: error), privacy: .public)
                     """
                 )
+                playheads[list.uniqueID] = .unknown(reason: describe(error))
             }
         }
     }
@@ -1248,20 +1356,31 @@ final class QLabClient {
     /// Records a playhead, treating QLab's several spellings of "unset" alike.
     ///
     /// An absent argument, an empty string, and the literal `none` all mean the
-    /// same thing, and it is a real state rather than a missing value — the
-    /// display has an empty state for it.
+    /// same thing, and it is a real state rather than a missing value — so it
+    /// is stored as ``PlayheadState/unset`` rather than by removing the key.
+    /// Removing it would say "never asked", which is a different claim and the
+    /// one the display used to make.
     private func setPlayhead(_ cueID: String?, forCueListID listID: String) {
         guard let cueID, !cueID.isEmpty, cueID != "none" else {
-            playheads.removeValue(forKey: listID)
+            playheads[listID] = .unset
             return
         }
-        playheads[listID] = cueID
+        playheads[listID] = .cue(cueID)
     }
 
-    /// The cue ID at the playhead of the watched cue list, if any.
-    var currentPlayheadCueID: String? {
+    /// What is known about the watched cue list's playhead.
+    ///
+    /// `nil` when no list is being watched, or when this one has not been
+    /// asked about yet — which the display words differently from either an
+    /// unset playhead or a failed query.
+    var watchedPlayhead: PlayheadState? {
         guard let watchedCueListID else { return nil }
         return playheads[watchedCueListID]
+    }
+
+    /// The cue ID standing by in the watched cue list, if one is known to be.
+    var currentPlayheadCueID: String? {
+        watchedPlayhead?.cueID
     }
 
     /// A flattened graph of the watched cue list, for playhead neighbourhood

@@ -257,23 +257,48 @@ struct WorkspaceSidebar: View {
     }
 
     private func cueListRow(_ list: Cue) -> some View {
-        let cue = model.client.playheads[list.uniqueID]
-            .flatMap { list.children.firstCue(withID: $0) }
-        let playheadDescription = cue.map {
-            "Standing by: \($0.displayNumber ?? "Unnumbered cue"), \($0.displayName ?? "Untitled")"
-        } ?? "No cue standing by"
+        let state = model.client.playheads[list.uniqueID]
+        let cue = state?.cueID.flatMap { list.children.firstCue(withID: $0) }
+
+        // One glyph per state, so the column never presents ignorance as an
+        // answer. "—" used to cover a failed query and an unasked list as well
+        // as an empty one.
+        let marker: String
+        let description: String
+        switch state {
+        case .cue where cue != nil:
+            marker = cue?.displayNumber ?? "•"
+            description = """
+                Standing by: \(cue?.displayNumber ?? "Unnumbered cue"), \
+                \(cue?.displayName ?? "Untitled")
+                """
+        case .cue:
+            // QLab named a cue this list does not contain, which means the
+            // tree is behind. A refetch is already on its way.
+            marker = "?"
+            description = "Standing by a cue Cuety has not caught up with yet"
+        case .unset:
+            marker = "—"
+            description = "No cue standing by"
+        case .unknown(let reason):
+            marker = "?"
+            description = "Playhead unknown. \(reason)"
+        case nil:
+            marker = "·"
+            description = "Cuety has not read this cue list's playhead yet"
+        }
 
         return Label {
             HStack {
                 Text(list.displayName ?? "Untitled Cue List")
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                Text(cue?.displayNumber ?? "—")
+                Text(marker)
                     .font(.caption)
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .help(playheadDescription)
-                    .accessibilityLabel(playheadDescription)
+                    .foregroundStyle(state?.isKnown == false ? .orange : .secondary)
+                    .help(description)
+                    .accessibilityLabel(description)
             }
         } icon: {
             Image(systemName: "list.triangle")

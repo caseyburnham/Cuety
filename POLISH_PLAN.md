@@ -691,17 +691,52 @@ assigned to the watched list as a fallback even when ownership is unconfirmed.
 *Evidence:* `Cuety/Networking/QLabClient.swift:810`, `Cuety/Networking/QLabClient.swift:701`,
 `Cuety/Features/Display/CueDisplayView.swift:145`.
 
-- [ ] Represent query failure explicitly, distinct from "no playhead set".
-- [ ] Represent unresolved cue identity explicitly instead of defaulting to the watched
+- [x] Represent query failure explicitly, distinct from "no playhead set".
+- [x] Represent unresolved cue identity explicitly instead of defaulting to the watched
       list.
-- [ ] Reconcile the watched-list selection whenever the cue-list collection changes, not
+- [x] Reconcile the watched-list selection whenever the cue-list collection changes, not
       only when the selection is `nil`.
-- [ ] Give each state its own honest wording: unknown, failed, empty.
-- [ ] Tests: failed playhead query; deletion of the watched list; broadcast for a cue in an
+- [x] Give each state its own honest wording: unknown, failed, empty.
+- [x] Tests: failed playhead query; deletion of the watched list; broadcast for a cue in an
       unknown list.
 
 **Done when:** deleting the watched list moves the display to a valid state on its own, and
 a failed query never reads as an empty one.
+
+**Landed.** `playheads` went from `[String: String]` to `[String: PlayheadState]`, where
+all three of "never asked", "asked and it failed", and "asked, nothing standing by" used to
+be one absent key. A missing entry now means only the first; `.unknown(reason:)` and
+`.unset` say the other two out loud. `refreshPlayheads` records a failure instead of
+`continue`-ing past it — the skip was what let a failed query read as an empty cue list.
+
+Cancellation deliberately records nothing: abandoning a question is not learning an answer,
+so the previous state stands.
+
+The display grew from three empty states to five, and the sidebar's playhead column from
+one marker to four (`—` unset, `?` unknown, `·` not yet asked, and the cue number),
+tinted orange when the state is not known. The old `—` covered all of it.
+
+**The broadcast no longer guesses.** A Show Control Broadcast names a cue but not its list;
+if the cue is in no known list the old code assigned it to whatever the operator happened
+to be watching, which renders a guess as a fact. The realistic cause is a cue added since
+the last tree fetch, so it now refetches and lets the cue-data sequence place it.
+
+**Watched-list reconciliation** runs on every change to the collection via
+`reconcileWatchedCueList()`, and playheads for lists that no longer exist are dropped.
+One subtlety worth stating: a fallback is *not* the operator choosing a list, so
+`preferredCueListID` is preserved across one — otherwise deleting "Effects" would rewrite
+the remembered preference to "Main" and bringing "Effects" back would not return to it.
+
+*Also closes part of `S3`:* `debouncedCueListRefresh()` was `async` while only ever
+starting a task, so awaiting it meant awaiting the scheduling. It is now
+`scheduleCueListRefresh()` and not `async` — and that signature mattered more than tidiness,
+because being `async` is what made it look like something event handling should await.
+
+*Tests:* `failedPlayheadQueryIsUnknown`, `deletingWatchedCueListReconciles`,
+`broadcastForUnknownCueDoesNotGuess`. The first needed the peer to answer `error` rather
+than `denied`: a denial is an authorization problem that correctly ends the session, which
+is a different story from a query that simply failed — the first attempt tested the wrong
+thing and said so by failing.
 
 ---
 

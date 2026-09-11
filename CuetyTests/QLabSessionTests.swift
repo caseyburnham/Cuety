@@ -822,6 +822,212 @@ struct QLabDisconnectTests {
         #expect(client.playheadCue?.duration == 4.25)
     }
 
+    /// A playhead move reported through `/updates` must not stall the session.
+    ///
+    /// This is a regression test for a self-inflicted deadlock: handling the
+    /// update `await`ed a `valuesForKeys` request, but update handling runs on
+    /// the session's one event consumer, and the reply arrives as an event on
+    /// that same stream. The consumer parked waiting for something it had to
+    /// return in order to receive, so every playhead move cost a full request
+    /// timeout and the display fell seconds behind the show.
+    @Test("A playhead move via /updates fetches details without stalling")
+    func playheadUpdateDoesNotStallTheEventLoop() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = [
+            .init(
+                id: "L1",
+                name: "Main",
+                cues: [
+                    .init(id: "C1", number: "1", name: "House", duration: 1),
+                    .init(id: "C2", number: "2", name: "Thunder", duration: 42),
+                ],
+                playheadCueID: "C1"
+            ),
+        ]
+        defer { peer.stop() }
+        let port = try await peer.start()
+        // Generous on purpose: under the deadlock the fetch burns the whole
+        // timeout, so a short one would hide the failure behind impatience.
+        let client = QLabClient(
+            preferences: try makePreferences(requestTimeout: 5), log: ActivityLog()
+        )
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.playheadCue?.duration == 1)
+
+        peer.push(OSCMessage("/update/workspace/W/cueList/L1/playbackPosition", [.string("C2")]))
+
+        // Well inside the request timeout. Deadlocked, this cannot arrive at
+        // all; working, it is one debounce plus one round trip.
+        let deadline = ContinuousClock.now + .seconds(2)
+        while client.playheadCue?.duration != 42, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(client.currentPlayheadCueID == "C2")
+        #expect(client.playheadCue?.duration == 42)
+        // And the session is still answering, rather than wedged behind a
+        // request it cannot complete.
+        #expect(client.status.hasLiveData)
+    }
+
+    @Test("A run of playhead moves collapses into one details request")
+    func rapidPlayheadMovesAreCoalesced() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = [
+            .init(
+                id: "L1",
+                name: "Main",
+                cues: (1...8).map {
+                    .init(id: "C\($0)", number: "\($0)", name: "Cue \($0)", duration: Double($0))
+                },
+                playheadCueID: "C1"
+            ),
+        ]
+        defer { peer.stop() }
+        let log = ActivityLog()
+        let port = try await peer.start()
+        let client = QLabClient(preferences: try makePreferences(), log: log)
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+
+        func detailRequests() -> Int {
+            log.entries.filter {
+                $0.direction == .outbound && $0.address.hasSuffix("/valuesForKeys")
+            }.count
+        }
+        let handshakeRequests = detailRequests()
+
+        // Walking a stack with GO. Both the `/updates` and broadcast feeds can
+        // report the same move, so without coalescing this is a round trip per
+        // press and then some.
+        for cue in 2...8 {
+            peer.push(
+                OSCMessage(
+                    "/update/workspace/W/cueList/L1/playbackPosition", [.string("C\(cue)")]
+                )
+            )
+        }
+
+        let deadline = ContinuousClock.now + .seconds(3)
+        while client.playheadCue?.duration != 8, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        // Only the cue that ended up standing by is worth asking about.
+        #expect(client.currentPlayheadCueID == "C8")
+        #expect(client.playheadCue?.duration == 8)
+        #expect(detailRequests() - handshakeRequests < 7)
+    }
+
+    @Test("A failed playhead query is unknown, not empty")
+    func failedPlayheadQueryIsUnknown() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = Self.populatedShow
+        peer.failPlaybackPosition = true
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let client = QLabClient(preferences: try makePreferences(), log: ActivityLog())
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.status == .connected)
+
+        // The query was refused. Cuety does not know where the playhead is —
+        // and used to leave no entry at all, which the display read as "the
+        // playhead in this cue list is not set": a confident statement about
+        // a list it had failed to read.
+        let state = try #require(client.playheads["L1"])
+        #expect(state.isKnown == false)
+        #expect(state.cueID == nil)
+        if case .unknown = state {} else {
+            Issue.record("Expected .unknown, got \(state)")
+        }
+        // Crucially not `.unset`, which is the wording for a list QLab
+        // answered about.
+        #expect(state != .unset)
+    }
+
+    @Test("Deleting the watched cue list moves the display to a valid one")
+    func deletingWatchedCueListReconciles() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = [
+            .init(id: "L1", name: "Main", cues: [.init(id: "C1", number: "1", name: "House")],
+                  playheadCueID: "C1"),
+            .init(id: "L2", name: "Effects", cues: [.init(id: "C9", number: "9", name: "Rain")],
+                  playheadCueID: "C9"),
+        ]
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let client = QLabClient(preferences: try makePreferences(), log: ActivityLog())
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.status == .connected)
+
+        client.watchedCueListID = "L2"
+        try #require(client.currentPlayheadCueID == "C9")
+
+        // The operator deletes the list Cuety is following. The selection used
+        // to be left pointing at it, because reconciliation only ran when
+        // nothing was selected — so nothing matched, no cue was found, and the
+        // display reported an unset playhead for a list that no longer existed.
+        peer.cueLists = [
+            .init(id: "L1", name: "Main", cues: [.init(id: "C1", number: "1", name: "House")],
+                  playheadCueID: "C1"),
+        ]
+        peer.push(OSCMessage("/update/workspace/W"))
+
+        let deadline = ContinuousClock.now + .seconds(5)
+        while client.watchedCueListID == "L2", ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(client.watchedCueListID == "L1")
+        #expect(client.currentPlayheadCueID == "C1")
+        // And the deleted list's playhead is not still on the books.
+        #expect(client.playheads["L2"] == nil)
+    }
+
+    @Test("A broadcast for an unknown cue refetches instead of guessing a list")
+    func broadcastForUnknownCueDoesNotGuess() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = Self.populatedShow
+        defer { peer.stop() }
+        let log = ActivityLog()
+        let port = try await peer.start()
+        let client = QLabClient(preferences: try makePreferences(), log: log)
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.watchedCueListID == "L1")
+        try #require(client.currentPlayheadCueID == "C1")
+
+        func cueListRequests() -> Int {
+            log.entries.filter {
+                $0.direction == .outbound && $0.address.hasSuffix("/cueLists")
+            }.count
+        }
+        let before = cueListRequests()
+
+        // A cue added in QLab since the last tree fetch. The old code assigned
+        // it to whatever list the operator happened to be watching, putting a
+        // cue on screen under a list that may not contain it.
+        peer.push(
+            OSCMessage(
+                "/qlab/event/workspace/playhead",
+                [.string("99"), .string("Newly Added"), .string("C-NEW"), .string("Audio")]
+            )
+        )
+
+        let deadline = ContinuousClock.now + .seconds(5)
+        while cueListRequests() == before, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        // Refetched rather than guessed, and the unrecognised cue was never
+        // attributed to the watched list.
+        #expect(cueListRequests() > before)
+        #expect(client.playheads["L1"]?.cueID != "C-NEW")
+    }
+
     @Test("Reconnecting keeps the cue list the operator was watching")
     func reconnectKeepsWatchedCueList() async throws {
         let peer = try AuthorizationPeer()
@@ -886,6 +1092,10 @@ private final class AuthorizationPeer {
     private var connections: [NWConnection] = []
     var denyHeartbeat = false
     var denyCueLists = false
+
+    /// Fail `playbackPositionID`, so a test can produce a *failed* playhead
+    /// query — which must not read as a cue list with nothing standing by.
+    var failPlaybackPosition = false
 
     /// What `/workspaces` reports. Emptying it is how a test closes a
     /// workspace out from under the client.
@@ -1029,6 +1239,10 @@ private final class AuthorizationPeer {
             // what puts a cue on the display: without it a populated show
             // still has nothing standing by.
             if parts[2] == "playbackPositionID" {
+                // `error`, not `denied`: a denial is an authorization problem
+                // and correctly ends the session, which is a different story
+                // from a query that simply failed.
+                guard !failPlaybackPosition else { return ("error", NSNull()) }
                 let list = cueLists.first { $0.id == String(parts[1]) }
                 return ("ok", list?.playheadCueID ?? "none")
             }

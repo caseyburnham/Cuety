@@ -116,6 +116,36 @@ nonisolated struct Cue: Hashable, Sendable, Identifiable {
     }
 }
 
+/// What Cuety knows about one cue list's playhead.
+///
+/// Three different things used to be one absent dictionary entry, and the
+/// display described all of them as "the playhead in this cue list is not
+/// set". Only one of them is that. A query Cuety never got an answer to, and a
+/// list it has not asked about yet, are both *ignorance* — and saying "not
+/// set" about a cue list that in fact has a cue standing by is the kind of
+/// quiet lie this app exists not to tell.
+nonisolated enum PlayheadState: Hashable, Sendable {
+    /// QLab answered with a cue.
+    case cue(String)
+    /// QLab answered, and nothing is standing by. A real state with a real
+    /// empty display, not an absence of information.
+    case unset
+    /// The query failed or was refused. Where the playhead is, is unknown.
+    case unknown(reason: String)
+
+    /// The cue standing by, if one is known to be.
+    var cueID: String? {
+        guard case .cue(let id) = self else { return nil }
+        return id
+    }
+
+    /// Whether Cuety has an answer about this list at all.
+    var isKnown: Bool {
+        if case .unknown = self { return false }
+        return true
+    }
+}
+
 /// QLab's continue mode, which governs what happens after a cue fires.
 nonisolated enum ContinueMode: Int, Hashable, Sendable, Codable {
     case doNotContinue = 0

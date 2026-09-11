@@ -161,10 +161,16 @@ struct CueDisplayView: View {
 
     // MARK: - Empty states
     //
-    // Three genuinely different situations, each with its own explanation.
-    // Collapsing them into one "no cue" message would leave the operator
-    // guessing which one they are in. All three are `ContentUnavailableView`, so
-    // "nothing to show" always looks the same however Cuety got there.
+    // Five genuinely different situations, each with its own explanation.
+    // Collapsing them would leave the operator guessing which one they are in.
+    // All are `ContentUnavailableView`, so "nothing to show" always looks the
+    // same however Cuety got there.
+    //
+    // The three that used to be one message are the last three: a cue list
+    // nobody has asked about yet, one whose playhead query failed, and one
+    // that genuinely has nothing standing by. Only the last is "the playhead
+    // is not set" — saying that about the other two claims knowledge Cuety
+    // does not have, on a display whose whole job is being trustworthy.
 
     @ViewBuilder
     private var emptyState: some View {
@@ -189,9 +195,32 @@ struct CueDisplayView: View {
             } description: {
                 Text("This workspace has no cue lists.")
             }
+        } else if client.watchedCueListID == nil {
+            ContentUnavailableView {
+                Label("No Cue List Selected", systemImage: "list.triangle")
+            } description: {
+                Text("Choose a cue list in the sidebar to follow its playhead.")
+            }
+        } else if case .unknown(let reason) = client.watchedPlayhead {
+            // The query failed. Cuety does not know where the playhead is,
+            // which is emphatically not the same as knowing there is no cue
+            // standing by — and this used to say the latter.
+            ContentUnavailableView {
+                Label("Playhead Unknown", systemImage: "questionmark.circle")
+            } description: {
+                Text("Cuety could not read the playhead of this cue list. \(reason)")
+            }
+        } else if client.watchedPlayhead == nil {
+            // Asked for, not yet answered. A brief state during connection,
+            // and a lasting one if a refresh was cancelled partway.
+            ContentUnavailableView {
+                Label("Waiting for QLab", systemImage: "progress.indicator")
+            } description: {
+                Text("Cuety has not heard back about this cue list's playhead yet.")
+            }
         } else {
-            // The playhead is genuinely unset: QLab sent a playbackPosition
-            // update with no cue ID. A real state, not an error.
+            // The playhead is genuinely unset: QLab answered, and nothing is
+            // standing by. A real state, not an error.
             ContentUnavailableView {
                 // The same glyph the drawer marks the playhead with.
                 Label("No Cue Standing By", systemImage: "arrowtriangle.right")
