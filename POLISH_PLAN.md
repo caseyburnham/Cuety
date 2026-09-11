@@ -1191,6 +1191,50 @@ passcoded connection. They stay open.
 
 ---
 
+### Running the pass
+
+Written out because one live-show regression got through 233 green tests, and because
+several of these scenarios are only meaningful with a *populated* show — an empty workspace
+makes most of the assertions below vacuous.
+
+**Before starting.** Build and run from Xcode with the console visible: several checks are
+about what does *not* appear in the log. Open a real show with at least two cue lists, one
+group containing cues, a cue with a duration and a note, and a cue with an awkward number.
+Keep the Activity Log window (⇧⌘L) and Connection Status (⇧⌘I) to hand.
+
+**`V0` — the regression, first.** Not in the original plan; added because it is the one
+fault this project has shipped into a live show. Walk a stack with GO at performance speed,
+a dozen cues or more.
+
+- The display keeps up with QLab, with no growing lag.
+- The console shows **no** `did not answer … in time`, **no** `Dropped a late reply`, and
+  **no** `valuesForKeys failed`.
+- Connection Status shows no Late Replies row and no Dropped Events row.
+
+If any of those appear, stop and report — nothing below matters until this is clean.
+
+| ID | How to run it | What should happen |
+|---|---|---|
+| `V1` | Connect, enter presentation mode (⇧⌘F), then quit QLab | The cue is replaced **immediately** by a large, legible loss state — not a stale cue, not a small `ContentUnavailableView`. Nothing reappears until QLab is back and reconnected. |
+| `V2` | Move the playhead by hand in QLab — arrow keys, clicking a cue, skipping several — firing nothing | Drawer rows say "rows above/below the playhead"; nothing says taken, ago, or next. VoiceOver over a row says position, not history. Stepping into a group shows "in ⟨group⟩" by the marker. |
+| `V3` | A group set to fire-all-children, then one set to fire-first-then-advance. Run past each | The group is **one row**; its children never appear as rows. "End of List" appears only on the genuinely last top-level row, never while inside the final group. The Cue List pill names the containing list, not the cue. |
+| `V4` | With the pills on screen, edit the standing-by cue's duration and note in QLab. Then edit a *different* cue | First: pills update to the new values. Second: pills **never blank**, not even for a frame. Watch closely — this is a one-round-trip window. |
+| `V5` | Delete the cue list Cuety is following | The display moves to another list by itself, with a cue on screen. No "playhead is not set". If the deleted list is later recreated, the display returns to it. |
+| `V6` | Hard one to force. Set Request timeout to 1s in Settings, then load QLab heavily (a big group of video cues) | Any timeout that occurs is followed by a dropped late reply in the console and a **Late Replies** count in Connection Status — not by wrong data on screen. |
+| `V7` | The genuinely hard one. Needs the reading side stalled while messages arrive — a very large show plus a burst. May not be reproducible on demand | If Dropped Events appears in Connection Status, the display should resynchronise and stay correct. A second overflow within ten seconds should visibly rebuild the session. **If it cannot be reproduced, say so and mark it as such** — that is a real result, not a gap. |
+| `V8` | File menu, and ⌘N | No New Window item, no second main window by any route. Close the window, then ⌘0 reopens it. |
+| `V9` | Cannot be forced without a broken Keychain; covered by tests instead. What to check by hand: Settings ▸ Connection, save a passcode, then Forget it | The row disappears **at once**. Then: connect with a passcode and *untick* Remember — Settings should still show that workspace as the Last workspace. |
+| `V10` | Drag the window as narrow as it goes, with a long cue-list name and a long note | Pills stay on one row and truncate rather than overflowing or wrapping; the drawer scrolls or clips rather than pushing the display off screen. Expect findings — `F14` is not implemented. |
+| `V11` | A cue numbered `100.25`, one numbered `A12`, one with a very long name | Numbers are not clipped by the drawer's column; long names truncate with an ellipsis. Expect findings. |
+| `V12` | System Settings ▸ Accessibility: Reduce Motion on, then Increase Contrast on, then a VoiceOver pass over display, drawer, pills, sidebar | Reduce Motion suppresses cue-change, drawer and pill animation — not just the sidebar's. Expect findings; only the sidebar was ever audited. |
+| `V13` | Connect to a passcoded workspace. In the Activity Log find `/workspace/…/connect`, select it, open the inspector, then ⌘C | The argument reads `••••` in the row, in the inspector, and in what is pasted. The passcode must appear nowhere, including in the search field results. |
+
+**Reporting.** For each: pass, fail with what you saw, or "could not reproduce". The last is
+a legitimate answer for `V6` and `V7` and should be recorded as one rather than left blank —
+an unreproducible scenario is information about the scenario.
+
+---
+
 ## Notes on scope
 
 Justified as-is, per the audit — do not "simplify" these:
