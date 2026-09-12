@@ -1123,7 +1123,8 @@ and returning `maxHeight` unconditionally fails `shortContentIsNotStretched`.
 
 Not verifiable here: `RenderPreview` and `RunCodeSnippet` began failing with "The data
 couldn't be read because it is missing" partway through and did not recover, so the drawer
-fix has measurements behind it but no screenshot. Worth an eye at `V10`.
+fix landed with measurements behind it but no screenshot. **The operator confirmed the
+drawer on 2026-09-11** — the measurements were load-bearing and they held.
 
 #### Toolbar press response — investigated, parked
 
@@ -1266,16 +1267,20 @@ about what does *not* appear in the log. Open a real show with at least two cue 
 group containing cues, a cue with a duration and a note, and a cue with an awkward number.
 Keep the Activity Log window (⇧⌘L) and Connection Status (⇧⌘I) to hand.
 
-**`V0` — the regression, first.** Not in the original plan; added because it is the one
-fault this project has shipped into a live show. Walk a stack with GO at performance speed,
-a dozen cues or more.
+**`V0` — the regression, first. ✅ Verified 2026-09-11.** Not in the original plan; added
+because it is the one fault this project has shipped into a live show. Walk a stack with GO
+at performance speed, a dozen cues or more.
 
 - The display keeps up with QLab, with no growing lag.
 - The console shows **no** `did not answer … in time`, **no** `Dropped a late reply`, and
   **no** `valuesForKeys failed`.
 - Connection Status shows no Late Replies row and no Dropped Events row.
 
-If any of those appear, stop and report — nothing below matters until this is clean.
+Confirmed clean by the operator. The deadlock is closed: `route(_:)` no longer awaits a
+reply it must return in order to receive, and the debounced
+`schedulePlayheadDetailsRefresh()` holds up at performance speed. Re-run this after any
+change to `route(_:)` or to what the event consumer awaits — it is the cheapest check
+against the worst failure this app has had.
 
 | ID | How to run it | What should happen |
 |---|---|---|
@@ -1288,7 +1293,7 @@ If any of those appear, stop and report — nothing below matters until this is 
 | `V7` | The genuinely hard one. Needs the reading side stalled while messages arrive — a very large show plus a burst. May not be reproducible on demand | If Dropped Events appears in Connection Status, the display should resynchronise and stay correct. A second overflow within ten seconds should visibly rebuild the session. **If it cannot be reproduced, say so and mark it as such** — that is a real result, not a gap. |
 | `V8` | File menu, and ⌘N | No New Window item, no second main window by any route. Close the window, then ⌘0 reopens it. |
 | `V9` | Cannot be forced without a broken Keychain; covered by tests instead. What to check by hand: Settings ▸ Connection, save a passcode, then Forget it | The row disappears **at once**. Then: connect with a passcode and *untick* Remember — Settings should still show that workspace as the Last workspace. |
-| `V10` | Drag the window as narrow as it goes, with a long cue-list name and a long note | Pills stay on one row and truncate rather than overflowing or wrapping; the drawer scrolls or clips rather than pushing the display off screen. Expect findings — `F14` is not implemented. |
+| `V10` | Drag the window as narrow as it goes, with a long cue-list name and a long note | Pills wrap onto as many rows as they need and the cue-list name truncates; the drawer stays within its share of the window and the cue number keeps the rest. **Drawer half confirmed 2026-09-11** by the operator. The narrow-window pill behaviour is verified only by rendered previews — still worth a live drag. |
 | `V11` | A cue numbered `100.25`, one numbered `A12`, one with a very long name | Numbers are not clipped by the drawer's column; long names truncate with an ellipsis. Expect findings. |
 | `V12` | System Settings ▸ Accessibility: Reduce Motion on, then Increase Contrast on, then a VoiceOver pass over display, drawer, pills, sidebar | Reduce Motion suppresses cue-change, drawer and pill animation — not just the sidebar's. The code path is now uniform (`F14`, 2026-09-11) but has not been watched with the setting on. Contrast and VoiceOver are still unaudited; expect findings there. |
 | `V13` | Connect to a passcoded workspace. In the Activity Log find `/workspace/…/connect`, select it, open the inspector, then ⌘C | The argument reads `••••` in the row, in the inspector, and in what is pasted. The passcode must appear nowhere, including in the search field results. |
