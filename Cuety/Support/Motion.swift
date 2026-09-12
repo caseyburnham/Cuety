@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The app's animation vocabulary.
@@ -23,4 +24,46 @@ enum Motion {
 
     /// Drawer row reflow when the playhead moves by one cue.
     static let drawerShift = Animation.spring(response: 0.38, dampingFraction: 0.85)
+}
+
+extension View {
+    /// Animates changes to `value` with `animation`, unless the operator has
+    /// asked for reduced motion.
+    ///
+    /// Use this in place of `.animation(_:value:)` everywhere Cuety animates.
+    /// The check used to be written out at each call site, which meant eight
+    /// of them silently did not have it: the sidebar honoured Reduce Motion
+    /// and the display, drawer, pills and header did not. Making the guard
+    /// part of the vocabulary rather than a thing to remember is the only
+    /// version of this that stays true.
+    func motion<V: Equatable>(_ animation: Animation, value: V) -> some View {
+        modifier(ReducibleMotion(animation: animation, value: value))
+    }
+}
+
+/// Reads the accessibility setting from the environment, so the view updates
+/// when it is switched during a session rather than only at launch.
+private struct ReducibleMotion<V: Equatable>: ViewModifier {
+    let animation: Animation
+    let value: V
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.animation(reduceMotion ? nil : animation, value: value)
+    }
+}
+
+extension Animation {
+    /// This animation, or `nil` when the operator has asked for reduced
+    /// motion — for the imperative `withAnimation` call sites, which have no
+    /// environment to read.
+    ///
+    /// Views should prefer ``SwiftUICore/View/motion(_:value:)``: the
+    /// environment is the canonical source and it invalidates the view when
+    /// the setting changes, which reading `NSWorkspace` does not.
+    @MainActor
+    var unlessMotionIsReduced: Animation? {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : self
+    }
 }

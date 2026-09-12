@@ -75,7 +75,7 @@ struct ConnectionInspectorView: View {
 
                 Spacer(minLength: 0)
             }
-            .animation(Motion.status, value: client.status)
+            .motion(Motion.status, value: client.status)
 
             if model.canDisconnect {
                 // Not a destructive role: dropping the connection loses nothing

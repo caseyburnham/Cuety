@@ -43,8 +43,8 @@ struct WorkspaceSidebar: View {
                                 .accessibilityLabel("Looking for workspaces on \(server.name)")
                         }
                     }
-                    .animation(
-                        reduceMotion ? nil : Motion.status,
+                    .motion(
+                        Motion.status,
                         value: model.refreshingServerIDs.contains(server.id)
                     )
                     .help(server.address ?? "Discovered on the local network")
@@ -132,7 +132,7 @@ struct WorkspaceSidebar: View {
                             .transition(.blurReplace)
                     }
                 }
-                .animation(reduceMotion ? nil : Motion.status, value: model.isRefreshing)
+                .motion(Motion.status, value: model.isRefreshing)
                 .labelStyle(.iconOnly)
                 .disabled(!model.canRefresh)
                 // Still enabled while refreshing: pressing it again starts over
@@ -369,7 +369,6 @@ private struct WorkspaceDisconnectButton: View {
     let status: ConnectionStatus
     let disconnect: () -> Void
     @State private var isHovering = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: disconnect) {
@@ -381,7 +380,7 @@ private struct WorkspaceDisconnectButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .animation(reduceMotion ? nil : Motion.status, value: isHovering)
+        .motion(Motion.status, value: isHovering)
         .help("Disconnect")
         .accessibilityLabel("Disconnect from workspace")
     }

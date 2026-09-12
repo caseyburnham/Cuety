@@ -1055,8 +1055,13 @@ fix is aimed at a real failure. Prefer content-driven native layout throughout.
       `.fixedSize()` on the overlay lets a wide number overflow the template leftward rather
       than clip, so `SQ-104` starts further left than `1` and the column reads ragged. That
       is misalignment, not lost information — cosmetic, not a production risk.
-- [ ] Reduce Motion is honoured in the sidebar but not consistently in the main display,
-      drawer, pills, or toolbar — apply it uniformly.
+- [x] Reduce Motion is honoured in the sidebar but not consistently in the main display,
+      drawer, pills, or toolbar — apply it uniformly. **Done** (2026-09-11): eight of the
+      ten animation sites had no guard at all. Rather than write the check out a ninth
+      time, the guard is now part of the vocabulary — `View.motion(_:value:)` reads
+      `accessibilityReduceMotion` from the environment itself, and the two imperative
+      `withAnimation` sites use `Animation.unlessMotionIsReduced`. Needs an eye at `V12`:
+      the code path is uniform, but nobody has watched it with the setting on.
 - [x] Notes are reorderable in Settings although their position is ignored on screen —
       either honour the order or stop offering it. **Stopped offering it** (2026-09-11):
       a cue note is long-form text and gets a line of its own beneath the pills, so no
@@ -1199,6 +1204,7 @@ truncates or overflows at the window sizes in `V10`/`V11`.
 | R1 | App icon asset | A real icon ships in `Assets.xcassets`; no placeholder | [ ] |
 | R2 | Formatter configuration, four-space indentation retained | Config committed **before** any mechanical reformatting; lint output reflects it | [ ] |
 | R3 | Address the 279 remaining lint diagnostics (mostly wrapping and indentation) after `R2` | Clean lint run, or a documented allowlist | [ ] |
+| R3a | Add a custom rule banning `.animation(` and bare `withAnimation(` outside `Support/Motion.swift` | `F14`'s Reduce Motion guard cannot be forgotten again — it was missed at eight of ten sites | [ ] |
 | R4 | Project metadata still says `MyApp/Info.plist` and `productName = MyApp` | All references say Cuety; build settings verified via `GetTargetBuildSettings` | [ ] |
 | R5 | User-specific Xcode scheme metadata is tracked in git | Untracked and git-ignored | [ ] |
 | R6 | No shared scheme | A shared scheme is checked in and builds from a clean clone | [ ] |
@@ -1284,7 +1290,7 @@ If any of those appear, stop and report — nothing below matters until this is 
 | `V9` | Cannot be forced without a broken Keychain; covered by tests instead. What to check by hand: Settings ▸ Connection, save a passcode, then Forget it | The row disappears **at once**. Then: connect with a passcode and *untick* Remember — Settings should still show that workspace as the Last workspace. |
 | `V10` | Drag the window as narrow as it goes, with a long cue-list name and a long note | Pills stay on one row and truncate rather than overflowing or wrapping; the drawer scrolls or clips rather than pushing the display off screen. Expect findings — `F14` is not implemented. |
 | `V11` | A cue numbered `100.25`, one numbered `A12`, one with a very long name | Numbers are not clipped by the drawer's column; long names truncate with an ellipsis. Expect findings. |
-| `V12` | System Settings ▸ Accessibility: Reduce Motion on, then Increase Contrast on, then a VoiceOver pass over display, drawer, pills, sidebar | Reduce Motion suppresses cue-change, drawer and pill animation — not just the sidebar's. Expect findings; only the sidebar was ever audited. |
+| `V12` | System Settings ▸ Accessibility: Reduce Motion on, then Increase Contrast on, then a VoiceOver pass over display, drawer, pills, sidebar | Reduce Motion suppresses cue-change, drawer and pill animation — not just the sidebar's. The code path is now uniform (`F14`, 2026-09-11) but has not been watched with the setting on. Contrast and VoiceOver are still unaudited; expect findings there. |
 | `V13` | Connect to a passcoded workspace. In the Activity Log find `/workspace/…/connect`, select it, open the inspector, then ⌘C | The argument reads `••••` in the row, in the inspector, and in what is pasted. The passcode must appear nowhere, including in the search field results. |
 
 **Reporting.** For each: pass, fail with what you saw, or "could not reproduce". The last is

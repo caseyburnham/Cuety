@@ -21,7 +21,7 @@ struct CueDisplayView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(Motion.cueChange, value: client.currentPlayheadCueID)
+        .motion(Motion.cueChange, value: client.currentPlayheadCueID)
     }
 
     /// The cue at the playhead, and only while the session is live enough for

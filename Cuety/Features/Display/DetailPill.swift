@@ -396,8 +396,8 @@ struct DetailPillsRow: View {
                     }
                 }
             }
-            .animation(Motion.pill, value: populated)
-            .animation(Motion.pill, value: cue.uniqueID)
+            .motion(Motion.pill, value: populated)
+            .motion(Motion.pill, value: cue.uniqueID)
         }
     }
 

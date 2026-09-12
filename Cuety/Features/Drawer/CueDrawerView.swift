@@ -63,7 +63,7 @@ struct CueDrawerView: View {
         // content area rather than a strip of chrome: the cue rows should read
         // as sitting on the window, not on a toolbar.
         .background(.thinMaterial)
-        .animation(Motion.drawerShift, value: playheadID)
+        .motion(Motion.drawerShift, value: playheadID)
         .accessibilityElement(children: .contain)
         // Named for what it is — a window onto the list — rather than for the
         // furniture it is drawn as. VoiceOver users get the same guarantee the
@@ -88,31 +88,31 @@ struct CueDrawerView: View {
         graph: CueGraph, playheadID: String, above: [Cue], below: [Cue]
     ) -> some View {
         let stack = VStack(alignment: .leading, spacing: 2) {
-                // The boundary rows are driven by the graph, not by an empty
-                // slice: with the drawer set to show no rows above, "Top of
-                // cue list" would otherwise be claimed on every cue in the show.
-                if graph.isFirst(playheadID) {
-                    boundaryRow("Top of cue list", systemImage: "arrow.up.to.line")
-                } else {
-                    // Nearest-last, so the row adjacent to the playhead is the
-                    // one directly above it in the list.
-                    ForEach(Array(above.enumerated()), id: \.element.id) { offset, cue in
-                        CueRowView(
-                            cue: cue,
-                            role: .above(distance: above.count - offset)
-                        )
-                    }
+            // The boundary rows are driven by the graph, not by an empty
+            // slice: with the drawer set to show no rows above, "Top of
+            // cue list" would otherwise be claimed on every cue in the show.
+            if graph.isFirst(playheadID) {
+                boundaryRow("Top of cue list", systemImage: "arrow.up.to.line")
+            } else {
+                // Nearest-last, so the row adjacent to the playhead is the
+                // one directly above it in the list.
+                ForEach(Array(above.enumerated()), id: \.element.id) { offset, cue in
+                    CueRowView(
+                        cue: cue,
+                        role: .above(distance: above.count - offset)
+                    )
                 }
+            }
 
-                playheadMarker(insideGroup: graph.containingRow(of: playheadID))
+            playheadMarker(insideGroup: graph.containingRow(of: playheadID))
 
-                if graph.isLast(playheadID) {
-                    boundaryRow("End of cue list", systemImage: "arrow.down.to.line")
-                } else {
-                    ForEach(Array(below.enumerated()), id: \.element.id) { offset, cue in
-                        CueRowView(cue: cue, role: .below(distance: offset + 1))
-                    }
+            if graph.isLast(playheadID) {
+                boundaryRow("End of cue list", systemImage: "arrow.down.to.line")
+            } else {
+                ForEach(Array(below.enumerated()), id: \.element.id) { offset, cue in
+                    CueRowView(cue: cue, role: .below(distance: offset + 1))
                 }
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)

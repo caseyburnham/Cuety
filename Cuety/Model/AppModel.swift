@@ -619,7 +619,7 @@ final class AppModel {
     /// Enters or leaves presentation mode, animating the whole layout change
     /// as one transition.
     func togglePresentationMode() {
-        withAnimation(Motion.chrome) {
+        withAnimation(Motion.chrome.unlessMotionIsReduced) {
             if isPresenting {
                 isPresenting = false
                 sidebarVisibility = sidebarVisibilityBeforePresenting
@@ -632,7 +632,7 @@ final class AppModel {
     }
 
     func toggleDrawer() {
-        withAnimation(Motion.chrome) {
+        withAnimation(Motion.chrome.unlessMotionIsReduced) {
             preferences.showsDrawer.toggle()
         }
     }

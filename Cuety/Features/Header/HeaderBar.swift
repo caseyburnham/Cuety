@@ -80,7 +80,7 @@ struct ActivityLogButton: View {
                 options: .nonRepeating,
                 value: client.heartbeatCount
             )
-            .animation(Motion.status, value: isLive)
+            .motion(Motion.status, value: isLive)
     }
 
     private var heartTint: Color {
@@ -128,7 +128,7 @@ struct ConnectionStatusButton: View {
                 // and stops once settled.
                 .contentTransition(.symbolEffect(.replace))
                 .symbolEffect(.variableColor.iterative, isActive: status.isTransitional)
-                .animation(Motion.status, value: status)
+                .motion(Motion.status, value: status)
         }
         .help("\(status.title). \(status.detail)")
         .accessibilityLabel("Connection status")
@@ -174,7 +174,7 @@ struct KeepAwakeToggle: View {
                     .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp)))
             }
         }
-        .animation(Motion.status, value: isOn)
+        .motion(Motion.status, value: isOn)
         .help(isOn
             ? "The display is being kept awake."
             : "The display can sleep.")
