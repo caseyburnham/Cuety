@@ -158,7 +158,12 @@ struct DetailPill: View {
             return Content(
                 text: cueListName,
                 systemImage: kind.systemImage,
-                help: "Cue list"
+                help: "Cue list",
+                // Free-form text, like a note: an operator can call a cue list
+                // anything, and "Act Two — Understudy Track (Revised)" is not
+                // a short bounded value. Marked fixed-width, it was the pill
+                // that shoved the whole row off the edge of a narrow window.
+                isFlexible: true
             )
 
         case .armed:
@@ -239,6 +244,99 @@ struct DetailPill: View {
     }
 }
 
+/// Lays views out in a row, wrapping onto further rows when they do not fit.
+///
+/// `Layout` is the system's extension point for arrangements SwiftUI has no
+/// stock container for, and there is no wrapping stack — so this is not a
+/// hand-rolled substitute for something the platform already does.
+///
+/// An `HStack` cannot fit an arbitrary number of pills into an arbitrary
+/// width, and the pills deliberately refuse to shrink so that "Disarmed" never
+/// becomes "Disar…". Reproduced at 260pt, the row ran off *both* edges of the
+/// window with five of its seven pills not on screen at all — on a display
+/// whose job is to be readable from across a booth, information vanishing
+/// silently is the worst available outcome. Wrapping keeps every pill visible;
+/// scrolling would hide them behind a gesture nobody is there to make, and
+/// dropping them would lose the information without saying so.
+struct WrappingPillLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) -> CGSize {
+        let available = proposal.width ?? .infinity
+        let rows = rows(for: subviews, availableWidth: available)
+
+        let width = rows.map { row in
+            row.reduce(0) { $0 + subviews[$1].sizeThatFits(.unspecified).width }
+                + spacing * CGFloat(max(0, row.count - 1))
+        }.max() ?? 0
+
+        let height = rows.reduce(0) { total, row in
+            total + rowHeight(row, in: subviews)
+        } + spacing * CGFloat(max(0, rows.count - 1))
+
+        return CGSize(width: min(width, available), height: height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        let rows = rows(for: subviews, availableWidth: bounds.width)
+        var y = bounds.minY
+
+        for row in rows {
+            let rowWidth = row.reduce(0) { $0 + subviews[$1].sizeThatFits(.unspecified).width }
+                + spacing * CGFloat(max(0, row.count - 1))
+            let height = rowHeight(row, in: subviews)
+            // Centred, because the display centres everything else. A
+            // left-aligned final row under a centred cue number reads as a
+            // mistake.
+            var x = bounds.minX + (bounds.width - rowWidth) / 2
+
+            for index in row {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(
+                    at: CGPoint(x: x, y: y + (height - size.height) / 2),
+                    proposal: ProposedViewSize(size)
+                )
+                x += size.width + spacing
+            }
+
+            y += height + spacing
+        }
+    }
+
+    /// Groups subviews into rows that fit. A subview wider than the whole
+    /// container still gets a row of its own rather than being dropped.
+    private func rows(for subviews: Subviews, availableWidth: CGFloat) -> [[Int]] {
+        var rows: [[Int]] = []
+        var current: [Int] = []
+        var x: CGFloat = 0
+
+        for index in subviews.indices {
+            let width = subviews[index].sizeThatFits(.unspecified).width
+            let needed = current.isEmpty ? width : width + spacing
+
+            if !current.isEmpty, x + needed > availableWidth {
+                rows.append(current)
+                current = [index]
+                x = width
+            } else {
+                current.append(index)
+                x += needed
+            }
+        }
+
+        if !current.isEmpty { rows.append(current) }
+        return rows
+    }
+
+    private func rowHeight(_ row: [Int], in subviews: Subviews) -> CGFloat {
+        row.map { subviews[$0].sizeThatFits(.unspecified).height }.max() ?? 0
+    }
+}
+
 /// The pills beneath the cue name: the short values on one line, and the note
 /// on a line of its own beneath them.
 ///
@@ -283,7 +381,10 @@ struct DetailPillsRow: View {
             GlassEffectContainer(spacing: 14) {
                 VStack(spacing: 10) {
                     if !inlineKinds.isEmpty {
-                        HStack(spacing: 10) {
+                        // Wrapping, not an `HStack`: see ``WrappingPillLayout``.
+                        // At a narrow width an `HStack` put five of seven pills
+                        // outside the window.
+                        WrappingPillLayout(spacing: 10) {
                             ForEach(inlineKinds) { kind in
                                 pill(kind)
                             }
@@ -350,6 +451,35 @@ struct DetailPillsRow: View {
     )
     .padding(40)
     .frame(width: 900)
+}
+
+/// `F14` reproduction: a narrow window with a long cue-list name.
+///
+/// Every other preview here is 900pt wide, which is why this was never seen.
+/// The audit's claim is that the pills occupy one non-wrapping row and treat
+/// the list name as fixed-width content, so a long one pushes the row wider
+/// than the window instead of giving way.
+#Preview("Narrow window, long list name") {
+    var cue = Cue(uniqueID: "n")
+    cue.number = "12.5"
+    cue.name = "Thunder Crash"
+    cue.listName = "Thunder Crash"
+    cue.type = "Audio"
+    cue.duration = 4.25
+    cue.preWait = 1.5
+    cue.continueMode = .autoContinue
+    cue.isFlagged = true
+    cue.isArmed = false
+
+    return DetailPillsRow(
+        cue: cue,
+        kinds: DetailPillKind.defaultOrder,
+        cueListName: "Act Two — Understudy Track (Revised)"
+    )
+    .padding(20)
+    // The narrowest the main window's detail pane realistically gets: the
+    // sidebar's minimum is 220 of a 480pt window.
+    .frame(width: 260)
 }
 
 /// An unnamed audio cue: QLab labels it with its file, and that is what the
