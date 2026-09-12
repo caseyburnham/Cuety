@@ -1044,12 +1044,17 @@ fix is aimed at a real failure. Prefer content-driven native layout throughout.
 *Evidence:* `Cuety/Features/Display/DetailPill.swift:272`,
 `Cuety/Features/Drawer/CueDrawerView.swift:218`, `Cuety/Support/Motion.swift:8`.
 
-- [ ] Pills occupy one non-wrapping row and treat an unbounded list name as fixed-width
+- [x] Pills occupy one non-wrapping row and treat an unbounded list name as fixed-width
       content — reproduce at a narrow window with a long list name, then fix.
-- [ ] The drawer allows twenty surrounding rows with no scroll or height constraint —
-      reproduce at a short window, then fix.
+      **Reproduced and fixed** — see the 2026-09-11 notes below.
+- [x] The drawer allows twenty surrounding rows with no scroll or height constraint —
+      reproduce at a short window, then fix. **Reproduced and fixed** — worse than
+      described; see the 2026-09-11 notes below.
 - [ ] Number-column sizing uses a hidden `"000.0"` template that cannot fit arbitrary cue
-      numbers — replace with content-driven sizing.
+      numbers — replace with content-driven sizing. **Reproduced 2026-09-11 and downgraded:**
+      `.fixedSize()` on the overlay lets a wide number overflow the template leftward rather
+      than clip, so `SQ-104` starts further left than `1` and the column reads ragged. That
+      is misalignment, not lost information — cosmetic, not a production risk.
 - [ ] Reduce Motion is honoured in the sidebar but not consistently in the main display,
       drawer, pills, or toolbar — apply it uniformly.
 - [ ] Notes are reorderable in Settings although their position is ignored on screen —
@@ -1061,6 +1066,55 @@ fix is aimed at a real failure. Prefer content-driven native layout throughout.
 - [ ] **Toolbar buttons do not show the press/scale response.** Investigated at length on
       2026-09-10 and concluded **not a Cuety defect** — see below. No action pending unless
       new evidence appears.
+
+#### Layout reproductions — 2026-09-11
+
+Both risks were real, and the drawer's was worse than the audit's wording.
+
+**Pills at a narrow window.** Rendered `DetailPillsRow` at 260pt with a long cue-list name:
+five of seven pills were entirely off screen, "Do-Continue" clipped on the left and the
+list name on the right. Fixed by marking the `cueList` pill flexible so it truncates, and
+replacing the row's `HStack` with a `WrappingPillLayout` that wraps onto as many rows as it
+needs. Re-rendered: all seven pills visible in four centred rows, nothing clipped. The
+900pt case is unchanged — one row plus the note.
+
+**The drawer at maximum rows.** Rendered ten above and ten below in the 900×560 window
+Cuety opens at. The drawer took roughly 85% of the height, reducing the headline cue number
+to a *clipped sliver of glyph tops* — and it still did not fit, losing rows 17–20 off the
+bottom edge with nothing to indicate it. The number is the entire point of the app, so this
+was a release blocker whenever the row counts are set high.
+
+The drawer is now bounded to `MainWindowView.drawerHeightShare` (45%) of the detail area,
+measured with a `GeometryReader` so the bound is a share of the window rather than a point
+value that stops being right on resize. `View.scrollingBound(to:)` applies it: content
+shorter than the bound keeps its own height, and content taller than it scrolls, anchored on
+the centre so the rows either side of the playhead are what stay on screen. Scrolling is
+little use on an unattended display, but distant rows being reachable beats them being
+silently cut off, and the number keeps its 55% either way.
+
+Two wrong turns, both caught by measurement rather than by reading:
+
+1. The first `DrawerBoundTests` measured `ImageRenderer(...).nsImage.size` without setting
+   `proposedSize`. `ImageRenderer` proposes `nil` — an offer of nothing in particular — so
+   an over-eager view is never given the chance to over-expand. The stretch test **passed
+   with the fix deleted**. Fixed by setting `proposedSize` explicitly. A second attempt
+   measured from inside with `onGeometryChange`, whose action does not run in step with the
+   render: it passed alone and failed in the suite.
+2. The fix itself was wrong twice. `.frame(maxHeight:)` is a **flexible** frame — it grows
+   to fill what it is offered, up to the maximum, and never shrink-wraps. Measured: three
+   24pt rows under `.frame(maxHeight: 252)` offered 560pt resolve to **252**, with no scroll
+   view involved at all. So the cap would have taken the number's space to no purpose.
+   `fixedSize` does make such a frame shrink-wrap, but only by proposing `nil` inwards,
+   which robs `ViewThatFits` of the bound it must choose against. Hence
+   `BoundedHeightLayout`: a `Layout` can narrow the proposal without having an appetite of
+   its own. Measured after: 72 and 252, i.e. `min(content, bound)`.
+
+Falsified both ways — passing the proposal through unlimited fails `tallContentIsClamped`,
+and returning `maxHeight` unconditionally fails `shortContentIsNotStretched`.
+
+Not verifiable here: `RenderPreview` and `RunCodeSnippet` began failing with "The data
+couldn't be read because it is missing" partway through and did not recover, so the drawer
+fix has measurements behind it but no screenshot. Worth an eye at `V10`.
 
 #### Toolbar press response — investigated, parked
 

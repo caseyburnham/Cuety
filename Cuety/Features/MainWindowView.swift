@@ -25,23 +25,41 @@ struct MainWindowView: View {
         }
     }
 
+    /// The largest share of the detail area the drawer may occupy.
+    ///
+    /// The cue number is what the operator reads from across a room, so it gets
+    /// the majority of the window whatever the drawer is set to show. Ten rows
+    /// above the playhead and ten below — both allowed by Settings — otherwise
+    /// come to more than the whole height of the window Cuety opens at.
+    ///
+    /// Not private, so ``DrawerBoundTests`` can hold the share itself to
+    /// account rather than only the mechanism that applies it.
+    static let drawerHeightShare: CGFloat = 0.45
+
     private var detail: some View {
-        CueDisplayView()
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if model.preferences.showsDrawer && !model.isPresenting {
-                    CueDrawerView()
+        // Measures the detail area so the drawer's bound is a share of the
+        // window rather than a point value that stops being right the moment
+        // the window is resized.
+        GeometryReader { proxy in
+            CueDisplayView()
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if model.preferences.showsDrawer && !model.isPresenting {
+                        CueDrawerView(
+                            maxHeight: proxy.size.height * Self.drawerHeightShare
+                        )
                         .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                 }
-            }
-            .toolbar { StatusToolbarContent() }
-            .toolbar(model.isPresenting ? .hidden : .automatic)
-            .navigationTitle(navigationTitle)
-            .navigationSubtitle(navigationSubtitle)
-            // Escape leaves presentation mode. Without this the only way out
-            // is the menu, which is a bad place to be with the chrome hidden.
-            .onExitCommand {
-                if model.isPresenting { model.togglePresentationMode() }
-            }
+        }
+        .toolbar { StatusToolbarContent() }
+        .toolbar(model.isPresenting ? .hidden : .automatic)
+        .navigationTitle(navigationTitle)
+        .navigationSubtitle(navigationSubtitle)
+        // Escape leaves presentation mode. Without this the only way out
+        // is the menu, which is a bad place to be with the chrome hidden.
+        .onExitCommand {
+            if model.isPresenting { model.togglePresentationMode() }
+        }
     }
 
     private var navigationTitle: String {

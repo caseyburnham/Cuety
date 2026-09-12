@@ -21,11 +21,28 @@ import Testing
 @Suite("Drawer height bound")
 @MainActor
 struct DrawerBoundTests {
-    /// The rendered height of a view, in points.
-    private func height(of view: some View) -> CGFloat {
-        let renderer = ImageRenderer(content: view.frame(width: 900))
+    /// The height a view resolves to when offered a whole window, in points.
+    ///
+    /// The offer is the whole point. A scroll view given more room than its
+    /// content needs will take it, and that is the fault under test — so these
+    /// measurements set `proposedSize` explicitly rather than letting
+    /// `ImageRenderer` propose `nil`, which is an offer of nothing in
+    /// particular and lets an over-eager view look well behaved. A first
+    /// attempt at these tests omitted it and passed with the fix removed.
+    ///
+    /// Reading the resolved size back off the image keeps this synchronous. A
+    /// second attempt measured from inside with `onGeometryChange`, whose
+    /// action does not run in step with the render: it passed alone and failed
+    /// in the suite.
+    private func heightOfferedAWindow(_ view: some View) -> CGFloat {
+        let renderer = ImageRenderer(content: view)
+        renderer.proposedSize = ProposedViewSize(
+            width: 900, height: Self.windowHeight
+        )
         return renderer.nsImage?.size.height ?? 0
     }
+
+    private static let windowHeight: CGFloat = 560
 
     /// A stack of plain rows, tall enough to be predictable without depending
     /// on the operator's chosen font family.
@@ -41,42 +58,40 @@ struct DrawerBoundTests {
     private static let bound: CGFloat = 252
 
     @Test("A drawer smaller than its bound keeps its own height")
-    func shortContentIsNotStretched() {
-        let content = rows(3)
-        let natural = height(of: content)
-        try? #require(natural > 0)
+    func shortContentIsNotStretched() throws {
+        let natural = Self.rowHeight * 3
+        try #require(natural < Self.bound)
 
-        // A bare `ScrollView` would fill whatever it was offered here, leaving
-        // the drawer 252pt tall to show three rows and taking that space from
-        // the cue number for nothing.
-        #expect(height(of: content.scrollingBound(to: Self.bound)) == natural)
-        #expect(natural < Self.bound)
+        // Three rows, offered a 560pt window. A scroll view that took the room
+        // on offer would leave the drawer 252pt tall to show 72pt of cues, and
+        // the cue number would have paid for the difference.
+        let bounded = heightOfferedAWindow(rows(3).scrollingBound(to: Self.bound))
+        #expect(bounded == natural)
     }
 
     @Test("A drawer larger than its bound is held to it")
-    func tallContentIsClamped() {
+    func tallContentIsClamped() throws {
         // Twenty rows plus the playhead marker — the configured maximum.
-        let content = rows(21)
-        try? #require(height(of: content) > Self.bound)
+        try #require(Self.rowHeight * 21 > Self.bound)
 
-        #expect(height(of: content.scrollingBound(to: Self.bound)) == Self.bound)
+        let bounded = heightOfferedAWindow(rows(21).scrollingBound(to: Self.bound))
+        #expect(bounded == Self.bound)
     }
 
     @Test("No bound means the view is left exactly as it was")
     func noBoundIsNoChange() {
-        let content = rows(21)
-
         // The drawer is a `safeAreaInset`, which wants the inset view's natural
         // height. Wrapping it in a scroll view "just in case" would break that
         // even with a generous bound.
-        #expect(height(of: content.scrollingBound(to: nil)) == height(of: content))
+        let unbounded = heightOfferedAWindow(rows(21).scrollingBound(to: nil))
+        #expect(unbounded == Self.rowHeight * 21)
     }
 
     /// The bound has to leave the cue number the majority of the window,
     /// because the number is the reason the app is on the wall.
     @Test("The window's share leaves the display more room than the drawer")
     func shareFavoursTheDisplay() {
-        let detailHeight: CGFloat = 560
+        let detailHeight = Self.windowHeight
         let drawerBound = detailHeight * MainWindowView.drawerHeightShare
 
         #expect(drawerBound < detailHeight / 2)

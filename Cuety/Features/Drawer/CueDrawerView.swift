@@ -22,6 +22,13 @@ import SwiftUI
 /// operator should be able to read their position in the list from the shape
 /// of it without reading a single number.
 struct CueDrawerView: View {
+    /// The most vertical space the drawer may take, or `nil` for unbounded.
+    ///
+    /// Supplied by the window rather than chosen here, because "how much of
+    /// the display may the drawer eat" is a question about the window, and the
+    /// answer has to hold at every window size.
+    var maxHeight: CGFloat?
+
     @Environment(AppModel.self) private var model
 
     private var client: QLabClient { model.client }
@@ -50,7 +57,37 @@ struct CueDrawerView: View {
         VStack(alignment: .leading, spacing: 0) {
             Divider()
 
-            VStack(alignment: .leading, spacing: 2) {
+            rows(graph: graph, playheadID: playheadID, above: above, below: below)
+        }
+        // A thinner material than the app's status bars use, because this is a
+        // content area rather than a strip of chrome: the cue rows should read
+        // as sitting on the window, not on a toolbar.
+        .background(.thinMaterial)
+        .animation(Motion.drawerShift, value: playheadID)
+        .accessibilityElement(children: .contain)
+        // Named for what it is — a window onto the list — rather than for the
+        // furniture it is drawn as. VoiceOver users get the same guarantee the
+        // row labels give: position, not playback.
+        .accessibilityLabel("Cue list around the playhead")
+    }
+
+    /// The rows, bounded so the drawer can never take the display's space.
+    ///
+    /// Ten rows above and ten below — both allowed by Settings — come to more
+    /// than the height of the window Cuety opens at. Unbounded, the drawer
+    /// reduced the headline cue number to a clipped sliver *and* lost its own
+    /// furthest rows off the bottom edge with nothing to say so.
+    ///
+    /// So it scrolls, anchored on the centre. Scrolling is not much use on a
+    /// display nobody is standing at, but the rows either side of the playhead
+    /// are the ones that matter and the anchor keeps those on screen; the rows
+    /// that fall outside are the distant ones, and they remain reachable rather
+    /// than silently cut off.
+    @ViewBuilder
+    private func rows(
+        graph: CueGraph, playheadID: String, above: [Cue], below: [Cue]
+    ) -> some View {
+        let stack = VStack(alignment: .leading, spacing: 2) {
                 // The boundary rows are driven by the graph, not by an empty
                 // slice: with the drawer set to show no rows above, "Top of
                 // cue list" would otherwise be claimed on every cue in the show.
@@ -76,20 +113,11 @@ struct CueDrawerView: View {
                         CueRowView(cue: cue, role: .below(distance: offset + 1))
                     }
                 }
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
         }
-        // A thinner material than the app's status bars use, because this is a
-        // content area rather than a strip of chrome: the cue rows should read
-        // as sitting on the window, not on a toolbar.
-        .background(.thinMaterial)
-        .animation(Motion.drawerShift, value: playheadID)
-        .accessibilityElement(children: .contain)
-        // Named for what it is — a window onto the list — rather than for the
-        // furniture it is drawn as. VoiceOver users get the same guarantee the
-        // row labels give: position, not playback.
-        .accessibilityLabel("Cue list around the playhead")
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+
+        stack.scrollingBound(to: maxHeight)
     }
 
     /// A thin rule marking the playhead's row in the list.
@@ -136,6 +164,91 @@ struct CueDrawerView: View {
             .font(.caption2)
             .foregroundStyle(.tertiary)
             .padding(.vertical, 3)
+    }
+}
+
+extension View {
+    /// Confines a view to `maxHeight`, scrolling what does not fit instead of
+    /// clipping it.
+    ///
+    /// - Parameter maxHeight: The bound, or `nil` to impose none.
+    ///
+    /// A `nil` bound returns the view untouched rather than wrapping it in a
+    /// scroll view that happens to be large enough. That distinction matters:
+    /// a `ScrollView` expands to fill whatever it is offered whether its
+    /// content needs the room or not, which is precisely the fault this is here
+    /// to prevent.
+    ///
+    /// When bounded, the height is `min(content, maxHeight)`:
+    /// ``BoundedHeightLayout`` narrows the offer to the bound, and
+    /// `ViewThatFits` spends it on the plain content when that fits and on a
+    /// scroll view only when it does not.
+    ///
+    /// `.frame(maxHeight:)` is conspicuously absent, and that is the point. A
+    /// flexible frame *grows to fill what it is offered*, up to its maximum —
+    /// it does not shrink-wrap — so capping the drawer that way made it 252pt
+    /// tall to show three rows, taking the cue number's space to no purpose.
+    /// ``DrawerBoundTests`` measured 252 where 72 was wanted, including for
+    /// plain content with no scroll view anywhere near it.
+    ///
+    /// `fixedSize` does make such a frame shrink-wrap, but only by proposing
+    /// `nil` inwards, and `ViewThatFits` needs the real bound to choose
+    /// against. Hence a layout: it can limit the proposal without having an
+    /// appetite of its own.
+    @ViewBuilder
+    func scrollingBound(to maxHeight: CGFloat?) -> some View {
+        if let maxHeight {
+            BoundedHeightLayout(maxHeight: maxHeight) {
+                ViewThatFits(in: .vertical) {
+                    self
+
+                    ScrollView(.vertical) { self }
+                        // The rows either side of the playhead are the ones
+                        // that matter, so they are what stays on screen when
+                        // the content outgrows the bound.
+                        .defaultScrollAnchor(.center)
+                }
+            }
+        } else {
+            self
+        }
+    }
+}
+
+/// Offers its content at most `maxHeight`, and is exactly as tall as the
+/// content turns out to be.
+///
+/// Neither half of that is what `.frame(maxHeight:)` does, which is why this
+/// exists — see ``SwiftUICore/View/scrollingBound(to:)``.
+struct BoundedHeightLayout: Layout {
+    let maxHeight: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        return subview.sizeThatFits(limiting(proposal))
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize,
+        subviews: Subviews, cache: inout ()
+    ) {
+        guard let subview = subviews.first else { return }
+        subview.place(
+            at: CGPoint(x: bounds.minX, y: bounds.minY),
+            anchor: .topLeading,
+            proposal: limiting(proposal)
+        )
+    }
+
+    /// An unspecified height means "however much you like", which is more than
+    /// the bound by definition — so the bound is the answer either way.
+    private func limiting(_ proposal: ProposedViewSize) -> ProposedViewSize {
+        ProposedViewSize(
+            width: proposal.width,
+            height: min(proposal.height ?? .infinity, maxHeight)
+        )
     }
 }
 
@@ -334,4 +447,76 @@ struct CueRowView: View {
     CueDrawerView()
         .environment(AppModel())
         .frame(width: 900)
+}
+
+/// `F14` reproduction: the drawer at its maximum configured size, in a window
+/// the size Cuety opens at.
+///
+/// Settings allows ten rows above the playhead and ten below, which together
+/// come to more than 560pt. Unbounded, the drawer reduced the headline cue
+/// number to a clipped sliver of glyph tops *and* still lost rows 17–20 off
+/// the bottom edge with nothing to indicate it.
+///
+/// The bound is the one the window passes — 45% of the detail height — so this
+/// renders the real arithmetic, not a stand-in for it.
+#Preview("Drawer at maximum rows") {
+    func cue(_ number: Int) -> Cue {
+        var cue = Cue(uniqueID: "\(number)")
+        cue.number = "\(number)"
+        cue.name = "Cue number \(number)"
+        return cue
+    }
+
+    let height: CGFloat = 560
+
+    return VStack(spacing: 0) {
+        // Stands in for the cue display the drawer is inset into.
+        Text("42")
+            .font(.system(size: 160, weight: .semibold))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+        VStack(spacing: 0) {
+            Divider()
+
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(1...10, id: \.self) {
+                    CueRowView(cue: cue($0), role: .above(distance: 11 - $0))
+                }
+                Rectangle().fill(.tint.opacity(0.5))
+                    .frame(height: 1).padding(.vertical, 5)
+                ForEach(1...10, id: \.self) {
+                    CueRowView(cue: cue($0 + 10), role: .below(distance: $0))
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            // The real mechanism, given the bound the window would pass.
+            .scrollingBound(to: height * MainWindowView.drawerHeightShare)
+        }
+        .background(.thinMaterial)
+    }
+    // The app's own `defaultSize`.
+    .frame(width: 900, height: height)
+    .environment(AppModel())
+}
+
+/// `F14` reproduction: cue numbers the hidden `"000.0"` template cannot fit.
+///
+/// QLab numbers are free text. Anything wider than five monospaced digits —
+/// a three-part number, a lettered number, a longer decimal — has to go
+/// somewhere, and the template decides how much room there is.
+#Preview("Awkward cue numbers") {
+    let numbers = ["1", "12.5", "100.25", "A12", "1.1.1", "SQ-104"]
+
+    return VStack(alignment: .leading, spacing: 2) {
+        ForEach(Array(numbers.enumerated()), id: \.offset) { offset, number in
+            var cue = Cue(uniqueID: number)
+            cue.number = number
+            cue.name = "Cue named \(number)"
+            return CueRowView(cue: cue, role: .below(distance: offset + 1))
+        }
+    }
+    .padding(20)
+    .frame(width: 420)
+    .environment(AppModel())
 }
