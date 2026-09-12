@@ -8,6 +8,15 @@ import SwiftUI
 struct DetailPillSettingsView: View {
     @Environment(AppModel.self) private var model
 
+    /// The pills whose order the display actually honours.
+    ///
+    /// `pillOrder` still holds every pill, notes included, so nothing about
+    /// stored preferences changes and an operator who switches notes off and
+    /// on again keeps their arrangement.
+    private var inlineOrder: [DetailPillKind] {
+        model.preferences.pillOrder.filter { $0 != .notes }
+    }
+
     var body: some View {
         let preferences = model.preferences
         let client = model.client
@@ -19,7 +28,11 @@ struct DetailPillSettingsView: View {
             // in the `ForEach` content itself, and an opaque return type
             // hides them from it. Plain rows survive the extraction, so
             // the failure looks unrelated to reordering — it isn't.
-            ForEach(preferences.pillOrder) { kind in
+            //
+            // That constraint is also why the notes row below repeats this
+            // markup instead of sharing it: factoring it out would have to
+            // pull this one with it.
+            ForEach(inlineOrder) { kind in
                 Toggle(isOn: Binding {
                     preferences.enabledPills.contains(kind)
                 } set: { isEnabled in
@@ -55,6 +68,44 @@ struct DetailPillSettingsView: View {
                 }
             }
             .reorderable()
+
+            // Notes sits outside the reorderable list because a cue note is
+            // long-form text: it gets a line of its own beneath the pills, and
+            // no position in the order can change that. It was previously
+            // draggable, which offered the operator a control that did nothing.
+            // It stays switchable, because whether notes appear at all is a
+            // real choice.
+            Section {
+                Toggle(isOn: Binding {
+                    preferences.enabledPills.contains(.notes)
+                } set: { isEnabled in
+                    if isEnabled {
+                        preferences.enabledPills.insert(.notes)
+                    } else {
+                        preferences.enabledPills.remove(.notes)
+                    }
+                    Task { await client.refreshPlayheadCueDetails() }
+                }) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(DetailPillKind.notes.title)
+                            Text(DetailPillKind.notes.settingsDescription)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: DetailPillKind.notes.systemImage)
+                            .foregroundStyle(
+                                preferences.enabledPills.contains(.notes)
+                                    ? Color.accentColor : .secondary
+                            )
+                    }
+                }
+            } footer: {
+                Text("Notes always appear on their own line beneath the pills.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .reorderContainer(for: DetailPillKind.self) { difference in
             apply(difference, to: preferences)

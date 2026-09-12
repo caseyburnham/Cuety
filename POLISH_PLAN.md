@@ -1057,8 +1057,12 @@ fix is aimed at a real failure. Prefer content-driven native layout throughout.
       is misalignment, not lost information — cosmetic, not a production risk.
 - [ ] Reduce Motion is honoured in the sidebar but not consistently in the main display,
       drawer, pills, or toolbar — apply it uniformly.
-- [ ] Notes are reorderable in Settings although their position is ignored on screen —
-      either honour the order or stop offering it.
+- [x] Notes are reorderable in Settings although their position is ignored on screen —
+      either honour the order or stop offering it. **Stopped offering it** (2026-09-11):
+      a cue note is long-form text and gets a line of its own beneath the pills, so no
+      position could change anything. Notes now sits in its own section, still switchable
+      but no longer draggable, with a footer saying where it appears. `pillOrder` still
+      stores it, so switching notes off and on again does not disturb the arrangement.
 - [ ] Run the VoiceOver and contrast audits over the display, drawer, pills and sidebar.
 - [x] The sidebar's Refresh button spun its glyph slowly enough to read as a stuck
       animation — now swaps to the standard indeterminate indicator (see `F12`'s
