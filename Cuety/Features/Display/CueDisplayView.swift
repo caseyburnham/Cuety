@@ -82,7 +82,9 @@ struct CueDisplayView: View {
                 DetailPillsRow(
                     cue: cue,
                     kinds: model.preferences.visiblePills,
-                    cueListName: cueListName(containing: cue)
+                    cueListName: cueListName(containing: cue),
+                    size: model.preferences.pillSize,
+                    showsCueTypeLabel: model.preferences.showsCueTypeLabel
                 )
             }
         }

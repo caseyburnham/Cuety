@@ -20,9 +20,16 @@ struct Typography {
     let familyName: String?
     let usesRounded: Bool
 
+    /// The operator's chosen weight for the cue number.
+    ///
+    /// Exposed so Settings can set its own preview at the same weight the
+    /// display will use, rather than guessing one.
+    let cueNumberWeight: Font.Weight
+
     init(preferences: Preferences) {
         self.familyName = preferences.fontFamily
         self.usesRounded = preferences.usesRoundedSystemFont
+        self.cueNumberWeight = preferences.fontWeight.weight
     }
 
     /// The design to apply when using the system font.
@@ -30,9 +37,10 @@ struct Typography {
         usesRounded ? .rounded : .default
     }
 
-    /// The cue number: heavy, tabular, and as large as will fit.
+    /// The cue number: as heavy as the operator asked for, tabular, and as
+    /// large as will fit.
     var cueNumber: Font {
-        font(size: Self.cueNumberBaseSize, weight: .bold)
+        font(size: Self.cueNumberBaseSize, weight: cueNumberWeight)
     }
 
     /// A cue name, whether the headline one or a drawer row's.

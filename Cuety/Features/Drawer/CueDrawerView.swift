@@ -362,6 +362,16 @@ struct CueRowView: View {
             trailingIndicators
         }
         .opacity(role.opacity)
+        // Typography snaps; position and opacity still animate.
+        //
+        // When the playhead advances, the two rows below it keep their
+        // identity and change ``Role`` — which changes their font size and
+        // weight. SwiftUI's default content transition tries to interpolate
+        // that, and falls back to cross-fading the old and new text when it
+        // can't: two half-opaque copies of the same number, which reads as the
+        // row briefly turning grey. It was only ever the next two rows,
+        // because they are the only ones whose size changes at all.
+        .contentTransition(.identity)
         .padding(.vertical, role.isFocalRow ? 3 : 1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityDescription)
@@ -411,6 +421,7 @@ struct CueRowView: View {
         HStack(spacing: 5) {
             if cue.isArmed == false {
                 Image(systemName: DetailPillKind.armed.systemImage)
+                    .rotationEffect(DetailPillKind.armed.glyphRotation)
                     .foregroundStyle(.red)
                     .help("Disarmed — this cue will not fire")
             }

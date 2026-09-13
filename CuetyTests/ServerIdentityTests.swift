@@ -135,4 +135,84 @@ struct ServerIdentityTests {
 
         #expect(discovered?.id != manual.id)
     }
+
+    // MARK: - Removal
+
+    private func model() throws -> AppModel {
+        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        return AppModel(preferences: Preferences(defaults: defaults))
+    }
+
+    @Test("Only servers the operator added are theirs to remove")
+    func removabilityIsLimitedToAddedServers() throws {
+        let model = try model()
+
+        // Discovered: in the list because the machine is on the network, so
+        // removing it would hide something Cuety rediscovers seconds later.
+        let discovered = try #require(QLabServer.bonjour(
+            endpoint: .service(
+                name: "QLab Mac", type: QLabBrowser.serviceType, domain: "local.", interface: nil
+            )
+        ))
+        #expect(model.canRemove(discovered) == false)
+
+        // The built-in entry, which costs nothing and is the common case.
+        #expect(model.canRemove(QLabServer.localhost()) == false)
+
+        #expect(model.canRemove(model.browser.addManualServer(host: "192.168.1.10", port: port)))
+    }
+
+    @Test("A removed server stays removed across a relaunch")
+    func removalIsPersisted() throws {
+        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let model = AppModel(preferences: Preferences(defaults: defaults))
+        let added = model.browser.addManualServer(host: "192.168.1.10", port: port)
+        try #require(model.browser.server(withID: added.id) != nil)
+
+        model.removeServer(withID: added.id)
+
+        #expect(model.browser.server(withID: added.id) == nil)
+        // A fresh browser over the same store, which is what the next launch
+        // builds: a removal that only emptied the array in memory would bring
+        // the row back.
+        #expect(QLabBrowser(defaults: defaults).server(withID: added.id) == nil)
+    }
+
+    @Test("Removing the server in use ends the session first")
+    func removingTheSelectedServerDisconnects() throws {
+        let model = try model()
+        let added = model.browser.addManualServer(host: "192.168.1.10", port: port)
+        model.selection = WorkspaceSelection(serverID: added.id, workspaceID: "W1")
+
+        model.removeServer(withID: added.id)
+
+        // Otherwise the app would go on describing a session on a server that
+        // is no longer in the list.
+        #expect(model.selection == nil)
+        #expect(model.browser.server(withID: added.id) == nil)
+    }
+
+    @Test("Removing an unrelated server leaves the session alone")
+    func removingAnotherServerKeepsTheSession() throws {
+        let model = try model()
+        let inUse = model.browser.addManualServer(host: "192.168.1.10", port: port)
+        let other = model.browser.addManualServer(host: "192.168.1.11", port: port)
+        let selection = WorkspaceSelection(serverID: inUse.id, workspaceID: "W1")
+        model.selection = selection
+
+        model.removeServer(withID: other.id)
+
+        #expect(model.selection == selection)
+        #expect(model.browser.server(withID: inUse.id) != nil)
+    }
+
+    @Test("This Mac cannot be removed even by identifier")
+    func localhostSurvivesRemoval() throws {
+        let model = try model()
+        let localhostID = QLabServer.localhost().id
+
+        model.removeServer(withID: localhostID)
+
+        #expect(model.browser.server(withID: localhostID) != nil)
+    }
 }

@@ -54,11 +54,29 @@ enum DetailPillKind: String, CaseIterable, Codable, Hashable, Sendable, Identifi
         case .duration: "clock"
         case .preWait: "hourglass.tophalf.filled"
         case .postWait: "hourglass.bottomhalf.filled"
-        case .continueMode: "arrow.turn.down.right"
+        // Auto-continue's glyph, standing in for a pill that draws whichever
+        // of the two modes the cue is actually in. It has to be one of them:
+        // `arrow.turn.down.right` used to sit here, a symbol that appears on
+        // no pill at all, so the Settings row previewed something the display
+        // would never show.
+        case .continueMode: "arrow.down"
         case .cueList: "list.bullet"
         case .armed: "power"
         case .flagged: "flag.fill"
         case .notes: "ellipsis.bubble"
+        }
+    }
+
+    /// How far to turn this pill's glyph.
+    ///
+    /// Disarmed is an inverted power symbol, the way QLab draws a disarmed
+    /// cue, rather than the upright one that means the opposite. Read by the
+    /// pill, by the drawer's row indicator, and by the Settings list, so the
+    /// three cannot end up drawing it different ways up.
+    var glyphRotation: Angle {
+        switch self {
+        case .armed: .degrees(180)
+        default: .zero
         }
     }
 

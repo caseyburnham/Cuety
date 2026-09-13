@@ -2,6 +2,10 @@ import SwiftUI
 
 /// Settings that affect the app as a whole rather than any one view.
 struct GeneralSettingsView: View {
+    /// The height this pane needs to show everything without scrolling.
+    /// Applied by ``SettingsView``; measured, not guessed.
+    static let settingsHeight: CGFloat = 220
+
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -38,5 +42,5 @@ struct GeneralSettingsView: View {
 #Preview {
     GeneralSettingsView()
         .environment(AppModel())
-        .frame(width: 520, height: 320)
+        .frame(width: SettingsView.width, height: GeneralSettingsView.settingsHeight)
 }

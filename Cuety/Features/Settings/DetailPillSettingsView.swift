@@ -6,6 +6,11 @@ import SwiftUI
 /// ``Preferences/pillOrder`` is stored: an operator who arranges the row and
 /// then hides one pill should not lose the arrangement.
 struct DetailPillSettingsView: View {
+    /// The height this pane needs to show the appearance controls, every pill,
+    /// the notes row, and the bottom bar without scrolling. Applied by
+    /// ``SettingsView``.
+    static let settingsHeight: CGFloat = 625
+
     @Environment(AppModel.self) private var model
 
     /// The pills whose order the display actually honours.
@@ -22,6 +27,26 @@ struct DetailPillSettingsView: View {
         let client = model.client
 
         List {
+            Section {
+                // Segmented, because the three sizes are one ordered scale and
+                // the whole scale fits: a menu would hide two thirds of it
+                // behind a click for no gain.
+                Picker("Size", selection: Bindable(preferences).pillSize) {
+                    ForEach(PillSize.allCases) { size in
+                        Text(size.title).tag(size)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Toggle("Show the cue type name", isOn: Bindable(preferences).showsCueTypeLabel)
+            } header: {
+                Text("Appearance")
+            } footer: {
+                // One line, deliberately: a footer in a `List` truncates
+                // rather than wrapping, unlike the `Form`-based panes.
+                Text("With the name off, the cue type pill keeps its glyph alone.")
+            }
+
             // The row is written inline on purpose. Moving it into a
             // `-> some View` helper makes the reorderable list render
             // completely empty: `reorderable()` needs to see the row views
@@ -32,42 +57,59 @@ struct DetailPillSettingsView: View {
             // That constraint is also why the notes row below repeats this
             // markup instead of sharing it: factoring it out would have to
             // pull this one with it.
-            ForEach(inlineOrder) { kind in
-                Toggle(isOn: Binding {
-                    preferences.enabledPills.contains(kind)
-                } set: { isEnabled in
-                    if isEnabled {
-                        preferences.enabledPills.insert(kind)
-                    } else {
-                        preferences.enabledPills.remove(kind)
-                    }
+            Section("Pills") {
+                ForEach(inlineOrder) { kind in
+                    HStack(spacing: 10) {
+                        Toggle(isOn: Binding {
+                            preferences.enabledPills.contains(kind)
+                        } set: { isEnabled in
+                            if isEnabled {
+                                preferences.enabledPills.insert(kind)
+                            } else {
+                                preferences.enabledPills.remove(kind)
+                            }
 
-                    // Enabling a pill widens the set of cue keys Cuety
-                    // asks for, and nothing else triggers that request
-                    // until the playhead next moves. Refetch now so the
-                    // pill fills in immediately rather than sitting blank
-                    // until the following cue.
-                    Task { await client.refreshPlayheadCueDetails() }
-                }) {
-                    Label {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(kind.title)
-                            Text(kind.settingsDescription)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            // Enabling a pill widens the set of cue keys Cuety
+                            // asks for, and nothing else triggers that request
+                            // until the playhead next moves. Refetch now so the
+                            // pill fills in immediately rather than sitting blank
+                            // until the following cue.
+                            Task { await client.refreshPlayheadCueDetails() }
+                        }) {
+                            Label {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(kind.title)
+                                    Text(kind.settingsDescription)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                // The glyph the pill itself uses, the way up
+                                // the pill uses it, so this list reads as a
+                                // preview of the row rather than as an index
+                                // of it.
+                                Image(systemName: kind.systemImage)
+                                    .rotationEffect(kind.glyphRotation)
+                                    .foregroundStyle(
+                                        preferences.enabledPills.contains(kind)
+                                            ? Color.accentColor : .secondary
+                                    )
+                            }
                         }
-                    } icon: {
-                        // The glyph the pill itself uses, so this list reads as
-                        // a preview of the row rather than as an index of it.
-                        Image(systemName: kind.systemImage)
-                            .foregroundStyle(
-                                preferences.enabledPills.contains(kind)
-                                    ? Color.accentColor : .secondary
-                            )
+
+                        Spacer(minLength: 10)
+
+                        // A grip on every draggable row, so which rows move is
+                        // visible rather than something to discover by trying.
+                        // Tertiary and non-interactive: the whole row is the
+                        // drag target, as it was, and this only says so.
+                        Image(systemName: "line.3.horizontal")
+                            .foregroundStyle(.tertiary)
+                            .accessibilityHidden(true)
                     }
                 }
+                .reorderable()
             }
-            .reorderable()
 
             // Notes sits outside the reorderable list because a cue note is
             // long-form text: it gets a line of its own beneath the pills, and
@@ -75,7 +117,12 @@ struct DetailPillSettingsView: View {
             // draggable, which offered the operator a control that did nothing.
             // It stays switchable, because whether notes appear at all is a
             // real choice.
-            Section {
+            //
+            // Headed, not footnoted. The section break on its own was an
+            // unexplained gap after Flagged; a header names the reason, which
+            // is also why the row needs no sentence underneath it repeating
+            // what ``DetailPillKind/settingsDescription`` already says.
+            Section("Notes") {
                 Toggle(isOn: Binding {
                     preferences.enabledPills.contains(.notes)
                 } set: { isEnabled in
@@ -101,10 +148,6 @@ struct DetailPillSettingsView: View {
                             )
                     }
                 }
-            } footer: {
-                Text("Notes always appear on their own line beneath the pills.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .reorderContainer(for: DetailPillKind.self) { difference in
@@ -121,15 +164,22 @@ struct DetailPillSettingsView: View {
 
                 Spacer(minLength: 12)
 
+                // Resets everything this pane offers, not just the list: an
+                // operator who has been through the size picker and comes back
+                // for Reset means all of it.
                 Button("Reset") {
                     preferences.pillOrder = DetailPillKind.defaultOrder
                     preferences.enabledPills = DetailPillKind.defaultEnabled
+                    preferences.pillSize = .default
+                    preferences.showsCueTypeLabel = true
                     Task { await client.refreshPlayheadCueDetails() }
                 }
-                .help("Restore the default pills and order")
+                .help("Restore the default pills, order, and size")
                 .disabled(
                     preferences.pillOrder == DetailPillKind.defaultOrder
                         && preferences.enabledPills == DetailPillKind.defaultEnabled
+                        && preferences.pillSize == .default
+                        && preferences.showsCueTypeLabel
                 )
             }
             .padding(.horizontal, 16)
@@ -170,5 +220,5 @@ struct DetailPillSettingsView: View {
 #Preview {
     DetailPillSettingsView()
         .environment(AppModel())
-        .frame(width: 520, height: 420)
+        .frame(width: SettingsView.width, height: DetailPillSettingsView.settingsHeight)
 }

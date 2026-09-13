@@ -27,6 +27,17 @@ struct WorkspaceSidebar: View {
                     if server.workspaces.isEmpty {
                         serverStatus(server)
                             .selectionDisabled()
+                            // The one row a server with nothing open actually
+                            // has, and it had no way to remove that server:
+                            // the list's selection menu needs a selectable
+                            // row, and this one is deliberately not
+                            // selectable. So a machine added at a mistyped
+                            // address — the entry most likely to want removing
+                            // — could only be reached through the section
+                            // header's menu.
+                            .contextMenu {
+                                removeServerButton(server)
+                            }
                     }
                 } header: {
                     HStack(spacing: 6) {
@@ -221,14 +232,18 @@ struct WorkspaceSidebar: View {
 
     @ViewBuilder
     private func removeServerButton(_ server: QLabServer) -> some View {
-        if server.source == .manual, server.id != QLabServer.localhost().id {
+        if model.canRemove(server) {
+            // Both the test and the action come from ``AppModel``, so this menu,
+            // the one on the status row, and the Connection settings pane cannot
+            // disagree about which servers can go or about disconnecting first.
+            //
+            // No longer disabled by `canConnect`. That blocked removing an
+            // unrelated machine for the whole of a connection attempt to a
+            // different one — and the attempt is exactly what an operator
+            // fixing a mistyped address is trying to get out of.
             Button("Remove Server", role: .destructive) {
-                if model.selection?.serverID == server.id { model.disconnect() }
-                model.browser.removeManualServer(id: server.id)
+                model.removeServer(withID: server.id)
             }
-            // Removing a server can disconnect, so it answers to the same
-            // definition rather than inventing its own.
-            .disabled(!model.canConnect)
         }
     }
 
@@ -341,9 +356,13 @@ struct WorkspaceSidebar: View {
     }
 
     private var host: String { newHost.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// The typed port, or `nil` when Add should stay disabled.
+    ///
+    /// Bounded by ``Preferences/Limits/port`` rather than by `UInt16` parsing
+    /// alone, so the field and the stored default agree on what a port is.
     private var port: UInt16? {
-        guard let value = UInt16(newPort), value > 0 else { return nil }
-        return value
+        guard let value = Int(newPort), Preferences.Limits.port.contains(value) else { return nil }
+        return UInt16(value)
     }
 
     private func addServer() {

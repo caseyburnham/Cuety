@@ -38,7 +38,7 @@ enum ConnectionStatus: Hashable, Sendable {
 
     var systemImage: String {
         switch self {
-        case .offline: "bolt.horizontal.circle"
+        case .offline: "circle.slash"
         case .connecting: "progress.indicator"
         case .reconnecting: "arrow.triangle.2.circlepath"
         case .needsPasscode: "lock.circle"

@@ -52,6 +52,15 @@ struct ConnectionInspectorView: View {
 
     // MARK: - Sections
 
+    /// The glyph, the state, and the one action that acts on it, on a single
+    /// centred line.
+    ///
+    /// All three are vertically centred against each other rather than pinned
+    /// to the top: the glyph and the button are one item each, so top-aligning
+    /// them against a two-line block left both sitting high with the detail
+    /// line hanging below. Disconnect is in this row at all because it acts on
+    /// the thing the row names — as its own row beneath, it read as one more
+    /// fact about the session.
     private var statusSection: some View {
         Section {
             HStack(spacing: 12) {
@@ -73,22 +82,25 @@ struct ConnectionInspectorView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Spacer(minLength: 0)
-            }
-            .motion(Motion.status, value: client.status)
+                Spacer(minLength: 12)
 
-            if model.canDisconnect {
-                // Not a destructive role: dropping the connection loses nothing
-                // and is a click away from being undone.
-                //
-                // The condition is ``AppModel/canDisconnect``, not a third
-                // opinion of its own. This used to ask whether a workspace had
-                // been negotiated, which is neither what the menu asked nor
-                // what the sidebar asked.
-                Button("Disconnect") {
-                    model.disconnect()
+                if model.canDisconnect {
+                    // Tinted red rather than given a destructive role:
+                    // dropping the connection loses nothing and is a click
+                    // away from being undone, so the colour is there to make
+                    // it findable, not to warn.
+                    //
+                    // The condition is ``AppModel/canDisconnect``, not a third
+                    // opinion of its own. This used to ask whether a workspace
+                    // had been negotiated, which is neither what the menu asked
+                    // nor what the sidebar asked.
+                    Button("Disconnect") {
+                        model.disconnect()
+                    }
+                    .tint(.red)
                 }
             }
+            .motion(Motion.status, value: client.status)
         }
     }
 
@@ -102,11 +114,6 @@ struct ConnectionInspectorView: View {
                 value: server?.address ?? "Resolved by Bonjour"
             )
             LabeledContent("Protocol", value: "TCP, SLIP-framed (OSC 1.1)")
-            if let since = client.connectedSince {
-                LabeledContent("Connected") {
-                    Text(since, format: .relative(presentation: .named))
-                }
-            }
         }
     }
 
@@ -123,7 +130,18 @@ struct ConnectionInspectorView: View {
                     LabeledContent("Listening Port", value: String(port))
                 }
             }
-            LabeledContent("Passcode", value: client.usedPasscode ? "In use" : "Not required")
+            // A glyph as well as the words, because this is the one row in the
+            // section an operator scans for: a padlock reads at a glance where
+            // "In use" has to be read.
+            LabeledContent("Passcode") {
+                Label(
+                    client.usedPasscode ? "In use" : "Not required",
+                    systemImage: client.usedPasscode ? "lock.fill" : "lock.open"
+                )
+                .foregroundStyle(client.usedPasscode ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp)))
+                .motion(Motion.status, value: client.usedPasscode)
+            }
             LabeledContent("Access", value: client.accessLevel.title)
             LabeledContent(
                 "Update Subscription",
@@ -145,20 +163,42 @@ struct ConnectionInspectorView: View {
 
     private var healthSection: some View {
         Section("Health") {
-            LabeledContent("Heartbeats", value: client.heartbeatCount.formatted())
+            // The same beating glyph the toolbar shows, rather than a count of
+            // beats: whether one is arriving *now* is the question, and the
+            // running total is a detail the tooltip can carry.
+            LabeledContent("Heartbeat") {
+                HeartbeatIndicator()
+                    .help(client.heartbeatSummary)
+            }
 
-            if let last = client.lastThumpDate {
-                LabeledContent("Last Heartbeat") {
-                    Text(last, format: .relative(presentation: .numeric))
-                        .monospacedDigit()
+            // Counting down to the next one rather than up from the last.
+            //
+            // `.relative` on the last heartbeat rendered once, at the moment
+            // the view was built — and the only thing that rebuilt that row was
+            // a heartbeat arriving, at which point the answer is always zero.
+            // Hence "in 0 seconds", for ever, with the sign wrong too.
+            //
+            // A `SystemFormatStyle` fed `.currentDate` reschedules its own
+            // updates as the clock advances, and `.timer(countingDownIn:)`
+            // clamps at `0:00` once the deadline passes — so a QLab that has
+            // stopped answering shows a countdown stuck at zero beside a
+            // rising Missed Heartbeats, rather than a number that keeps
+            // climbing as though something were still happening.
+            if let window = client.nextThumpWindow {
+                LabeledContent("Next Heartbeat") {
+                    Text(.currentDate, format: .timer(
+                        countingDownIn: window, showsHours: false, maxFieldCount: 2
+                    ))
+                    .monospacedDigit()
                 }
+                .help("Time until Cuety sends QLab its next heartbeat.")
             }
 
             if let round = client.lastRoundTrip {
                 LabeledContent("Round Trip", value: formatMilliseconds(round))
             }
             if let mean = client.meanRoundTrip {
-                LabeledContent("Round Trip (mean)", value: formatMilliseconds(mean))
+                LabeledContent("Mean Round Trip", value: formatMilliseconds(mean))
             }
 
             if client.missedThumps > 0 {

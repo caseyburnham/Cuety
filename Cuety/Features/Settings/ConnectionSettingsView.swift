@@ -1,7 +1,16 @@
 import SwiftUI
 
-/// How Cuety reaches QLab: reconnection, timing, and stored credentials.
+/// How Cuety reaches QLab: reconnection, the connection itself, and stored
+/// credentials.
 struct ConnectionSettingsView: View {
+    /// The height this pane needs to show everything without scrolling.
+    ///
+    /// Sized for one added server and an empty Saved Passcodes section, which
+    /// are the two parts of this pane that grow: a Mac with several added
+    /// servers or several protected workspaces will still scroll, and no fixed
+    /// height can prevent that.
+    static let settingsHeight: CGFloat = 720
+
     @Environment(AppModel.self) private var model
 
     @State private var isConfirmingForgetAll = false
@@ -11,7 +20,8 @@ struct ConnectionSettingsView: View {
     var body: some View {
         Form {
             autoConnectSection
-            timingSection
+            connectionSection
+            addedServersSection
             passcodeSection
         }
         .formStyle(.grouped)
@@ -71,40 +81,97 @@ struct ConnectionSettingsView: View {
         return "\(workspace.displayName) — \(server.name)"
     }
 
-    // MARK: - Timing
+    // MARK: - Connection
 
-    private var timingSection: some View {
+    /// The port and the two intervals, all three as fields rather than as
+    /// stepped prose.
+    ///
+    /// The port was already editable and did not look it: a `TextField` with
+    /// no bezel inside a `LabeledContent` reads as a value Cuety is reporting.
+    /// ``SteppedField`` borders it, which is the whole difference.
+    private var connectionSection: some View {
         Section {
-            LabeledContent("Default port") {
-                TextField(
-                    "Default port",
-                    value: Bindable(preferences).defaultPort,
-                    format: .number.grouping(.never)
-                )
-                .labelsHidden()
-                .monospacedDigit()
-                .multilineTextAlignment(.trailing)
-                .frame(width: 80)
-            }
-
-            Stepper(
-                "Heartbeat: \(preferences.heartbeatInterval, format: .number.precision(.fractionLength(0)))s",
-                value: Bindable(preferences).heartbeatInterval,
-                in: 1...60,
-                step: 1
+            SteppedField(
+                title: "TCP port",
+                value: Bindable(preferences).defaultPort,
+                range: Preferences.Limits.port,
+                format: IntegerFormatStyle<Int>.number.grouping(.never),
+                // Nobody steps to a port. It is five digits that get typed.
+                showsStepper: false
             )
 
-            Stepper(
-                "Request timeout: \(preferences.requestTimeout, format: .number.precision(.fractionLength(0)))s",
+            SteppedField(
+                title: "Heartbeat",
+                value: Bindable(preferences).heartbeatInterval,
+                range: Preferences.Limits.heartbeatInterval,
+                format: FloatingPointFormatStyle<Double>.number
+                    .precision(.fractionLength(0)),
+                unit: "s"
+            )
+
+            SteppedField(
+                title: "Request timeout",
                 value: Bindable(preferences).requestTimeout,
-                in: 1...60,
-                step: 1
+                range: Preferences.Limits.requestTimeout,
+                format: FloatingPointFormatStyle<Double>.number
+                    .precision(.fractionLength(0)),
+                unit: "s"
             )
         } header: {
-            Text("Timing")
+            Text("Connection")
         } footer: {
-            Text("The port is the starting value when you add a server by hand; QLab's default is 53000. Timing changes apply to the current connection — a shorter heartbeat notices a dropped link sooner at the cost of more traffic.")
+            Text("The port is the starting value when you add a server by hand; QLab's default is 53000. The two intervals apply to the current connection — a shorter heartbeat notices a dropped link sooner at the cost of more traffic.")
         }
+    }
+
+    // MARK: - Added servers
+
+    /// Every server the operator typed in, each with a way to remove it.
+    ///
+    /// Removal existed before this, in two sidebar context menus, and between
+    /// them they missed the case that matters: a server added at an address
+    /// Cuety cannot reach has no workspace rows, and the only row it does have
+    /// is not selectable — so there was nothing to right-click but the section
+    /// header. The mistyped address was the hardest entry in the app to get
+    /// rid of.
+    ///
+    /// A plain list with a button beside each row, alongside Saved Passcodes,
+    /// which is the same shape of problem and already solved this way.
+    private var addedServersSection: some View {
+        Section {
+            if addedServers.isEmpty {
+                Text("No servers added by hand.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(addedServers) { server in
+                    LabeledContent {
+                        Button("Remove", role: .destructive) {
+                            model.removeServer(withID: server.id)
+                        }
+                    } label: {
+                        // The address, not the name: they are the same string
+                        // for a manual entry except that the address carries
+                        // the port, and the port is half of what identifies a
+                        // server — two QLabs on one machine are two servers.
+                        Label(
+                            server.address ?? server.name,
+                            systemImage: "server.rack"
+                        )
+                    }
+                }
+            }
+        } header: {
+            Text("Added Servers")
+        } footer: {
+            Text("Add servers from the sidebar or the Connection menu. This Mac and machines found on your network can't be removed.")
+        }
+    }
+
+    /// The manually added servers, which is every server minus the ones Cuety
+    /// found for itself and the built-in entry for this Mac.
+    private var addedServers: [QLabServer] {
+        model.browser.servers.filter(model.canRemove)
     }
 
     // MARK: - Passcodes
@@ -184,5 +251,5 @@ struct ConnectionSettingsView: View {
 #Preview {
     ConnectionSettingsView()
         .environment(AppModel())
-        .frame(width: 520, height: 460)
+        .frame(width: SettingsView.width, height: ConnectionSettingsView.settingsHeight)
 }

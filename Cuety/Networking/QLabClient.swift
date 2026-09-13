@@ -76,6 +76,19 @@ final class QLabClient {
 
     private(set) var heartbeatCount = 0
     private(set) var lastThumpDate: Date?
+
+    /// The wait the next `/thump` is scheduled across: when the wait began,
+    /// and when the thump is due.
+    ///
+    /// The pair rather than just the deadline, because a countdown has to know
+    /// the span it is counting over — and because deriving the start as
+    /// "deadline minus ``Preferences/heartbeatInterval``" would be wrong for
+    /// any wait the operator changed the interval during.
+    ///
+    /// `nil` whenever no heartbeat is scheduled, which is the only honest
+    /// answer while there is no session.
+    private(set) var nextThumpWindow: Range<Date>?
+
     private(set) var lastRoundTrip: TimeInterval?
     private(set) var meanRoundTrip: TimeInterval?
     private(set) var missedThumps = 0
@@ -298,6 +311,10 @@ final class QLabClient {
         playheadDetailsTask = nil
         heartbeatTask?.cancel()
         heartbeatTask = nil
+        // Cancelling the loop unschedules the thump it was waiting to send, so
+        // the deadline goes with it. Leaving it behind would have the inspector
+        // counting down to a heartbeat nothing is going to send.
+        nextThumpWindow = nil
         overflowRecoveryTask?.cancel()
         overflowRecoveryTask = nil
         // A fresh session starts with a clean escalation history, or a
@@ -385,6 +402,7 @@ final class QLabClient {
     private func handleSessionLost(reason: String) {
         heartbeatTask?.cancel()
         heartbeatTask = nil
+        nextThumpWindow = nil
         cueListRefreshTask?.cancel()
         cueListRefreshTask = nil
         playheadDetailsTask?.cancel()
@@ -1457,6 +1475,11 @@ final class QLabClient {
             while !Task.isCancelled {
                 guard let self else { return }
                 let interval = self.preferences.heartbeatInterval
+                // Recorded before the sleep, not after it: the inspector
+                // counts down to this, and a deadline published only once the
+                // wait was over would be a deadline that had already passed.
+                let start = Date()
+                self.nextThumpWindow = start..<start.addingTimeInterval(interval)
                 try? await Task.sleep(for: .seconds(interval))
                 guard !Task.isCancelled else { return }
                 await self.sendThump()
@@ -1514,6 +1537,7 @@ final class QLabClient {
     private func resetHeartbeatStatistics() {
         heartbeatCount = 0
         lastThumpDate = nil
+        nextThumpWindow = nil
         lastRoundTrip = nil
         meanRoundTrip = nil
         missedThumps = 0

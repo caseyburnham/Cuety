@@ -44,66 +44,18 @@ struct ActivityLogButton: View {
 
     private var client: QLabClient { model.client }
 
-    /// Whether there's a session that could produce a heartbeat at all.
-    private var isLive: Bool { client.status.hasLiveData }
-
     var body: some View {
         Button {
             openWindow(id: WindowID.activityLog.rawValue)
         } label: {
-            heartbeat
+            // The same indicator the connection inspector shows. It used to
+            // live here, which meant the inspector had nothing to mirror.
+            HeartbeatIndicator()
         }
-        .help("Activity Log. " + heartbeatHelpText)
+        .help("Activity Log. " + client.heartbeatSummary)
         .accessibilityLabel("Activity Log")
-        .accessibilityValue(heartbeatHelpText)
+        .accessibilityValue(client.heartbeatSummary)
         .accessibilityHint("Opens the activity log")
-    }
-
-    /// Beats once per received `/thump`.
-    ///
-    /// Driven off the heartbeat *count* rather than a timer, so it is a true
-    /// report of the link: when QLab stops answering, the glyph visibly stops
-    /// moving instead of continuing to animate reassuringly.
-    ///
-    /// With no session it shows a struck-through heart, which is a more honest
-    /// readout than an empty space — the operator can see the app isn't hearing
-    /// anything, rather than wonder where the indicator went.
-    private var heartbeat: some View {
-        Image(systemName: isLive ? "heart.fill" : "heart.slash.fill")
-            .foregroundStyle(heartTint)
-            // Magic replace keeps the heart itself put and draws the slash
-            // across it, so losing the connection reads as this indicator going
-            // quiet rather than as one glyph swapped for another.
-            .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp)))
-            .symbolEffect(
-                .bounce,
-                options: .nonRepeating,
-                value: client.heartbeatCount
-            )
-            .motion(Motion.status, value: isLive)
-    }
-
-    private var heartTint: Color {
-        guard isLive else { return .secondary }
-        return client.missedThumps > 0 ? .orange : .pink
-    }
-
-    private var heartbeatHelpText: String {
-        guard isLive else { return "Not receiving heartbeats from QLab." }
-        var text = "Receiving heartbeats from QLab."
-
-        guard client.heartbeatCount > 0 else {
-            return text + " Waiting for the first heartbeat from QLab."
-        }
-
-        text += " \(client.heartbeatCount) heartbeats"
-        if let round = client.lastRoundTrip {
-            text += ", last round trip \((round * 1000).formatted(.number.precision(.fractionLength(1)))) ms"
-        }
-        if client.missedThumps > 0 {
-            text += ", \(client.missedThumps) missed"
-        }
-        return text + "."
     }
 }
 
@@ -136,8 +88,12 @@ struct ConnectionStatusButton: View {
         .accessibilityHint("Opens the connection status window")
     }
 
+    /// Only `needsPasscode` differs from ``ConnectionStatus/systemImage``: a
+    /// filled lock carries further in a toolbar than the outlined circle the
+    /// inspector uses. The offline case used to be overridden too, with the
+    /// identical glyph — so changing the status type's symbol left the toolbar
+    /// showing the old one.
     private var connectionSymbol: String {
-        if case .offline = status { return "bolt.horizontal.circle" }
         if case .needsPasscode = status { return "lock.fill" }
         return status.systemImage
     }

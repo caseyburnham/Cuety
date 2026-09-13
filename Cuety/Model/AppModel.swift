@@ -462,6 +462,31 @@ final class AppModel {
     /// sidebar's button did not.
     var canRefresh: Bool { !client.status.isTransitional }
 
+    /// Whether a server entry is the operator's to remove.
+    ///
+    /// A Bonjour server is not: it is in the list because the machine is on
+    /// the network, so "removing" it would only hide something Cuety would
+    /// rediscover seconds later. The built-in "This Mac" entry is not either —
+    /// it costs nothing and is the most common case.
+    func canRemove(_ server: QLabServer) -> Bool {
+        server.source == .manual && server.id != QLabServer.localhost().id
+    }
+
+    /// Forgets a manually added server, ending the session first when it is
+    /// the server that session is on.
+    ///
+    /// Here rather than at each call site because there are now two of them —
+    /// the sidebar's context menus and the Connection settings pane — and
+    /// "removing the server you are connected to has to disconnect first" is
+    /// one rule, not two. Deliberately not gated on ``canConnect``: that
+    /// blocked removing an unrelated machine for the whole of someone else's
+    /// connection attempt, and ``disconnect()`` is available mid-connect
+    /// precisely so an attempt can be called off.
+    func removeServer(withID id: String) {
+        if selection?.serverID == id { disconnect() }
+        browser.removeManualServer(id: id)
+    }
+
     // MARK: - Connecting
 
     /// Workspace selection tries without credentials first. Launch restoration

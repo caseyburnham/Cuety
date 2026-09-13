@@ -163,8 +163,8 @@ nonisolated enum ContinueMode: Int, Hashable, Sendable, Codable {
     var systemImage: String {
         switch self {
         case .doNotContinue: "stop.circle"
-        case .autoContinue: "arrow.turn.down.right"
-        case .autoFollow: "arrow.right.to.line"
+        case .autoContinue: "arrow.down"
+        case .autoFollow: "square.and.arrow.down"
         }
     }
 }

@@ -16,56 +16,110 @@ struct DetailPill: View {
     /// ``Swift/Array/cueList(containing:)``.
     let cueListName: String?
 
+    /// How large the pill is set, from ``Preferences/pillSize``.
+    var size: PillSize = .medium
+
+    /// Whether the cue-type pill spells out the type beside its glyph, from
+    /// ``Preferences/showsCueTypeLabel``. With it off the pill keeps the glyph
+    /// alone, which is the one pill whose symbol already names its value.
+    var showsCueTypeLabel = true
+
     var body: some View {
         if let content = Self.content(for: kind, cue: cue, cueListName: cueListName) {
-            Label {
-                Text(content.text)
-                    .fontWeight(.medium)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(
-                        maxWidth: content.isFlexible ? Self.flexibleTextMaxWidth : nil,
-                        alignment: .leading
-                    )
-            } icon: {
-                Image(systemName: content.systemImage)
-                    .foregroundStyle(content.tint ?? .secondary)
+            if content.isFlexible {
+                // Two candidates: one sized to its own text, one that gives
+                // way. `ViewThatFits` takes the first whose ideal size fits
+                // and the last when none do, which is exactly the rule wanted
+                // here — hug the text, unless hugging it would not fit.
+                //
+                // Without this the note pill was a 520pt capsule whatever it
+                // held, because `frame(maxWidth:)` takes the width it is
+                // *proposed* rather than the width its text needs. A ten-word
+                // note sat in the middle of a fixed slab with an inch of glass
+                // either side of it.
+                ViewThatFits(in: .horizontal) {
+                    capsule(for: content, hugsText: true)
+                    capsule(for: content, hugsText: false)
+                }
+            } else {
+                capsule(for: content, hugsText: false)
             }
-            .font(.callout)
-            .labelStyle(.titleAndIcon)
+        }
+    }
+
+    private func capsule(for content: Content, hugsText: Bool) -> some View {
+        label(for: content)
+            .font(size.font)
             // A pill with bounded text holds its natural width; only free text
             // is allowed to give way, and it yields first, so a long note
             // truncates instead of squeezing "Disarmed" down to "Disar…".
-            .fixedSize(horizontal: !content.isFlexible, vertical: false)
+            //
+            // Fixing the size horizontally is also what makes the hugging
+            // candidate hug: it proposes nothing to the text, so the width cap
+            // above clamps the text's own ideal width instead of filling a
+            // proposal.
+            .fixedSize(horizontal: hugsText || !content.isFlexible, vertical: false)
             .layoutPriority(content.isFlexible ? -1 : 0)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            // The border goes on *before* the glass, not after. Glass renders
-            // its material behind the view it's applied to and composites over
-            // anything layered on afterwards, which mutes a trailing overlay to
-            // a dark smudge — the same reason the tinted icon above stays crisp
-            // and a stroke added below the glass line does not.
-            .overlay {
-                if content.isOutlined, let tint = content.tint {
-                    Capsule().strokeBorder(tint, lineWidth: 1.5)
-                }
-            }
+            .padding(.horizontal, size.horizontalPadding)
+            .padding(.vertical, size.verticalPadding)
             .glassEffect(Self.glass(for: content), in: .capsule)
             .help(content.help)
             .accessibilityLabel("\(kind.title): \(content.text)")
+    }
+
+    /// The pill's glyph and text, in whichever combination this pill uses.
+    ///
+    /// Three label styles rather than three hand-built stacks: a `Label` that
+    /// always carries both pieces and a style that decides which to draw keeps
+    /// the accessibility label and the help text identical in all three cases.
+    @ViewBuilder
+    private func label(for content: Content) -> some View {
+        let label = Label {
+            Text(content.text)
+                .fontWeight(.medium)
+                .monospacedDigit()
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .multilineTextAlignment(content.isCentred ? .center : .leading)
+                .frame(
+                    maxWidth: content.isFlexible ? Self.flexibleTextMaxWidth : nil,
+                    alignment: content.isCentred ? .center : .leading
+                )
+        } icon: {
+            Image(systemName: content.systemImage)
+                .rotationEffect(content.glyphRotation)
+                .foregroundStyle(content.glyphTint ?? content.tint ?? .secondary)
         }
+
+        if content.hidesGlyph {
+            label.labelStyle(.titleOnly)
+        } else if showsText(for: kind) {
+            label.labelStyle(.titleAndIcon)
+        } else {
+            label.labelStyle(.iconOnly)
+        }
+    }
+
+    /// Only the cue-type pill can have its text switched off; every other
+    /// pill's glyph names a category rather than the value beside it, so
+    /// hiding the value would leave nothing behind.
+    private func showsText(for kind: DetailPillKind) -> Bool {
+        kind != .cueType || showsCueTypeLabel
     }
 
     /// How wide free-form text is allowed to run before it truncates. Generous,
     /// because the only flexible pill now has a line to itself.
     static let flexibleTextMaxWidth: CGFloat = 520
 
-    /// An outlined pill states itself with its border, so it keeps clear glass:
-    /// a tinted fill *and* a stroke would be the same fact told twice, and the
-    /// two together read as a much louder pill than any value warrants.
+    /// A tinted pill is tinted glass, whatever the tint means.
+    ///
+    /// The group pill used to be an exception, drawn as a green stroke around
+    /// clear glass. A `Capsule().strokeBorder` overlay is Cuety's own idea of
+    /// an outlined capsule rather than anything the platform offers, and it had
+    /// to be layered *under* the glass to survive compositing — so it is gone,
+    /// and a group now reads as green the same way a pre-wait reads as orange.
     private static func glass(for content: Content) -> Glass {
-        guard !content.isOutlined, let tint = content.tint else { return .regular }
+        guard let tint = content.tint else { return .regular }
         return Glass.regular.tint(tint.opacity(0.28))
     }
 
@@ -73,19 +127,29 @@ struct DetailPill: View {
     struct Content {
         let text: String
         let systemImage: String
+        /// Colours the glass *and* the glyph, for a pill that should read as
+        /// coloured from across a booth.
         var tint: Color?
+        /// Colours the glyph alone, leaving the glass clear.
+        ///
+        /// The quieter of the two, for a cue type worth telling apart at a
+        /// glance without another filled pill competing with the values
+        /// beside it. Overrides ``tint`` for the glyph when both are set.
+        var glyphTint: Color?
         var help: String
         /// Whether the text is free-form and may be shortened to fit. True only
-        /// for notes; every other pill's text is a short bounded value that
-        /// should never be truncated.
+        /// for notes and cue-list names; every other pill's text is a short
+        /// bounded value that should never be truncated.
         var isFlexible = false
-        /// Draws the tint as a border around clear glass rather than as a fill.
-        ///
-        /// Reserved for a cue that is a different *kind* of thing rather than
-        /// one carrying a notable value — currently only a group. A filled pill
-        /// says "look at this value"; an outlined one says "this cue is built
-        /// differently", which is a distinction worth being able to make.
-        var isOutlined = false
+        /// Turns the glyph, for a cue type whose symbol is the right shape the
+        /// other way up — a Disarm cue being the upended Arm cue.
+        var glyphRotation: Angle = .zero
+        /// Drops the glyph entirely, leaving the text alone in the capsule.
+        var hidesGlyph = false
+        /// Centres the text rather than leaving it leading-aligned. Goes with
+        /// ``hidesGlyph``: text with nothing beside it has no reason to sit off
+        /// to one side of a centred display.
+        var isCentred = false
     }
 
     static func content(
@@ -94,20 +158,24 @@ struct DetailPill: View {
         switch kind {
         case .cueType:
             guard let type = cue.type, !type.isEmpty else { return nil }
-            // The one kind whose glyph depends on the value rather than the
-            // kind, because "which sort of cue is this" is the whole point.
-            //
-            // A group is called out because it is structurally unlike every
-            // other cue: firing it fires the cues inside it, so what happens
-            // on the next GO isn't described by this row alone.
+            // The one kind whose glyph and colour depend on the value rather
+            // than the kind, because "which sort of cue is this" is the whole
+            // point.
+            let colours = colours(forCueType: type, isGroup: cue.isGroup)
             return Content(
                 text: type,
                 systemImage: systemImage(forCueType: type),
-                tint: cue.isGroup ? .green : nil,
+                tint: colours.pill,
+                glyphTint: colours.glyph,
+                // Names the type rather than the pill. It used to read "Cue
+                // type", which says nothing at all once the operator has
+                // switched the label off and left the glyph to speak for
+                // itself — the tooltip is then the only way to ask what an
+                // unfamiliar symbol means.
                 help: cue.isGroup
                     ? "Group cue — firing it fires the cues inside it"
-                    : "Cue type",
-                isOutlined: cue.isGroup
+                    : "\(type) cue",
+                glyphRotation: glyphRotation(forCueType: type)
             )
 
         case .duration:
@@ -173,7 +241,8 @@ struct DetailPill: View {
                 text: "Disarmed",
                 systemImage: kind.systemImage,
                 tint: .red,
-                help: "This cue is disarmed and will not fire"
+                help: "This cue is disarmed and will not fire",
+                glyphRotation: kind.glyphRotation
             )
 
         case .flagged:
@@ -189,11 +258,17 @@ struct DetailPill: View {
             guard let notes = cue.notes?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !notes.isEmpty
             else { return nil }
+            // No glyph, and centred. A note already has a line to itself under
+            // a centred display, so a speech bubble at its left edge only
+            // announced what the sentence beside it makes obvious and pulled
+            // the text off-centre doing it.
             return Content(
                 text: notes,
                 systemImage: kind.systemImage,
                 help: notes,
-                isFlexible: true
+                isFlexible: true,
+                hidesGlyph: true,
+                isCentred: true
             )
         }
     }
@@ -217,10 +292,10 @@ struct DetailPill: View {
         case "start", "go": "play.circle"
         case "stop", "hard stop": "stop.circle"
         case "pause": "pause.circle"
-        case "load": "tray.and.arrow.down"
-        case "reset": "backward.end"
+        case "load": "circle.dashed"
+        case "reset": "backward.end.circle"
         case "goto": "arrow.right"
-        case "target": "scope"
+        case "target": "arrow.down.right.circle"
         case "arm", "disarm": "power"
         case "memo": "ellipsis.bubble"
         case "script": "applescript"
@@ -231,6 +306,45 @@ struct DetailPill: View {
         case "devamp": "arrow.uturn.right"
         default: "questionmark.square.dashed"
         }
+    }
+
+    /// What colour a cue type carries, and how much of the pill it colours.
+    ///
+    /// Two strengths, because the cue types divide in two. A Start, Stop, or
+    /// Pause takes hold of the show on the next GO, and a group fires
+    /// everything inside it — those read as a whole tinted pill, the loudest
+    /// thing the row can say. Load, Fade, Arm, and Disarm colour their glyph
+    /// only: worth telling apart at a glance, but four more filled pills
+    /// would drown out the durations and waits beside them.
+    ///
+    /// Most cue types are deliberately left uncoloured. Colour means
+    /// something here, and a palette covering everything would mean nothing.
+    static func colours(
+        forCueType type: String, isGroup: Bool
+    ) -> (pill: Color?, glyph: Color?) {
+        // Checked ahead of the type string: a cue with children is a group
+        // whatever QLab calls it — see ``Cue/isGroup``.
+        if isGroup { return (.green, nil) }
+
+        switch type.lowercased() {
+        case "start", "go": return (.green, nil)
+        case "stop", "hard stop": return (.red, nil)
+        case "pause": return (.orange, nil)
+        case "load", "fade": return (nil, .yellow)
+        case "arm": return (nil, .green)
+        case "disarm": return (nil, .red)
+        default: return (nil, nil)
+        }
+    }
+
+    /// How far to turn a cue type's glyph.
+    ///
+    /// Arm and Disarm are one pair of opposites sharing one symbol, and there
+    /// is no `power` variant for the off case — so Disarm gets the same glyph
+    /// inverted, which reads as the reverse of Arm rather than as a second cue
+    /// type that happens to look identical.
+    static func glyphRotation(forCueType type: String) -> Angle {
+        type.lowercased() == "disarm" ? .degrees(180) : .zero
     }
 
     /// Cue times read best as seconds under a minute, and mm:ss above it.
@@ -357,6 +471,15 @@ struct DetailPillsRow: View {
     /// work out — see ``Swift/Array/cueList(containing:)``.
     let cueListName: String?
 
+    /// How large the pills are set, from ``Preferences/pillSize``. The spacing
+    /// between them scales with it, so a row of large pills is not a row of
+    /// small gaps.
+    var size: PillSize = .medium
+
+    /// Whether the cue-type pill spells out the type, from
+    /// ``Preferences/showsCueTypeLabel``.
+    var showsCueTypeLabel = true
+
     @Namespace private var glassNamespace
 
     /// Only the pills that actually have something to show for this cue.
@@ -378,13 +501,13 @@ struct DetailPillsRow: View {
 
     var body: some View {
         if !populated.isEmpty {
-            GlassEffectContainer(spacing: 14) {
-                VStack(spacing: 10) {
+            GlassEffectContainer(spacing: size.glassSpacing) {
+                VStack(spacing: size.spacing) {
                     if !inlineKinds.isEmpty {
                         // Wrapping, not an `HStack`: see ``WrappingPillLayout``.
                         // At a narrow width an `HStack` put five of seven pills
                         // outside the window.
-                        WrappingPillLayout(spacing: 10) {
+                        WrappingPillLayout(spacing: size.spacing) {
                             ForEach(inlineKinds) { kind in
                                 pill(kind)
                             }
@@ -402,9 +525,15 @@ struct DetailPillsRow: View {
     }
 
     private func pill(_ kind: DetailPillKind) -> some View {
-        DetailPill(kind: kind, cue: cue, cueListName: cueListName)
-            .glassEffectID(kind, in: glassNamespace)
-            .glassEffectTransition(.matchedGeometry)
+        DetailPill(
+            kind: kind,
+            cue: cue,
+            cueListName: cueListName,
+            size: size,
+            showsCueTypeLabel: showsCueTypeLabel
+        )
+        .glassEffectID(kind, in: glassNamespace)
+        .glassEffectTransition(.matchedGeometry)
     }
 }
 
@@ -433,7 +562,77 @@ struct DetailPillsRow: View {
     .frame(width: 900)
 }
 
-/// The outlined group pill, and the note wide on its own line.
+/// The three pill sizes side by side, which is the only way to judge whether
+/// Small is still readable and Large is not absurd.
+#Preview("Pill sizes") {
+    var cue = Cue(uniqueID: "s")
+    cue.type = "Audio"
+    cue.duration = 4.25
+    cue.preWait = 1.5
+    cue.continueMode = .autoFollow
+    cue.isArmed = false
+
+    return VStack(spacing: 24) {
+        ForEach(PillSize.allCases) { size in
+            VStack(spacing: 6) {
+                Text(size.title).font(.caption).foregroundStyle(.secondary)
+                DetailPillsRow(
+                    cue: cue,
+                    kinds: DetailPillKind.defaultOrder,
+                    cueListName: "Main Cue List",
+                    size: size
+                )
+            }
+        }
+    }
+    .padding(40)
+    .frame(width: 900)
+}
+
+/// The cue-type pill with its label switched off, next to a row that keeps it.
+#Preview("Cue type without its label") {
+    var cue = Cue(uniqueID: "t")
+    cue.type = "Audio"
+    cue.duration = 4.25
+
+    return VStack(spacing: 24) {
+        DetailPillsRow(
+            cue: cue, kinds: DetailPillKind.defaultOrder, cueListName: "Main Cue List"
+        )
+        DetailPillsRow(
+            cue: cue,
+            kinds: DetailPillKind.defaultOrder,
+            cueListName: "Main Cue List",
+            showsCueTypeLabel: false
+        )
+    }
+    .padding(40)
+    .frame(width: 900)
+}
+
+/// Every cue type that carries a colour or a turned glyph, together so they
+/// can be told apart at a glance — including Arm and Disarm, which share one
+/// symbol and are distinguished by Disarm having it upside down and red.
+///
+/// Audio leads, uncoloured, as the baseline the rest are louder than.
+#Preview("Cue type colours") {
+    let types = [
+        "Audio", "Start", "Stop", "Pause", "Group",
+        "Load", "Fade", "Arm", "Disarm", "Reset", "Target",
+    ]
+
+    return VStack(spacing: 10) {
+        ForEach(types, id: \.self) { type in
+            var cue = Cue(uniqueID: type)
+            cue.type = type
+            return DetailPillsRow(cue: cue, kinds: [.cueType], cueListName: nil)
+        }
+    }
+    .padding(40)
+    .frame(width: 300)
+}
+
+/// The green group pill, and the note wide and centred on its own line.
 #Preview("Group cue") {
     var child = Cue(uniqueID: "child")
     child.number = "13.1"
@@ -479,6 +678,27 @@ struct DetailPillsRow: View {
     .padding(20)
     // The narrowest the main window's detail pane realistically gets: the
     // sidebar's minimum is 220 of a 480pt window.
+    .frame(width: 260)
+}
+
+/// A long note in a narrow window: the case the note pill's second candidate
+/// exists for.
+///
+/// Sized to its own text, this note would be far wider than the window, so
+/// ``ViewThatFits`` has to fall back to the pill that gives way and truncates.
+/// Hugging is the preference, not the rule — a pill that hugged regardless
+/// would hang off both edges of the window, which is the `F14` failure again
+/// by a different route.
+#Preview("Narrow window, long note") {
+    var cue = Cue(uniqueID: "ln")
+    cue.type = "Audio"
+    cue.duration = 4.25
+    cue.notes = "Hold for the door slam, then go on the lighting cue"
+
+    return DetailPillsRow(
+        cue: cue, kinds: DetailPillKind.defaultOrder, cueListName: "Effects"
+    )
+    .padding(20)
     .frame(width: 260)
 }
 

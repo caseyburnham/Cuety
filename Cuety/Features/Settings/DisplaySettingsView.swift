@@ -2,6 +2,10 @@ import SwiftUI
 
 /// Typography and layout choices for the cue display and the drawer.
 struct DisplaySettingsView: View {
+    /// The height this pane needs to show everything without scrolling.
+    /// Applied by ``SettingsView``; measured, not guessed.
+    static let settingsHeight: CGFloat = 585
+
     @Environment(AppModel.self) private var model
 
     /// Loaded once in `task` rather than read in `body`: building the catalogue
@@ -35,6 +39,12 @@ struct DisplaySettingsView: View {
                     }
                 }
 
+                Picker("Weight", selection: Bindable(preferences).fontWeight) {
+                    ForEach(FontWeightChoice.allCases) { choice in
+                        Text(choice.title).tag(choice)
+                    }
+                }
+
                 // Only meaningful for the system font — a custom family brings
                 // its own shapes, so there is no rounded variant to opt into.
                 Toggle("Use the rounded system font", isOn: Bindable(preferences).usesRoundedSystemFont)
@@ -64,20 +74,20 @@ struct DisplaySettingsView: View {
                 // drawer reads the cue list either side of the playhead; it
                 // has no way to know what has been taken or what the next GO
                 // will do, so the labels must not imply either.
-                Stepper(
-                    "Rows above the playhead: \(preferences.drawerRowsAboveCount)",
+                SteppedField(
+                    title: "Rows above the playhead",
                     value: Bindable(preferences).drawerRowsAboveCount,
-                    in: 0...10
+                    range: Preferences.Limits.drawerRows,
+                    format: IntegerFormatStyle<Int>.number.grouping(.never)
                 )
-                .monospacedDigit()
                 .disabled(!preferences.showsDrawer)
 
-                Stepper(
-                    "Rows below the playhead: \(preferences.drawerRowsBelowCount)",
+                SteppedField(
+                    title: "Rows below the playhead",
                     value: Bindable(preferences).drawerRowsBelowCount,
-                    in: 0...10
+                    range: Preferences.Limits.drawerRows,
+                    format: IntegerFormatStyle<Int>.number.grouping(.never)
                 )
-                .monospacedDigit()
                 .disabled(!preferences.showsDrawer)
             } header: {
                 Text("Cue Drawer")
@@ -95,16 +105,20 @@ struct DisplaySettingsView: View {
         }
     }
 
-    /// A live preview of the chosen family, so the choice can be judged on the
-    /// glyphs themselves rather than on a font name.
+    /// A live preview of the chosen family and weight, so the choice can be
+    /// judged on the glyphs themselves rather than on two names.
     ///
-    /// Set exactly as the drawer sets the cue standing by, since that is where
-    /// the family is read at a size close to this one.
+    /// The weight comes from ``Typography/cueNumberWeight`` rather than being
+    /// fixed here: a Weight picker whose preview ignored it would be the one
+    /// control in this pane that showed nothing.
     private var sample: some View {
-        LabeledContent("Preview") {
+        let typography = Typography(preferences: preferences)
+
+        return LabeledContent("Preview") {
             Text(verbatim: "127.5")
-                .font(Typography(preferences: preferences)
-                    .drawerNumber(size: 40, weight: .semibold))
+                .font(typography.drawerNumber(
+                    size: 40, weight: typography.cueNumberWeight
+                ))
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
@@ -117,5 +131,5 @@ struct DisplaySettingsView: View {
 #Preview {
     DisplaySettingsView()
         .environment(AppModel())
-        .frame(width: 520, height: 420)
+        .frame(width: SettingsView.width, height: DisplaySettingsView.settingsHeight)
 }
