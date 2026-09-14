@@ -56,6 +56,7 @@ does not have to be rediscovered.
 
 | Date | Decision | Choice | Consequence |
 |---|---|---|---|
+| 2026-09-13 | Bundle identifier | `com.ivxx.Cuety`, replacing `com.caseyburnham.Cuety` | Keeps a personal name out of the shipped bundle. The Keychain service string moved with it (`com.ivxx.Cuety.qlab-passcode`), so any passcode saved under the old identifier is orphaned and must be re-entered once. Logger subsystems and the connection queue label moved too. Must not change again after distribution. |
 | 2026-09-09 | Window model (`F7`) | Single main `Window`, not `WindowGroup` | Presentation and sidebar state become unambiguous; `model.start()` runs once; the reconnect-on-new-window fault disappears structurally. Accepts the loss of duplicate displays on multiple monitors. |
 | 2026-09-09 | Drawer semantics (`F3`) | Present as a labelled cue-list neighbourhood | Keep the static traversal; correct every wording and accessibility claim. Execution/history modelling is explicitly *not* in this release — see `F3b`. |
 | 2026-09-09 | Deployment target (`R8`) | Audit macOS 27-only API usage, then decide | Inventory every API that forces macOS 27 and scope the back-deployment work before committing to a floor. |
@@ -1206,15 +1207,44 @@ truncates or overflows at the window sizes in `V10`/`V11`.
 | R2 | Formatter configuration, four-space indentation retained | Config committed **before** any mechanical reformatting; lint output reflects it | [ ] |
 | R3 | Address the 279 remaining lint diagnostics (mostly wrapping and indentation) after `R2` | Clean lint run, or a documented allowlist | [ ] |
 | R3a | Add a custom rule banning `.animation(` and bare `withAnimation(` outside `Support/Motion.swift` | `F14`'s Reduce Motion guard cannot be forgotten again — it was missed at eight of ten sites | [ ] |
-| R4 | Project metadata still says `MyApp/Info.plist` and `productName = MyApp` | All references say Cuety; build settings verified via `GetTargetBuildSettings` | [ ] |
-| R5 | User-specific Xcode scheme metadata is tracked in git | Untracked and git-ignored | [ ] |
-| R6 | No shared scheme | A shared scheme is checked in and builds from a clean clone | [ ] |
-| R7 | No README | README covers what Cuety is, requirements, and how to build | [ ] |
+| R4 | Project metadata still says `MyApp/Info.plist` and `productName = MyApp` | All references say Cuety; build settings verified via `GetTargetBuildSettings` | [~] |
+| R5 | User-specific Xcode scheme metadata is tracked in git | Untracked and git-ignored | [x] |
+| R6 | No shared scheme | A shared scheme is checked in and builds from a clean clone | [~] |
+| R7 | No README | README covers what Cuety is, requirements, and how to build | [x] |
 | R8 | Deployment target — audit macOS 27-only API usage | Inventory of every API forcing macOS 27 (Liquid Glass / current SwiftUI APIs), with the back-deployment cost per item; then the target decision is recorded in the decisions log | [ ] |
 | R9 | No CI workflow | CI builds and runs tests on push | [ ] |
+| R10 | Ad-hoc signing blocks Gatekeeper on any other Mac | Either a Developer ID + hardened runtime + notarized Release build, or the quarantine workaround documented as the accepted answer | [ ] |
+| R11 | No LICENSE | A licence is chosen and committed | [x] |
 
 > `R8` is an inventory task first. Do not lower the target until the inventory exists —
 > the answer changes `F14`'s available layout APIs.
+
+> `R4` is **partly** closed. `INFOPLIST_FILE` is now `Info.plist` at `SRCROOT`, the
+> `MyApp/` folder is gone, and no Swift source mentions the old name. What remains is two
+> lines of stale metadata in `project.pbxproj` — `remoteInfo = MyApp` on the test target's
+> container proxy (line 15) and the app target's `productName = MyApp` (line 86). Neither
+> is reachable from a build setting and neither affects the build: `PRODUCT_NAME` is
+> already `Cuety`. To clear them, **quit Xcode** (editing `project.pbxproj` while it is
+> open risks crashing it), then:
+>
+> ```sh
+> sed -i '' 's/remoteInfo = MyApp;/remoteInfo = Cuety;/; s/productName = MyApp;/productName = Cuety;/' Cuety.xcodeproj/project.pbxproj
+> ```
+
+> `R6` was mis-stated in the audit: there *is* a shared scheme. Xcode reports the single
+> `Cuety` scheme as shared, and `xcodebuild -list` in a fresh clone lists it — verified
+> 2026-09-13 against a throwaway clone with no `.xcscheme` file anywhere on disk. The
+> scheme is **autocreated** from the target rather than checked in, which is why the audit
+> found no file. The half still open is robustness, not function: autocreation is a
+> per-project setting, so a checked-in `.xcscheme` (Product ▸ Scheme ▸ Manage Schemes ▸
+> **Shared**) is the version CI cannot be surprised by.
+
+*Why `Info.plist` sits at `SRCROOT` rather than in `Cuety/`:* `Cuety/` is a
+`PBXFileSystemSynchronizedRootGroup`, so every file inside it is a target member by
+default. An `Info.plist` in there gets copied into `Contents/Resources/` **as well as**
+being processed into `Contents/Info.plist` — a duplicate. Suppressing that needs a
+membership exception in `project.pbxproj`, which is why Apple's own template put the file
+outside the synchronized folder in the first place.
 
 ---
 
