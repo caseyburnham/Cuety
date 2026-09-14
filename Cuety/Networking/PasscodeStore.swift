@@ -23,10 +23,10 @@ nonisolated protocol PasscodeStoring: Sendable {
 /// else's show file. A sandboxed app gets its own Keychain access group from its
 /// application identifier, so this needs no entitlement.
 nonisolated struct PasscodeStore: PasscodeStoring {
-    private let logger = Logger(subsystem: "com.caseyburnham.Cuety", category: "PasscodeStore")
+    private let logger = Logger(subsystem: "com.ivxx.Cuety", category: "PasscodeStore")
 
     /// The Keychain service name all Cuety items share.
-    private static let service = "com.caseyburnham.Cuety.qlab-passcode"
+    private static let service = "com.ivxx.Cuety.qlab-passcode"
 
     /// Errors surfaced to the passcode sheet.
     enum Failure: Error, CustomStringConvertible {

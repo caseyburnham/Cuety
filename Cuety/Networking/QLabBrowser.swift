@@ -11,7 +11,7 @@ import os
 @Observable
 @MainActor
 final class QLabBrowser {
-    private let logger = Logger(subsystem: "com.caseyburnham.Cuety", category: "QLabBrowser")
+    private let logger = Logger(subsystem: "com.ivxx.Cuety", category: "QLabBrowser")
 
     /// QLab's Bonjour service type.
     static let serviceType = "_qlab._tcp"

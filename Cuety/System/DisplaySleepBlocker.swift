@@ -9,7 +9,7 @@ import os
 /// must be held for the lifetime of the activity and handed back exactly once.
 @MainActor
 final class DisplaySleepBlocker {
-    private let logger = Logger(subsystem: "com.caseyburnham.Cuety", category: "KeepAwake")
+    private let logger = Logger(subsystem: "com.ivxx.Cuety", category: "KeepAwake")
 
     /// The opaque activity token, non-nil exactly when the block is active.
     private var token: NSObjectProtocol?

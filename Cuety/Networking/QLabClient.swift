@@ -10,7 +10,7 @@ import os
 @Observable
 @MainActor
 final class QLabClient {
-    private let logger = Logger(subsystem: "com.caseyburnham.Cuety", category: "QLabClient")
+    private let logger = Logger(subsystem: "com.ivxx.Cuety", category: "QLabClient")
     private let preferences: Preferences
     private let log: ActivityLog
 

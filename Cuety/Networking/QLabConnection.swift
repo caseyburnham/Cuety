@@ -26,7 +26,7 @@ actor QLabConnection {
     }
 
     private let endpoint: NWEndpoint
-    private let logger = Logger(subsystem: "com.caseyburnham.Cuety", category: "QLabConnection")
+    private let logger = Logger(subsystem: "com.ivxx.Cuety", category: "QLabConnection")
     private let encoder = OSCEncoder()
     private let decoder = OSCDecoder()
 
@@ -43,7 +43,7 @@ actor QLabConnection {
     private var readinessTimeout: Task<Void, Never>?
 
     /// Serial queue for all `NWConnection` callbacks.
-    private let queue = DispatchQueue(label: "com.caseyburnham.Cuety.connection")
+    private let queue = DispatchQueue(label: "com.ivxx.Cuety.connection")
 
     /// How many events the stream holds when the consumer falls behind.
     ///
