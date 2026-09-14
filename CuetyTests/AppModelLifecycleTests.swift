@@ -1,4 +1,7 @@
 import Foundation
+// For `NavigationSplitViewVisibility`, which presentation mode saves and
+// restores.
+import SwiftUI
 import Testing
 
 @testable import Cuety
@@ -162,5 +165,41 @@ struct AppModelLifecycleTests {
 
         #expect(model.startupTask == startup)
         #expect(startup.isCancelled)
+    }
+
+    // MARK: - Presentation mode
+
+    @Test("Leaving presentation mode restores the sidebar it collapsed")
+    func presentationRestoresTheSidebar() throws {
+        let model = try makeModel()
+        model.sidebarVisibility = .all
+
+        model.togglePresentationMode()
+        #expect(model.isPresenting)
+        #expect(model.sidebarVisibility == .detailOnly)
+
+        model.togglePresentationMode()
+        #expect(!model.isPresenting)
+        #expect(model.sidebarVisibility == .all)
+    }
+
+    @Test("A window already presenting does not overwrite the sidebar to restore")
+    func redundantPresentingIsIgnored() throws {
+        // ``FullScreenPresentation`` reports the window's full-screen state
+        // whoever caused it, so the state Cuety is already in gets reported
+        // back to it as a matter of course — by the `did` notification for the
+        // transition Cuety asked for itself, among others.
+        //
+        // Without the guard in `setPresenting`, that second call would save
+        // `.detailOnly` as the visibility to restore, and the sidebar would
+        // never come back from presentation mode.
+        let model = try makeModel()
+        model.sidebarVisibility = .all
+
+        model.setPresenting(true)
+        model.setPresenting(true)
+        model.setPresenting(false)
+
+        #expect(model.sidebarVisibility == .all)
     }
 }

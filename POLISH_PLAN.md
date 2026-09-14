@@ -41,11 +41,12 @@ changes must not land before `R2` (formatter configuration) is committed.
 | 3 | Make data and Settings coherent | 4 | 4 / 4 |
 | 4 | Simplify and standardize | 17 | 0 / 17 |
 | 5 | Presentation and release readiness | 9 | 0 / 9 |
-| — | Verification sign-off | 13 | 0 / 13 |
+| — | Verification sign-off | 13 | 1 / 13 |
 
 Phase 1's four items are implemented and covered by automated tests (182 passing).
 The *visual* halves of their "Done when" criteria — a real QLab dropped mid-show, a
-playhead moved by hand — belong to `V1`, `V2` and `V13` and remain open.
+playhead moved by hand — belong to `V1`, `V2` and `V13`. `V1` is verified; `V2` and
+`V13` remain open.
 
 ---
 
@@ -56,6 +57,7 @@ does not have to be rediscovered.
 
 | Date | Decision | Choice | Consequence |
 |---|---|---|---|
+| 2026-09-13 | Presentation mode | Real full screen, driven from AppKit | Presentation mode was a layout change in an ordinary window, which left the menu bar, Dock, title bar and pointer on a stage display. `NSWindow.toggleFullScreen(_:)` is the only way to enter full screen — SwiftUI can configure it but not trigger it — so `FullScreenPresentation` bridges to it, and `PointerHider` hides the pointer on an idle delay. Full screen supplies the auto-hiding menu bar and Dock, so `NSApplication.presentationOptions` is deliberately untouched. Consequence: `isPresenting` is now a mirror of the window as well as an intent, and the system's own ⌃⌘F enters presentation mode too. |
 | 2026-09-13 | Bundle identifier | `com.ivxx.Cuety`, replacing `com.caseyburnham.Cuety` | Keeps a personal name out of the shipped bundle. The Keychain service string moved with it (`com.ivxx.Cuety.qlab-passcode`), so any passcode saved under the old identifier is orphaned and must be re-entered once. Logger subsystems and the connection queue label moved too. Must not change again after distribution. |
 | 2026-09-09 | Window model (`F7`) | Single main `Window`, not `WindowGroup` | Presentation and sidebar state become unambiguous; `model.start()` runs once; the reconnect-on-new-window fault disappears structurally. Accepts the loss of duplicate displays on multiple monitors. |
 | 2026-09-09 | Drawer semantics (`F3`) | Present as a labelled cue-list neighbourhood | Keep the static traversal; correct every wording and accessibility claim. Execution/history modelling is explicitly *not* in this release — see `F3b`. |
@@ -86,8 +88,8 @@ label asserts a playback fact it cannot know.
 **Status: met in code, pending visual sign-off.** All four items are implemented and
 tested (182 tests, all passing). The three criteria above are established by
 `dropInvalidatesCueDataOnScreen`, `ActivityLogRedactionTests`, and the `F3` string and
-label audit respectively. `V1`, `V2` and `V13` still have to be run against a real QLab
-before the phase is signed off.
+label audit respectively. `V1` has now been run against a real QLab and passed; `V2` and
+`V13` still have to be, before the phase is signed off.
 
 ---
 
@@ -141,8 +143,9 @@ than assumed — see `reconnectRepopulatesCueData`.
 asserting all seven derived facts are gone), `reconnectRepopulatesCueData`. `V-gap` is
 closed: `AuthorizationPeer` now serves cues and answers `playbackPositionID`, and
 `quitPeerLeavesSessionRetrying` runs against a populated show, so its `cueLists.isEmpty`
-assertion is no longer vacuous. **Outstanding:** `V1`, the visual confirmation against a
-real QLab in presentation mode.
+assertion is no longer vacuous. **`V1` verified 2026-09-13:** the stage-scale loss state
+was confirmed against a real QLab in presentation mode by the operator. Nothing
+outstanding.
 
 ---
 
@@ -1261,7 +1264,7 @@ a playhead parked on one. Disconnect coverage can be trusted from here.
 
 | ID | Scenario | Covers | Done |
 |---|---|---|---|
-| V1 | Connection loss during presentation mode | `F1` | [ ] |
+| V1 | Connection loss during presentation mode | `F1` | [x] |
 | V2 | Skipped and manual playhead moves with nothing fired | `F3`, `F6` | [ ] |
 | V3 | Different group modes, including advancing past a group | `F3`, `F4` | [ ] |
 | V4 | Cue edits while detail pills are visible | `F5` | [ ] |
@@ -1277,12 +1280,12 @@ a playhead parked on one. Disconnect coverage can be trusted from here.
 
 All thirteen precede the final visual-polish sign-off.
 
-`V1`, `V2` and `V13` now have automated coverage of the parts a test can reach — cue-data
+`V1`, `V2` and `V13` all have automated coverage of the parts a test can reach — cue-data
 invalidation on a drop, the corrected drawer strings and labels, and passcode redaction
-across storage and the clipboard. What is left in each is the part that needs a real QLab
-and a pair of eyes: the stage-scale loss state actually appearing in presentation mode, a
-hand-moved playhead reading correctly, and the Activity Log inspected and copied after a
-passcoded connection. They stay open.
+across storage and the clipboard. What was left in each is the part that needs a real QLab
+and a pair of eyes. `V1` has had that (below). `V2` and `V13` stay open: a hand-moved
+playhead reading correctly, and the Activity Log inspected and copied after a passcoded
+connection.
 
 ---
 
@@ -1314,7 +1317,7 @@ against the worst failure this app has had.
 
 | ID | How to run it | What should happen |
 |---|---|---|
-| `V1` | Connect, enter presentation mode (⇧⌘F), then quit QLab | The cue is replaced **immediately** by a large, legible loss state — not a stale cue, not a small `ContentUnavailableView`. Nothing reappears until QLab is back and reconnected. |
+| `V1` | Connect, enter presentation mode (⇧⌘F), then quit QLab | The cue is replaced **immediately** by a large, legible loss state — not a stale cue, not a small `ContentUnavailableView`. Nothing reappears until QLab is back and reconnected. **✅ Verified 2026-09-13** by the operator. |
 | `V2` | Move the playhead by hand in QLab — arrow keys, clicking a cue, skipping several — firing nothing | Drawer rows say "rows above/below the playhead"; nothing says taken, ago, or next. VoiceOver over a row says position, not history. Stepping into a group shows "in ⟨group⟩" by the marker. |
 | `V3` | A group set to fire-all-children, then one set to fire-first-then-advance. Run past each | The group is **one row**; its children never appear as rows. "End of List" appears only on the genuinely last top-level row, never while inside the final group. The Cue List pill names the containing list, not the cue. |
 | `V4` | With the pills on screen, edit the standing-by cue's duration and note in QLab. Then edit a *different* cue | First: pills update to the new values. Second: pills **never blank**, not even for a frame. Watch closely — this is a one-round-trip window. |
@@ -1344,6 +1347,11 @@ Justified as-is, per the audit — do not "simplify" these:
   platform APIs.
 - Framer callbacks required by the framework are not dead code merely because no Swift
   call site invokes them.
+- The three `NSViewRepresentable`/AppKit escapes — `SettingsWindowHeight`,
+  `FullScreenPresentation` and `PointerHider` — each reach for a window or pointer API
+  that SwiftUI does not expose at all. Each says so in its own doc comment. Being the
+  only AppKit in the app is not a reason to remove them; it is the reason they are
+  documented.
 
 The genuinely unnecessary custom mechanisms are exactly three: the error-description
 protocol (`F13`), the guessed drawer-column sizing (`F14`), and the scattered

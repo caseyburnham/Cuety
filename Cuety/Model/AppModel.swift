@@ -95,8 +95,15 @@ final class AppModel {
     // the sidebar in both. That is fixed by there being one window, not by
     // moving state, because per-window state is not what this app wants.
 
-    /// Full-screen stage mode: sidebar, header, and drawer hidden, cue number
-    /// scaled to fill the window.
+    /// Stage mode: the window in real full screen, sidebar, toolbar and drawer
+    /// hidden, cue number scaled to fill the display.
+    ///
+    /// Both an intent and a mirror. Setting it asks
+    /// ``FullScreenPresentation`` to take the window into or out of full
+    /// screen; the window entering or leaving full screen by any other route
+    /// sets it back. So this is never a claim about full screen that the window
+    /// disagrees with — which it would be if it were only an intent, since full
+    /// screen has entrances Cuety does not own.
     var isPresenting = false
 
     /// Sidebar visibility in the main window, tracked here so the presentation
@@ -641,17 +648,35 @@ final class AppModel {
 
     // MARK: - Chrome
 
-    /// Enters or leaves presentation mode, animating the whole layout change
-    /// as one transition.
+    /// Enters or leaves presentation mode.
     func togglePresentationMode() {
+        setPresenting(!isPresenting)
+    }
+
+    /// Sets presentation mode, animating the whole layout change as one
+    /// transition.
+    ///
+    /// More than a setter: entering has to remember the sidebar so that leaving
+    /// can put it back. Two things call this — the View menu, and
+    /// ``FullScreenPresentation`` when the window enters or leaves full screen
+    /// by some other route (the green button, the system's own ⌃⌘F, Mission
+    /// Control).
+    ///
+    /// Which is why the guard is load-bearing rather than a micro-optimisation.
+    /// The window reporting a state Cuety is already in must not re-save the
+    /// sidebar, or entering presentation mode would store `.detailOnly` over
+    /// the visibility that was meant to be restored afterwards — and the
+    /// sidebar would never come back.
+    func setPresenting(_ presenting: Bool) {
+        guard presenting != isPresenting else { return }
         withAnimation(Motion.chrome.unlessMotionIsReduced) {
-            if isPresenting {
-                isPresenting = false
-                sidebarVisibility = sidebarVisibilityBeforePresenting
-            } else {
+            if presenting {
                 sidebarVisibilityBeforePresenting = sidebarVisibility
                 isPresenting = true
                 sidebarVisibility = .detailOnly
+            } else {
+                isPresenting = false
+                sidebarVisibility = sidebarVisibilityBeforePresenting
             }
         }
     }

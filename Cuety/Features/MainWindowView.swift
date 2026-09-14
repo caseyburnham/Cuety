@@ -23,6 +23,21 @@ struct MainWindowView: View {
         .sheet(item: Bindable(model).passcodePrompt) { prompt in
             PasscodeSheet(prompt: prompt)
         }
+        // Presentation mode is real full screen, which is the window's state
+        // and not the layout's — see ``FullScreenPresentation``. A background
+        // because the view is zero-sized and must not be able to affect the
+        // size of anything.
+        .background(
+            FullScreenPresentation(isPresenting: model.isPresenting) { isFullScreen in
+                model.setPresenting(isFullScreen)
+            }
+        )
+        // The toolbar's own full-screen behaviour is what hides it now, in
+        // place of the hard hide `isPresenting` used to apply. `.onHover`
+        // brings it back when the pointer reaches the top of the display,
+        // exactly as the menu bar and Dock do, so the status glyph stays
+        // reachable without leaving stage mode.
+        .windowToolbarFullScreenVisibility(.onHover)
     }
 
     /// The largest share of the detail area the drawer may occupy.
@@ -52,11 +67,12 @@ struct MainWindowView: View {
                 }
         }
         .toolbar { StatusToolbarContent() }
-        .toolbar(model.isPresenting ? .hidden : .automatic)
         .navigationTitle(navigationTitle)
         .navigationSubtitle(navigationSubtitle)
-        // Escape leaves presentation mode. Without this the only way out
-        // is the menu, which is a bad place to be with the chrome hidden.
+        // Escape leaves presentation mode. Still needed with real full screen:
+        // macOS does not exit full screen on Escape, so without this the only
+        // ways out are the menu bar and the green button — both of which have
+        // to be revealed first, which is a bad place to be mid-show.
         .onExitCommand {
             if model.isPresenting { model.togglePresentationMode() }
         }
