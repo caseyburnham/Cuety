@@ -63,7 +63,9 @@ final class QLabBrowser {
         start()
     }
 
-    func stop() {
+    /// Private: nothing outside this class ends browsing. ``restartBrowsing()``
+    /// is what a refresh asks for, and a failed browser tears itself down.
+    private func stop() {
         browser?.stateUpdateHandler = nil
         browser?.browseResultsChangedHandler = nil
         browser?.cancel()
@@ -156,15 +158,6 @@ final class QLabBrowser {
         servers[index] = server
     }
 
-    /// Replaces several server entries in one observation update.
-    func update(_ updatedServers: [QLabServer]) {
-        let updates = Dictionary(
-            updatedServers.map { ($0.id, $0) },
-            uniquingKeysWith: { _, latest in latest }
-        )
-        servers = servers.map { updates[$0.id] ?? $0 }
-    }
-
     func server(withID id: String) -> QLabServer? {
         servers.first { $0.id == id }
     }
@@ -181,6 +174,14 @@ final class QLabBrowser {
     var bonjourServers: [QLabServer] { servers.filter { $0.source == .bonjour } }
 
     var manualServers: [QLabServer] { servers.filter { $0.source == .manual } }
+
+    /// Every server in the order the operator should see them: the machines
+    /// they added by hand — This Mac included — before the ones Cuety found.
+    ///
+    /// Stated once, here, rather than as `manualServers + bonjourServers` at
+    /// each display site. Two surfaces list servers — the sidebar and the
+    /// Connection menus — and the order they are listed in is one decision.
+    var orderedServers: [QLabServer] { manualServers + bonjourServers }
 
     // MARK: - Persistence
 

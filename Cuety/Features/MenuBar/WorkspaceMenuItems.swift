@@ -18,8 +18,7 @@ struct WorkspaceMenuItems: View {
     let model: AppModel
 
     var body: some View {
-        let servers = (model.browser.manualServers + model.browser.bonjourServers)
-            .filter { !$0.workspaces.isEmpty }
+        let servers = model.browser.orderedServers.filter { !$0.workspaces.isEmpty }
 
         if servers.isEmpty {
             // Disabled rather than absent: an empty menu section reads as a

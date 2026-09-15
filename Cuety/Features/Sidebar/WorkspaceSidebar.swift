@@ -6,10 +6,14 @@ struct WorkspaceSidebar: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    // Both owned by the Add Server sheet's `onAppear`, which is the only thing
+    // that seeds them — `newPort` used to start at ``QLabServer/defaultPort``
+    // here and then be overwritten with the operator's stored default before
+    // the field was ever seen, so the constant read as the value in use and
+    // was not.
     @State private var newHost = ""
-    @State private var newPort = String(QLabServer.defaultPort)
+    @State private var newPort = ""
     @State private var isConnecting = false
-    @State private var selectedRow: Selection?
     @FocusState private var hostIsFocused: Bool
 
     private enum Selection: Hashable {
@@ -19,7 +23,7 @@ struct WorkspaceSidebar: View {
 
     var body: some View {
         List(selection: sidebarSelection) {
-            ForEach(model.browser.manualServers + model.browser.bonjourServers) { server in
+            ForEach(model.browser.orderedServers) { server in
                 Section {
                     ForEach(server.workspaces) { workspace in
                         workspaceRow(workspace, on: server)
@@ -106,8 +110,6 @@ struct WorkspaceSidebar: View {
                 connect(to: selection)
             }
         }
-        .onChange(of: model.selection) { selectedRow = nil }
-        .onChange(of: model.client.watchedCueListID) { selectedRow = nil }
         .listStyle(.sidebar)
         // Let the window's own sidebar material through. A `List` draws an
         // opaque background of its own by default, which sits on top of the
@@ -160,26 +162,43 @@ struct WorkspaceSidebar: View {
         }
     }
 
+    /// What the sidebar highlights, read straight from the model and stored
+    /// nowhere else.
+    ///
+    /// The highlight means *the cue list driving the display*, and falls back
+    /// to the connected workspace only when there is no live list to point at.
+    /// A workspace row is an activation target — double-click or the context
+    /// menu connects — the way a Finder Favourite is, and its state is already
+    /// drawn in the row by the status glyph, so it has no need of the
+    /// highlight as well.
+    ///
+    /// Which is why the setter answers for cue lists and ignores everything
+    /// else: a write it does not act on leaves the getter reporting the same
+    /// value it did before, so the highlight stays where the model says it
+    /// belongs. There was a `selectedRow` here that the getter preferred
+    /// unconditionally, and clicking the workspace row you were *already*
+    /// connected to changed neither ``AppModel/selection`` nor
+    /// ``QLabClient/watchedCueListID`` — so nothing ever cleared it, and the
+    /// sidebar stopped saying which cue list the display was following until a
+    /// cue list row was clicked again.
     private var sidebarSelection: Binding<Selection?> {
         Binding {
-            if let selectedRow { return selectedRow }
             if model.client.status.hasLiveData, let id = model.client.watchedCueListID {
                 return .cueList(id)
             }
             return model.selection.map(Selection.workspace)
         } set: { selection in
-            guard let selection, !isConnecting, model.canConnect else { return }
-            selectedRow = selection
-            switch selection {
-            case .workspace:
-                break
-            case .cueList(let id):
-                guard id != model.client.watchedCueListID else { return }
-                withAnimation(reduceMotion ? nil : Motion.cueChange) {
-                    model.client.watchedCueListID = id
-                }
-                Task { await model.client.refreshPlayheadCueDetails() }
+            guard case .cueList(let id) = selection,
+                  id != model.client.watchedCueListID
+            else { return }
+            // Deliberately not gated on ``AppModel/canConnect``. It used to be
+            // — the guard covered this whole setter — so choosing which cue
+            // list to watch was refused for as long as a connection attempt
+            // was in flight, a question it has nothing to do with.
+            withAnimation(reduceMotion ? nil : Motion.cueChange) {
+                model.client.watchedCueListID = id
             }
+            Task { await model.client.refreshPlayheadCueDetails() }
         }
     }
 
@@ -193,12 +212,16 @@ struct WorkspaceSidebar: View {
                     .lineLimit(2)
                 Spacer(minLength: 4)
                 if isCurrent {
+                    // A readout, not a control. There used to be a button here
+                    // that swapped itself for a red ✗ on hover — a
+                    // hand-rolled affordance macOS has no equivalent of in a
+                    // source list, built out of an `onHover` and a hardcoded
+                    // 22pt frame, and invisible to anyone not using a mouse.
+                    // Disconnect is on the row's context menu, in the
+                    // Connection menu with a shortcut, and in the toolbar,
+                    // which are the three places macOS would look for it.
                     if model.client.status.isTransitional {
                         ProgressView().controlSize(.small)
-                    } else if model.client.isSessionActive {
-                        // Includes a session that is retrying: the glyph shows
-                        // what is happening and hovering it offers the way out.
-                        WorkspaceDisconnectButton(status: model.client.status) { model.disconnect() }
                     } else {
                         Image(systemName: model.client.status.systemImage)
                             .foregroundStyle(model.client.status.tint)
@@ -222,7 +245,6 @@ struct WorkspaceSidebar: View {
         // is *offered* is ``AppModel/canConnect``, everywhere.
         guard !isConnecting, model.canConnect else { return }
         guard selection != model.selection || !model.client.status.hasLiveData else { return }
-        selectedRow = nil
         isConnecting = true
         Task {
             defer { isConnecting = false }
@@ -250,11 +272,12 @@ struct WorkspaceSidebar: View {
     @ViewBuilder
     private func serverStatus(_ server: QLabServer) -> some View {
         if model.refreshingServerIDs.contains(server.id) {
-            HStack {
-                ProgressView().controlSize(.small)
-                Text("Looking for workspaces…")
-            }
-            .foregroundStyle(.secondary)
+            // Words only. The spinner for this server is the one in its
+            // section header, which is the single place a probe in flight is
+            // drawn — this row used to carry a second one, so a server with
+            // nothing open spun twice, side by side, for the same probe.
+            Text("Looking for workspaces…")
+                .foregroundStyle(.secondary)
         } else if let error = server.lastError {
             Label("Unable to Reach QLab", systemImage: "exclamationmark.triangle")
                 .foregroundStyle(.secondary)
@@ -381,26 +404,5 @@ struct WorkspaceSidebar: View {
     /// into showing spinners under different conditions.
     private func probeWorkspaces(on server: QLabServer) {
         Task { await model.refreshWorkspaces(onServerWithID: server.id) }
-    }
-}
-
-private struct WorkspaceDisconnectButton: View {
-    let status: ConnectionStatus
-    let disconnect: () -> Void
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: disconnect) {
-            Image(systemName: isHovering ? "xmark.circle.fill" : status.systemImage)
-                .foregroundStyle(isHovering ? .red : status.tint)
-                .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp)))
-                .frame(width: 22, height: 22)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .motion(Motion.status, value: isHovering)
-        .help("Disconnect")
-        .accessibilityLabel("Disconnect from workspace")
     }
 }
