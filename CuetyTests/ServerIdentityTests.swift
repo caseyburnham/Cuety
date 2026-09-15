@@ -4,11 +4,6 @@ import Testing
 
 @testable import Cuety
 
-/// What makes two sidebar entries the same machine.
-///
-/// Spelling is not identity. Getting this wrong is what let four stale
-/// `127.0.0.1` rows accumulate alongside "This Mac", each costing a full
-/// request timeout on every refresh.
 @Suite("Server identity")
 @MainActor
 struct ServerIdentityTests {
@@ -26,9 +21,6 @@ struct ServerIdentityTests {
         "0000:0000:0000:0000:0000:0000:0000:0001",
     ])
     func localhostAliasesShareOneIdentity(host: String) {
-        // The built-in entry's identity, which is also the spelling persisted
-        // as `lastServerID` — so canonicalising must land on exactly this or
-        // an existing remembered workspace stops matching.
         #expect(QLabServer.identity(host: host, port: port) == "localhost:\(port)")
         #expect(QLabServer.manual(host: host, port: port).id == QLabServer.localhost().id)
     }
@@ -44,8 +36,6 @@ struct ServerIdentityTests {
 
     @Test("Two QLabs on one machine are two servers")
     func portIsPartOfIdentity() {
-        // Not a spelling difference: QLab can run more than one instance, and
-        // they are genuinely separate things to connect to.
         #expect(
             QLabServer.identity(host: "localhost", port: 53000)
                 != QLabServer.identity(host: "localhost", port: 53001)
@@ -72,7 +62,6 @@ struct ServerIdentityTests {
     func nameIsSeparateFromIdentity() {
         let server = QLabServer.manual(host: "QLab-Mac.Local", port: port)
 
-        // Identity is canonical; the row still reads the way they typed it.
         #expect(server.id == QLabServer.identity(host: "qlab-mac.local", port: port))
         #expect(server.name == "QLab-Mac.Local")
     }
@@ -84,9 +73,6 @@ struct ServerIdentityTests {
         let before = browser.servers.count
         try #require(browser.server(withID: QLabServer.localhost().id) != nil)
 
-        // The exact thing that produced four junk rows: `127.0.0.1:53000` used
-        // to be a different identity from `localhost:53000`, so it was added
-        // rather than recognised.
         let added = browser.addManualServer(host: "127.0.0.1", port: port)
 
         #expect(added.id == QLabServer.localhost().id)
@@ -113,17 +99,12 @@ struct ServerIdentityTests {
         let before = browser.servers.count
 
         let first = browser.addManualServer(host: "192.168.1.10", port: port)
-        // Same machine, different spelling.
         let second = browser.addManualServer(host: "192.168.1.10.", port: port)
 
         #expect(first.id == second.id)
         #expect(browser.servers.count == before + 1)
     }
 
-    /// Recorded so the deferral is deliberate: a remote machine found by
-    /// Bonjour and also typed in as an IP address cannot be recognised as one
-    /// thing without resolving the service, which Cuety leaves to the system
-    /// at connect time.
     @Test("A discovered server is identified separately from a typed address")
     func remoteBonjourAndManualAreNotUnified() {
         let manual = QLabServer.manual(host: "192.168.1.10", port: port)
@@ -136,7 +117,6 @@ struct ServerIdentityTests {
         #expect(discovered?.id != manual.id)
     }
 
-    // MARK: - Removal
 
     private func model() throws -> AppModel {
         let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
@@ -147,8 +127,6 @@ struct ServerIdentityTests {
     func removabilityIsLimitedToAddedServers() throws {
         let model = try model()
 
-        // Discovered: in the list because the machine is on the network, so
-        // removing it would hide something Cuety rediscovers seconds later.
         let discovered = try #require(QLabServer.bonjour(
             endpoint: .service(
                 name: "QLab Mac", type: QLabBrowser.serviceType, domain: "local.", interface: nil
@@ -156,7 +134,6 @@ struct ServerIdentityTests {
         ))
         #expect(model.canRemove(discovered) == false)
 
-        // The built-in entry, which costs nothing and is the common case.
         #expect(model.canRemove(QLabServer.localhost()) == false)
 
         #expect(model.canRemove(model.browser.addManualServer(host: "192.168.1.10", port: port)))
@@ -172,9 +149,6 @@ struct ServerIdentityTests {
         model.removeServer(withID: added.id)
 
         #expect(model.browser.server(withID: added.id) == nil)
-        // A fresh browser over the same store, which is what the next launch
-        // builds: a removal that only emptied the array in memory would bring
-        // the row back.
         #expect(QLabBrowser(defaults: defaults).server(withID: added.id) == nil)
     }
 
@@ -186,8 +160,6 @@ struct ServerIdentityTests {
 
         model.removeServer(withID: added.id)
 
-        // Otherwise the app would go on describing a session on a server that
-        // is no longer in the list.
         #expect(model.selection == nil)
         #expect(model.browser.server(withID: added.id) == nil)
     }

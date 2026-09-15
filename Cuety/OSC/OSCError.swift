@@ -1,35 +1,18 @@
 import Foundation
 
-/// A failure encountered while decoding an OSC packet.
-///
-/// Every case carries the byte offset at which the problem was found, because
-/// the Activity Log shows these to the user and "malformed packet" without a
-/// location is not actionable.
 nonisolated enum OSCDecodingError: Error, Hashable, Sendable {
-    /// The packet ended while more bytes were still required.
     case unexpectedEnd(offset: Int, needed: Int, available: Int)
-    /// An address pattern or string was not valid UTF-8.
     case invalidUTF8(offset: Int)
-    /// A string was not terminated by a null byte before the packet ended.
     case unterminatedString(offset: Int)
-    /// The packet's first byte was neither `/` (message) nor `#` (bundle).
     case notAPacket(offset: Int, firstByte: UInt8)
-    /// An address pattern did not begin with `/`.
     case invalidAddress(offset: Int, address: String)
-    /// The type tag string did not begin with `,`.
     case malformedTypeTagString(offset: Int)
-    /// A type tag character has no defined representation.
     case unknownTypeTag(offset: Int, tag: Character)
-    /// A bundle did not begin with the literal `#bundle`.
     case invalidBundleIdentifier(offset: Int)
-    /// A bundle element declared a size that overruns the enclosing bundle.
     case bundleElementOverrunsBuffer(offset: Int, declared: Int, remaining: Int)
-    /// A blob declared a size that overruns the packet.
     case blobOverrunsBuffer(offset: Int, declared: Int, remaining: Int)
-    /// A declared size was negative, which the wire format cannot express.
     case negativeSize(offset: Int, declared: Int32)
 
-    /// The byte offset the failure was detected at.
     var offset: Int {
         switch self {
         case .unexpectedEnd(let offset, _, _),
@@ -77,13 +60,7 @@ nonisolated extension OSCDecodingError: CustomStringConvertible {
     }
 }
 
-/// A failure in the SLIP framing layer.
 nonisolated enum SLIPFramingError: Error, Hashable, Sendable {
-    /// An unterminated frame exceeded ``SLIPFramer/maximumFrameSize``.
-    ///
-    /// Cuety fails the connection rather than continuing to buffer. F53OSC has
-    /// no such limit; this is a deliberate divergence so that a wedged or
-    /// hostile peer cannot grow our memory without bound.
     case frameTooLarge(bytesBuffered: Int, limit: Int)
 }
 

@@ -1,12 +1,10 @@
 import SwiftUI
 
-/// The headline display: the cue standing by at the playhead.
 struct CueDisplayView: View {
     @Environment(AppModel.self) private var model
 
-    /// The tracking applied to the display's small uppercase captions. One
-    /// value, so the caption above the number and the one below it read as the
-    /// same piece of typography.
+    @State private var headlineSizingCache = HeadlineSizingCache()
+
     private static let captionTracking: CGFloat = 1.2
 
     private var client: QLabClient { model.client }
@@ -14,7 +12,7 @@ struct CueDisplayView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let cue = liveCue {
+            if let cue = client.liveCue {
                 cueContent(cue)
             } else {
                 emptyState
@@ -22,27 +20,11 @@ struct CueDisplayView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .motion(Motion.cueChange, value: client.currentPlayheadCueID)
+        .onChange(of: headlineSizingInvalidationKey) { _, _ in
+            headlineSizingCache.invalidate()
+        }
     }
 
-    /// The cue at the playhead, and only while the session is live enough for
-    /// that to still be true.
-    ///
-    /// The client already discards its cue data on a drop, so this check is
-    /// redundant today — deliberately. A stale cue captioned "Standing By" on
-    /// a stage display is the worst thing this app can do, and the display
-    /// should not be one refactor of the networking layer away from doing it
-    /// again. The contract is enforced where it is visible.
-    private var liveCue: Cue? {
-        guard client.status.hasLiveData else { return nil }
-        return client.playheadCue
-    }
-
-    /// The name of the cue list the given cue actually sits in.
-    ///
-    /// Looked up in the cue tree rather than read off the cue, because
-    /// ``Cue/listName`` is the cue's own displayed name and not its list's.
-    /// The watched list is checked first: it is where the playhead cue lives
-    /// in every ordinary case, so the general search is the exception.
     private func cueListName(containing cue: Cue) -> String? {
         if let watchedID = client.watchedCueListID,
            let watched = client.cueLists.first(where: { $0.uniqueID == watchedID }),
@@ -52,7 +34,6 @@ struct CueDisplayView: View {
         return client.cueLists.cueList(containing: cue.uniqueID)?.displayName
     }
 
-    // MARK: - Cue content
 
     @ViewBuilder
     private func cueContent(_ cue: Cue) -> some View {
@@ -67,9 +48,6 @@ struct CueDisplayView: View {
                let name = cue.displayName {
                 Text(name)
                     .font(typography.cueName(size: model.isPresenting ? 40 : 28))
-                    // The colour the operator gave the cue in QLab, so the
-                    // colour-coding they already rely on carries through to the
-                    // display instead of stopping at QLab's window.
                     .foregroundStyle(cue.color ?? .secondary)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
@@ -93,8 +71,6 @@ struct CueDisplayView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// The number fills the space when there is one; an unnumbered cue promotes
-    /// its name into the headline slot rather than leaving it blank.
     @ViewBuilder
     private func numberOrName(_ cue: Cue) -> some View {
         if let number = cue.displayNumber {
@@ -105,17 +81,11 @@ struct CueDisplayView: View {
                 .accessibilityLabel("Cue number \(number)")
         } else if let name = cue.displayName {
             VStack(spacing: 6) {
-                // The same font as a cue number: this name is standing in for
-                // one, so it should not silently ignore the operator's choice
-                // of family the way a hardcoded system font did.
                 Text(name)
                     .font(typography.cueNumber)
                     .minimumScaleFactor(Typography.cueNumberMinimumScale)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
-                    // Still the cue's colour, but against `.primary` rather
-                    // than `.secondary`: here the name is the headline, so an
-                    // uncoloured cue must not read as subordinate to nothing.
                     .foregroundStyle(cue.color ?? .primary)
                     .transition(.blurReplace)
 
@@ -124,56 +94,41 @@ struct CueDisplayView: View {
             }
             .accessibilityLabel("Unnumbered cue, \(name)")
         } else {
-            // Standing in for a number, so sized like one.
             headline("—")
                 .foregroundStyle(.tertiary)
                 .accessibilityLabel("Cue with no number or name")
         }
     }
 
-    /// The headline number, set at one size for the whole cue list.
-    ///
-    /// The size fits the *widest* number the watched list can show here, and
-    /// every cue is then drawn at that size. `minimumScaleFactor` alone fits
-    /// whichever number happens to be standing by, which made the point size a
-    /// function of how many digits that cue had: the headline jumped between
-    /// sizes every time the playhead moved, on a display whose whole job is to
-    /// be read at a glance from the back of a room.
-    ///
-    /// The trade is deliberate — a one-digit cue no longer fills the window
-    /// edge to edge — and it buys a display that holds still.
     private func headline(_ text: String) -> some View {
-        // Resolved out here rather than inside the geometry closure: it walks
-        // the cue list, and the closure runs on every frame of a window
-        // resize. The reference number does not depend on the size anyway.
         let reference = referenceNumber(for: text)
 
-        // The space left after the captions, name and pills have taken theirs,
-        // which is what the number is being fitted to.
         return GeometryReader { geometry in
             Text(text)
                 .font(typography.cueNumber(
                     size: typography.cueNumberPointSize(fitting: reference, in: geometry.size)
                 ))
-                // A guard rather than the sizing mechanism it used to be: the
-                // size already fits every number in the list. It catches a
-                // custom family whose drawn width differs from the face
-                // ``Typography`` measured.
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
                 .frame(width: geometry.size.width, height: geometry.size.height)
         }
     }
 
-    /// The number the headline is sized for: the widest in the watched cue
-    /// list.
-    ///
-    /// `text` is in the running too. The playhead can sit on a cue from a list
-    /// Cuety is not watching, and a number that isn't in the reference set is a
-    /// number that would not fit.
+    private var headlineSizingInvalidationKey: HeadlineSizingInvalidationKey {
+        HeadlineSizingInvalidationKey(
+            cueListID: client.watchedCueListID,
+            cueNumbers: client.watchedGraph?.cueNumbers ?? [],
+            usesRounded: model.preferences.usesRoundedSystemFont,
+            fontWeight: model.preferences.fontWeight
+        )
+    }
+
     private func referenceNumber(for text: String) -> String {
-        let candidates = (client.watchedGraph?.cueNumbers ?? []) + [text]
-        return typography.widestCueNumber(among: candidates) ?? text
+        headlineSizingCache.referenceNumber(
+            for: text,
+            cueNumbers: client.watchedGraph?.cueNumbers ?? [],
+            typography: typography
+        )
     }
 
     private var standingByCaption: some View {
@@ -196,27 +151,10 @@ struct CueDisplayView: View {
             .tracking(Self.captionTracking)
     }
 
-    // MARK: - Empty states
-    //
-    // Five genuinely different situations, each with its own explanation.
-    // Collapsing them would leave the operator guessing which one they are in.
-    // All are `ContentUnavailableView`, so "nothing to show" always looks the
-    // same however Cuety got there.
-    //
-    // The three that used to be one message are the last three: a cue list
-    // nobody has asked about yet, one whose playhead query failed, and one
-    // that genuinely has nothing standing by. Only the last is "the playhead
-    // is not set" — saying that about the other two claims knowledge Cuety
-    // does not have, on a display whose whole job is being trustworthy.
 
     @ViewBuilder
     private var emptyState: some View {
         if !client.status.hasLiveData {
-            // Presentation mode hides the toolbar, and with it the status
-            // glyph that would otherwise be the operator's first sign of a
-            // drop. `ContentUnavailableView` is metricked for a window someone
-            // is sitting in front of, which is exactly not the case here, so
-            // stage mode states the loss at its own scale instead.
             if model.isPresenting {
                 presentedStatusState
             } else {
@@ -239,27 +177,19 @@ struct CueDisplayView: View {
                 Text("Choose a cue list in the sidebar to follow its playhead.")
             }
         } else if case .unknown(let reason) = client.watchedPlayhead {
-            // The query failed. Cuety does not know where the playhead is,
-            // which is emphatically not the same as knowing there is no cue
-            // standing by — and this used to say the latter.
             ContentUnavailableView {
                 Label("Playhead Unknown", systemImage: "questionmark.circle")
             } description: {
                 Text("Cuety could not read the playhead of this cue list. \(reason)")
             }
         } else if client.watchedPlayhead == nil {
-            // Asked for, not yet answered. A brief state during connection,
-            // and a lasting one if a refresh was cancelled partway.
             ContentUnavailableView {
                 Label("Waiting for QLab", systemImage: "progress.indicator")
             } description: {
                 Text("Cuety has not heard back about this cue list's playhead yet.")
             }
         } else {
-            // The playhead is genuinely unset: QLab answered, and nothing is
-            // standing by. A real state, not an error.
             ContentUnavailableView {
-                // The same glyph the drawer marks the playhead with.
                 Label("No Cue Standing By", systemImage: "arrowtriangle.right")
             } description: {
                 Text("The playhead in this cue list is not set.")
@@ -267,11 +197,6 @@ struct CueDisplayView: View {
         }
     }
 
-    /// The connection state at stage-display scale.
-    ///
-    /// Sized to be read from wherever the display is being watched from, and
-    /// tinted with the status's own colour so it cannot disagree with the
-    /// toolbar glyph the operator sees on leaving presentation mode.
     private var presentedStatusState: some View {
         VStack(spacing: 24) {
             Image(systemName: client.status.systemImage)
@@ -280,8 +205,6 @@ struct CueDisplayView: View {
                 .foregroundStyle(client.status.tint)
 
             VStack(spacing: 10) {
-                // The operator's chosen family, as the cue name uses: this is
-                // standing in for the headline, not annotating it.
                 Text(client.status.title)
                     .font(typography.cueName(size: 48))
                     .lineLimit(2)
@@ -300,6 +223,41 @@ struct CueDisplayView: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(client.status.title). \(client.status.detail)")
     }
+}
+
+@MainActor
+private final class HeadlineSizingCache {
+    private struct Inputs: Equatable {
+        let cueNumbers: [String]
+        let text: String
+    }
+
+    private var inputs: Inputs?
+    private var cachedReference: String?
+
+    func referenceNumber(for text: String, cueNumbers: [String], typography: Typography) -> String {
+        let inputs = Inputs(cueNumbers: cueNumbers, text: text)
+        if self.inputs == inputs, let cachedReference {
+            return cachedReference
+        }
+
+        let reference = typography.widestCueNumber(among: cueNumbers + [text]) ?? text
+        self.inputs = inputs
+        cachedReference = reference
+        return reference
+    }
+
+    func invalidate() {
+        inputs = nil
+        cachedReference = nil
+    }
+}
+
+private struct HeadlineSizingInvalidationKey: Equatable {
+    let cueListID: String?
+    let cueNumbers: [String]
+    let usesRounded: Bool
+    let fontWeight: FontWeightChoice
 }
 
 #Preview {

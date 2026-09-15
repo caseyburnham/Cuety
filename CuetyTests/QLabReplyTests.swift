@@ -3,17 +3,13 @@ import Testing
 
 @testable import Cuety
 
-/// The JSON contract with QLab: reply envelopes and cue payloads.
 @Suite("QLab replies")
 struct QLabReplyTests {
 
-    /// Wraps a JSON body the way QLab does: one string argument on a
-    /// `/reply/…` address.
     private func replyMessage(address: String, json: String) -> OSCMessage {
         OSCMessage("/reply" + address, [.string(json)])
     }
 
-    // MARK: - Envelope
 
     @Test("Decodes an ok reply with a string payload")
     func decodesStringPayload() throws {
@@ -30,7 +26,6 @@ struct QLabReplyTests {
         #expect(reply.data == "ok")
     }
 
-    // MARK: - Correlation keys
 
     @Test(
         "Strips the workspace prefix when building a correlation key",
@@ -39,7 +34,6 @@ struct QLabReplyTests {
             ("/cueLists", "/cueLists"),
             ("/workspace/ABC/cue_id/XYZ/playbackPositionId", "/cue_id/XYZ/playbackPositionId"),
             ("/cue_id/XYZ/playbackPositionId", "/cue_id/XYZ/playbackPositionId"),
-            // Not a workspace address, so it must survive untouched.
             ("/workspaces", "/workspaces"),
             ("/workspace/ABC", "/workspace/ABC"),
         ]
@@ -57,14 +51,12 @@ struct QLabReplyTests {
             QLabReplyParser.correlationKey(for: sent)
                 == QLabReplyParser.correlationKey(for: echoedWithout)
         )
-        // Two different cues must still not collide.
         #expect(
             QLabReplyParser.correlationKey(for: sent)
                 != QLabReplyParser.correlationKey(for: "/cue_id/OTHER/playbackPositionId")
         )
     }
 
-    // MARK: - Connect access levels
 
     @Test(
         "Reads the access level from a connect reply",
@@ -73,9 +65,7 @@ struct QLabReplyTests {
             ("ok:view", .view),
             ("ok:control", .control),
             ("ok:edit", .edit),
-            // A tier added by a later QLab must connect, not be rejected.
             ("ok:supervise", .other("supervise")),
-            // A trailing colon is still an acceptance, just an unnamed level.
             ("ok:", .other("")),
         ]
     )
@@ -102,8 +92,6 @@ struct QLabReplyTests {
         #expect(reply.data == "badpass")
     }
 
-    /// `denied` means either "not connected yet" or "this passcode lacks the
-    /// privilege", and must not be mistaken for success.
     @Test("Decodes a denied reply")
     func decodesDenied() throws {
         let message = replyMessage(
@@ -128,8 +116,6 @@ struct QLabReplyTests {
         #expect(reply.status == .error)
     }
 
-    /// An unrecognised status must round-trip rather than being coerced to
-    /// success, so a future QLab can't accidentally look healthy.
     @Test("Preserves an unknown status")
     func preservesUnknownStatus() throws {
         let message = replyMessage(
@@ -142,7 +128,6 @@ struct QLabReplyTests {
         #expect(!reply.status.isSuccess)
     }
 
-    // MARK: - Workspaces
 
     @Test("Decodes the /workspaces payload")
     func decodesWorkspaces() throws {
@@ -163,7 +148,6 @@ struct QLabReplyTests {
         #expect(workspaces[0].version == "5.4.6")
     }
 
-    /// Older or partial QLab builds omit fields; absent must not be fatal.
     @Test("Tolerates a workspace payload missing optional fields")
     func tolerantWorkspaceDecoding() throws {
         let json = #"{"address":"/workspaces","status":"ok","data":[{"uniqueID":"AAA","displayName":"Show"}]}"#
@@ -175,17 +159,7 @@ struct QLabReplyTests {
         #expect(workspace.version == nil)
     }
 
-    // MARK: - Cue lists
 
-    /// A cue-list payload spelling `listName` the way QLab actually does.
-    ///
-    /// `listName` is the cue's *own displayed name* in the list, not the name
-    /// of the list containing it. The fixture used to set it to "Main Cue
-    /// List" on every cue, which is what let the Cue List pill read it as the
-    /// containing list and still pass its tests.
-    ///
-    /// `cue-3` is the interesting one: an audio cue the operator never named,
-    /// so QLab supplies the file as its display name.
     private static let cueListsJSON = """
     {"address":"/workspace/ABC/cueLists","status":"ok","data":[
       {"uniqueID":"list-1","name":"Main Cue List","type":"Cue List","cues":[
@@ -241,18 +215,12 @@ struct QLabReplyTests {
         )
         let lists = try #require(QLabReplyParser.parse(message, as: [Cue].self).data)
 
-        // A top-level cue, a cue nested inside a group, and a cue in a second
-        // list. Under the old interpretation the first two would both have
-        // reported "House to Half" and "Thunder" as their cue lists.
         #expect(lists.cueList(containing: "cue-1")?.displayName == "Main Cue List")
         #expect(lists.cueList(containing: "cue-2")?.displayName == "Main Cue List")
         #expect(lists.cueList(containing: "cue-4")?.displayName == "Effects")
 
-        // The group reports the list, not itself.
         #expect(lists.cueList(containing: "grp-1")?.uniqueID == "list-1")
 
-        // A cue QLab has never heard of belongs to no list, rather than
-        // silently defaulting to one.
         #expect(lists.cueList(containing: "nope") == nil)
     }
 
@@ -265,14 +233,11 @@ struct QLabReplyTests {
         let named = try #require(lists.firstCue(withID: "cue-1"))
         let unnamed = try #require(lists.firstCue(withID: "cue-3"))
 
-        // The operator's own name always wins.
         #expect(named.displayName == "House to Half")
-        // With no name of their own, QLab's display name beats "Untitled".
         #expect(unnamed.name?.isEmpty == true)
         #expect(unnamed.displayName == "rain-loop.wav")
     }
 
-    /// Unnumbered cues are legal in QLab, and the display has to cope.
     @Test("Handles a cue with no number")
     func handlesUnnumberedCue() throws {
         let json = #"{"address":"/x","status":"ok","data":[{"uniqueID":"c","name":"Untitled"}]}"#
@@ -285,8 +250,6 @@ struct QLabReplyTests {
         #expect(cue.displayName == "Untitled")
     }
 
-    /// A number that is present but whitespace is as good as absent, and must
-    /// not render as a blank headline.
     @Test("Treats a whitespace-only number as absent")
     func whitespaceNumberIsAbsent() throws {
         let json = #"{"address":"/x","status":"ok","data":[{"uniqueID":"c","number":"   "}]}"#
@@ -298,7 +261,6 @@ struct QLabReplyTests {
         #expect(cue.displayNumber == nil)
     }
 
-    // MARK: - valuesForKeys
 
     @Test("Decodes and merges valuesForKeys into a nested cue")
     func mergesValuesForKeys() throws {
@@ -316,7 +278,6 @@ struct QLabReplyTests {
         #expect(values.duration == 4.25)
         #expect(values.continueMode == 1)
 
-        // Merge into a tree, targeting a cue nested inside a group.
         var lists: [Cue] = {
             var group = Cue(uniqueID: "grp-1")
             group.children = [Cue(uniqueID: "cue-2")]
@@ -325,8 +286,6 @@ struct QLabReplyTests {
             return [list]
         }()
 
-        // The mutating call happens outside `#expect`: the macro captures its
-        // operand immutably.
         let didMerge = lists.applyValues(values, toCueWithID: "cue-2")
         #expect(didMerge)
 
@@ -348,10 +307,7 @@ struct QLabReplyTests {
         #expect(!didMerge)
     }
 
-    // MARK: - Correlation
 
-    /// Correlation runs off the echoed `address` field, because the `/reply/…`
-    /// OSC address sometimes drops the workspace prefix.
     @Test("Correlates on the echoed address field")
     func correlatesOnEchoedAddress() {
         let message = replyMessage(
@@ -361,8 +317,6 @@ struct QLabReplyTests {
         #expect(QLabReplyParser.correlationAddress(of: message) == "/workspace/ABC/cueLists")
     }
 
-    /// When the body is unreadable, fall back to the OSC address so the request
-    /// still fails fast instead of waiting for its timeout.
     @Test("Falls back to the OSC address when the body is unreadable")
     func fallsBackToOSCAddress() {
         let message = OSCMessage("/reply/workspace/ABC/thump", [.string("not json at all")])
@@ -376,7 +330,6 @@ struct QLabReplyTests {
         #expect(!QLabReplyParser.isReply(OSCMessage("/workspace/ABC/thump")))
     }
 
-    // MARK: - Failure modes
 
     @Test("Rejects a non-reply message")
     func rejectsNonReply() {
@@ -405,8 +358,6 @@ struct QLabReplyTests {
         }
     }
 
-    /// A payload of the wrong shape must fail the one request, with a readable
-    /// reason for the inspector — not crash and not silently return nil.
     @Test("Rejects a payload of the wrong shape")
     func rejectsWrongShapePayload() throws {
         let message = replyMessage(

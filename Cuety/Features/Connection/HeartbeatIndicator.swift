@@ -1,41 +1,15 @@
 import SwiftUI
 
-/// The heartbeat glyph: beats once per received `/thump`.
-///
-/// The connection inspector's Health section. It used to report a bare count
-/// instead — a number that tells you how many heartbeats have arrived but not
-/// whether one is arriving *now*, which is the question being asked.
-///
-/// The toolbar shows the same readout through ``ToolbarGlyph``, which draws
-/// the same symbol the same way inside an AppKit button. The two cannot
-/// disagree about whether Cuety is hearing anything, because the glyph, the
-/// tint and the phrasing all come from ``QLabClient`` below rather than from
-/// either call site.
-///
-/// Carries no tooltip or accessibility label of its own: the toolbar's tooltip
-/// has a window to name as well as a heartbeat to describe, so each call site
-/// composes its own from ``QLabClient/heartbeatSummary``.
 struct HeartbeatIndicator: View {
     @Environment(AppModel.self) private var model
 
     private var client: QLabClient { model.client }
 
-    /// Whether there's a session that could produce a heartbeat at all.
     private var isLive: Bool { client.status.hasLiveData }
 
     var body: some View {
-        // Driven off the heartbeat *count* rather than a timer, so it is a true
-        // report of the link: when QLab stops answering, the glyph visibly
-        // stops moving instead of continuing to animate reassuringly.
-        //
-        // With no session it shows a struck-through heart, which is a more
-        // honest readout than an empty space — the operator can see the app
-        // isn't hearing anything, rather than wonder where the indicator went.
         Image(systemName: client.heartbeatSymbol)
             .foregroundStyle(client.heartbeatTint)
-            // Magic replace keeps the heart itself put and draws the slash
-            // across it, so losing the connection reads as this indicator going
-            // quiet rather than as one glyph swapped for another.
             .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp)))
             .symbolEffect(
                 .bounce,
@@ -47,26 +21,15 @@ struct HeartbeatIndicator: View {
 }
 
 extension QLabClient {
-    /// The heartbeat glyph.
-    ///
-    /// With no session it is a struck-through heart, which is a more honest
-    /// readout than an empty space — the operator can see the app isn't
-    /// hearing anything, rather than wonder where the indicator went.
     var heartbeatSymbol: String {
         status.hasLiveData ? "heart.fill" : "heart.slash.fill"
     }
 
-    /// The heartbeat glyph's colour.
     var heartbeatTint: Color {
         guard status.hasLiveData else { return .secondary }
         return missedThumps > 0 ? .orange : .pink
     }
 
-    /// A sentence describing the heartbeat, including the running total.
-    ///
-    /// Presentation on the client for the same reason ``ConnectionStatus``
-    /// carries its own phrasing: the toolbar glyph and the inspector describe
-    /// one fact, and writing it twice is how they come to disagree.
     var heartbeatSummary: String {
         guard status.hasLiveData else { return "Not receiving heartbeats from QLab." }
         var text = "Receiving heartbeats from QLab."

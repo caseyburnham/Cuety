@@ -3,8 +3,6 @@ import Testing
 
 @testable import Cuety
 
-/// Launch and teardown ownership: the launch sequence runs once, and stops
-/// when the operator says stop.
 @Suite("App model lifecycle")
 @MainActor
 struct AppModelLifecycleTests {
@@ -21,10 +19,6 @@ struct AppModelLifecycleTests {
         return AppModel(preferences: preferences)
     }
 
-    /// Addresses from the documentation range, which cannot be routed.
-    ///
-    /// A probe against one parks until the request timeout, which is how a
-    /// test gets a refresh to stay in flight long enough to do something to it.
     private static let unroutableHost = "192.0.2.1"
     private static let otherUnroutableHost = "192.0.2.2"
 
@@ -36,10 +30,6 @@ struct AppModelLifecycleTests {
         model.start()
         let first = try #require(model.startupTask)
 
-        // The second and third calls are what a reopened window does. Under a
-        // `WindowGroup` every main window ran this, and each one started an
-        // untracked task that restarted discovery and could reconnect the
-        // session all of them shared.
         model.start()
         model.start()
 
@@ -48,10 +38,6 @@ struct AppModelLifecycleTests {
 
     @Test("Disconnecting stops the launch reconnect")
     func disconnectCancelsAutoConnect() throws {
-        // Auto-connect polls for ten seconds and stands down once a workspace
-        // is selected. `disconnect()` clears the selection, which on its own
-        // reads as "nothing chosen yet" — so without cancellation the poll
-        // would hand the show back to the workspace just left.
         let model = try makeModel(
             autoConnect: true,
             lastWorkspace: WorkspaceSelection(serverID: "S", workspaceID: "W")
@@ -70,9 +56,6 @@ struct AppModelLifecycleTests {
     func idleAvailability() throws {
         let model = try makeModel()
 
-        // The three surfaces that offer connection actions — the Connection
-        // menu, the sidebar, and the connection inspector — read these and
-        // nothing else, so agreeing here is agreeing everywhere.
         #expect(!model.canDisconnect)
         #expect(model.canConnect)
         #expect(model.canRefresh)
@@ -87,14 +70,6 @@ struct AppModelLifecycleTests {
 
         await model.refresh()
 
-        // Launch used to skip This Mac deliberately, so the most common setup
-        // of all — QLab on this machine — required clicking Check for
-        // Workspaces before Cuety would look at the Mac it was running on,
-        // while every Bonjour server was probed unasked.
-        //
-        // Whether the probe *succeeds* depends on whether QLab happens to be
-        // running here, which is not this test's business. That it was asked
-        // at all is.
         #expect(model.browser.server(withID: localhostID)?.hasBeenProbed == true)
     }
 
@@ -102,20 +77,12 @@ struct AppModelLifecycleTests {
     func serversFoundMidRefreshAreProbed() async throws {
         let model = try makeModel(requestTimeout: 1)
 
-        // Something slow to probe, so the refresh is still working when the
-        // new server turns up. `Task { }` only *schedules* the refresh, so
-        // without this the addition below would land before the refresh body
-        // ran at all — and the test would pass against the snapshotting
-        // version it is meant to catch.
         let blocking = model.browser.addManualServer(host: Self.unroutableHost, port: 53000)
 
         let refreshing = Task { await model.refresh() }
         try await Task.sleep(for: .milliseconds(200))
         try #require(model.isRefreshing)
 
-        // Stands in for Bonjour reporting a machine partway through, which is
-        // the ordinary case: discovery is asynchronous and `restartBrowsing()`
-        // deliberately re-asks the network.
         let late = model.browser.addManualServer(
             host: Self.otherUnroutableHost, port: 53000
         )
@@ -123,9 +90,6 @@ struct AppModelLifecycleTests {
 
         await refreshing.value
 
-        // Asked at all is the claim. Whether it answered depends on there
-        // being a QLab at that address, which is not this test's business —
-        // and there is not, by construction.
         #expect(model.browser.server(withID: late.id)?.hasBeenProbed == true)
         #expect(model.browser.server(withID: blocking.id)?.hasBeenProbed == true)
     }
@@ -134,11 +98,6 @@ struct AppModelLifecycleTests {
     func refreshIsNotLockedOutByItself() throws {
         let model = try makeModel()
 
-        // One unreachable server costs a full request timeout and they are
-        // probed one after another, so a refresh can run for a long time.
-        // Refusing for the duration left the operator watching a sidebar they
-        // could see was stale and could do nothing about — pressing it again
-        // now supersedes the pass in progress.
         let refreshing = Task { await model.refresh() }
         defer { refreshing.cancel() }
 
@@ -156,15 +115,12 @@ struct AppModelLifecycleTests {
         let startup = try #require(model.startupTask)
         model.disconnect()
 
-        // Reopening the window after disconnecting must not resurrect the
-        // launch reconnect the operator just cancelled.
         model.start()
 
         #expect(model.startupTask == startup)
         #expect(startup.isCancelled)
     }
 
-    // MARK: - Presentation mode
 
     @Test("Leaving presentation mode restores the sidebar it collapsed")
     func presentationRestoresTheSidebar() throws {
@@ -182,9 +138,6 @@ struct AppModelLifecycleTests {
 
     @Test("A sidebar collapsed before presenting stays collapsed afterwards")
     func presentationRestoresACollapsedSidebar() throws {
-        // The other direction of the same guarantee, and the one a single
-        // `Bool` makes worth stating: restoring must put back what was there,
-        // not reveal a sidebar the operator had deliberately hidden.
         let model = try makeModel()
         model.isSidebarVisible = false
 
@@ -196,14 +149,6 @@ struct AppModelLifecycleTests {
 
     @Test("A window already presenting does not overwrite the sidebar to restore")
     func redundantPresentingIsIgnored() throws {
-        // ``FullScreenPresentation`` reports the window's full-screen state
-        // whoever caused it, so the state Cuety is already in gets reported
-        // back to it as a matter of course — by the `did` notification for the
-        // transition Cuety asked for itself, among others.
-        //
-        // Without the guard in `setPresenting`, that second call would save
-        // `.detailOnly` as the visibility to restore, and the sidebar would
-        // never come back from presentation mode.
         let model = try makeModel()
         model.isSidebarVisible = true
 

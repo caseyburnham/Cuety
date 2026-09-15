@@ -1,9 +1,6 @@
 import SwiftUI
 
-/// Settings that affect the app as a whole rather than any one view.
 struct GeneralSettingsView: View {
-    /// The height this pane needs to show everything without scrolling.
-    /// Applied by ``SettingsView``; measured, not guessed.
     static let settingsHeight: CGFloat = 535
 
     @Environment(AppModel.self) private var model
@@ -19,16 +16,10 @@ struct GeneralSettingsView: View {
                     }
                 }
             } footer: {
-                // Section footers in a grouped Form are already set as
-                // secondary caption text; restyling them by hand only risks
-                // disagreeing with the system.
                 Text("Automatic follows the system setting. A dark display is usually the right choice in a booth.")
             }
 
             Section {
-                // Routed through the model rather than bound straight to the
-                // preference: flipping this has to tell the sleep blocker as
-                // well, or the setting and the actual assertion drift apart.
                 Toggle("Keep the display awake", isOn: Binding(
                     get: { model.preferences.keepsDisplayAwake },
                     set: { _ in model.toggleKeepAwake() }

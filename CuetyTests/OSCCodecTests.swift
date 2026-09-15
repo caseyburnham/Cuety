@@ -8,9 +8,7 @@ struct OSCCodecTests {
     let encoder = OSCEncoder()
     let decoder = OSCDecoder()
 
-    // MARK: - Round trips
 
-    /// Every argument type must survive an encode/decode cycle unchanged.
     @Test(
         "Round-trips every argument type",
         arguments: [
@@ -74,9 +72,7 @@ struct OSCCodecTests {
         #expect(decoded == .message(message))
     }
 
-    // MARK: - Alignment
 
-    /// Everything OSC puts on the wire is a multiple of four bytes.
     @Test("Encoded packets are always 4-byte aligned", arguments: 0...16)
     func encodedPacketsAreAligned(addressLength: Int) throws {
         let address = "/" + String(repeating: "a", count: addressLength)
@@ -89,8 +85,6 @@ struct OSCCodecTests {
         #expect(try decoder.decode(encoded) == .message(message))
     }
 
-    /// A string whose length is already a multiple of four still gets a full
-    /// four bytes of padding, because the null terminator is mandatory.
     @Test("Aligned-length strings gain full padding")
     func alignedStringsGainFullPadding() {
         var data = Data()
@@ -106,7 +100,6 @@ struct OSCCodecTests {
         #expect(data == Data([0, 0, 0, 0]))
     }
 
-    /// Blob padding pads the contents, not the length prefix.
     @Test(
         "Blob encoding pads contents to a 4-byte boundary",
         arguments: [(0, 4), (1, 8), (2, 8), (3, 8), (4, 8), (5, 12)]
@@ -117,7 +110,6 @@ struct OSCCodecTests {
         #expect(data.count == expectedTotal)
     }
 
-    // MARK: - Bundles
 
     @Test("Round-trips a bundle of messages")
     func roundTripsBundle() throws {
@@ -152,8 +144,6 @@ struct OSCCodecTests {
         }
     }
 
-    /// F53OSC checks that a declared element length fits the enclosing bundle.
-    /// Without this, a corrupt length reads past the end of the packet.
     @Test("Rejects a bundle element that overruns the buffer")
     func rejectsOverrunningBundleElement() {
         var data = Data()
@@ -179,11 +169,6 @@ struct OSCCodecTests {
         }
     }
 
-    // MARK: - Malformed input
-    //
-    // These all mirror `F53OSCParser`'s validation. The contract is that a bad
-    // packet throws a typed error the caller can log — never a crash, and never
-    // a silently wrong result.
 
     @Test("Rejects a packet that is neither a message nor a bundle")
     func rejectsNonPacket() {
@@ -218,7 +203,6 @@ struct OSCCodecTests {
         }
     }
 
-    /// An unknown tag has an unknown width, so parsing cannot continue past it.
     @Test("Rejects an unknown type tag")
     func rejectsUnknownTypeTag() {
         var data = Data()
@@ -270,7 +254,6 @@ struct OSCCodecTests {
 
     @Test("Rejects an address that does not begin with a slash")
     func rejectsAddressWithoutLeadingSlash() {
-        // Craft it by hand: the encoder would trip its own precondition.
         var data = Data()
         data.appendOSCString("#notbundle/x")
 
@@ -284,7 +267,6 @@ struct OSCCodecTests {
         var data = Data()
         data.appendOSCString("/test")
         data.appendOSCString(",s")
-        // 0xFF is never valid in UTF-8.
         data.append(contentsOf: [0xFF, 0xFE, 0x00, 0x00])
 
         #expect(throws: OSCDecodingError.self) {
@@ -292,8 +274,6 @@ struct OSCCodecTests {
         }
     }
 
-    /// Decoding errors carry a byte offset, because "malformed packet" with no
-    /// location is not actionable in the Activity Log.
     @Test("Decoding errors report a byte offset")
     func errorsCarryOffset() throws {
         var data = Data()
@@ -307,7 +287,6 @@ struct OSCCodecTests {
         #expect(!error.description.isEmpty)
     }
 
-    // MARK: - Address handling
 
     @Test(
         "Validates outgoing addresses",
@@ -334,7 +313,6 @@ struct OSCCodecTests {
         ])
     }
 
-    // MARK: - Value accessors
 
     @Test("Reads booleans from both tag-only and numeric forms")
     func readsBooleans() {
@@ -352,7 +330,6 @@ struct OSCCodecTests {
         #expect(OSCValue.int32(1).stringValue == nil)
     }
 
-    // MARK: - Time tags
 
     @Test("Time tag survives a date round trip within a millisecond")
     func timeTagRoundTrip() throws {
@@ -367,7 +344,6 @@ struct OSCCodecTests {
         #expect(OSCTimeTag.immediate.date == nil)
     }
 
-    /// A bad system clock must not be able to trap the app.
     @Test("Pre-1900 dates clamp instead of trapping")
     func prehistoricDatesClamp() {
         let ancient = Date(timeIntervalSince1970: -3_000_000_000)

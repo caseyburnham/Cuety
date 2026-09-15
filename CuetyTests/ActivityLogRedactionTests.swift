@@ -3,12 +3,6 @@ import Testing
 
 @testable import Cuety
 
-/// The Activity Log must not become a plaintext copy of the operator's
-/// workspace passcode.
-///
-/// Every assertion here is about *retention*, not rendering: the log is
-/// searchable, inspectable and copyable, so a secret that reaches storage has
-/// already leaked into three surfaces at once.
 @Suite("Activity log redaction")
 @MainActor
 struct ActivityLogRedactionTests {
@@ -26,8 +20,6 @@ struct ActivityLogRedactionTests {
 
         #expect(!event.arguments.contains(Self.passcode))
         #expect(event.arguments.contains(OSCRedaction.placeholder))
-        // The address still says what happened, which is the point of keeping
-        // the entry at all.
         #expect(event.address == "/workspace/ABC/connect")
     }
 
@@ -37,7 +29,6 @@ struct ActivityLogRedactionTests {
             message: connectMessage(), direction: .outbound, byteCount: 44
         )
 
-        // The clipboard is the surface most likely to end up in a bug report.
         #expect(!event.copyableDescription.contains(Self.passcode))
         #expect(event.copyableDescription.contains(OSCRedaction.placeholder))
     }
@@ -50,8 +41,6 @@ struct ActivityLogRedactionTests {
 
         log.record(OSCEvent(message: message, direction: .outbound, byteCount: wireSize))
 
-        // Redaction is a display concern. Reporting the placeholder's length
-        // would quietly understate the traffic in the connection inspector.
         #expect(log.bytesSent == wireSize)
         #expect(log.entries.count == 1)
         #expect(log.entries[0].byteCount == wireSize)
@@ -61,8 +50,6 @@ struct ActivityLogRedactionTests {
     func logHoldsNoPasscode() {
         let log = ActivityLog()
         log.record(OSCEvent(message: connectMessage(), direction: .outbound, byteCount: 44))
-        // QLab's answer names the tier it granted, never the credential — but
-        // assert it rather than assume it.
         log.record(OSCEvent(
             message: OSCMessage("/reply/workspace/ABC/connect", [.string(
                 #"{"address":"/workspace/ABC/connect","status":"ok","data":"ok:view"}"#
@@ -78,8 +65,6 @@ struct ActivityLogRedactionTests {
         }
     }
 
-    /// The rule has to stay narrow: an over-eager one would blank the very
-    /// arguments an operator opens the log to read.
     @Test("Messages that carry no credential are logged verbatim", arguments: [
         OSCMessage("/workspaces"),
         OSCMessage("/updates", [.true]),
@@ -94,9 +79,6 @@ struct ActivityLogRedactionTests {
 
     @Test("A connect message with no arguments is left alone")
     func passcodelessConnectIsUntouched() {
-        // An unprotected workspace sends `connect` with nothing attached.
-        // There is no secret to hide, and inventing a placeholder would claim
-        // a passcode was used when none was.
         let message = OSCMessage("/workspace/ABC/connect")
 
         #expect(OSCRedaction.redacting(message) == message)

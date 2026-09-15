@@ -3,18 +3,10 @@ import Testing
 
 @testable import Cuety
 
-/// SLIP framing conformance.
-///
-/// The behaviours asserted here are taken from Figure 53's own
-/// `F53OSCParser.translateSlipData:toData:withState:destination:`, since F53OSC
-/// defines what QLab actually puts on the wire. Where Cuety deliberately
-/// diverges — the frame size cap — that is called out on the test.
 @Suite("SLIP framing")
 struct SLIPCodecTests {
 
-    // MARK: - Constants
 
-    /// RFC 1055 defines these as octal 300, 333, 334, 335.
     @Test("Uses the RFC 1055 constants")
     func constants() {
         #expect(SLIPCodec.end == 0o300)
@@ -23,7 +15,6 @@ struct SLIPCodecTests {
         #expect(SLIPCodec.escEsc == 0o335)
     }
 
-    // MARK: - Encoding
 
     @Test("Wraps payloads in the double-END form QLab documents")
     func encodesWithDoubleEnd() {
@@ -47,8 +38,6 @@ struct SLIPCodecTests {
         ]))
     }
 
-    /// `ESC_END` and `ESC_ESC` are only special *after* an `ESC`; on their own
-    /// they are ordinary payload bytes and must not be escaped.
     @Test("Leaves ESC_END and ESC_ESC alone when not preceded by ESC")
     func doesNotEscapeEscapeOperands() {
         let payload = Data([SLIPCodec.escEnd, SLIPCodec.escEsc])
@@ -58,14 +47,7 @@ struct SLIPCodecTests {
         ]))
     }
 
-    // MARK: - Round trips
 
-    /// Payloads chosen to exercise every escaping path, including a run of
-    /// every possible byte value.
-    ///
-    /// Held as an explicitly typed constant rather than inlined into the
-    /// `@Test` attribute: as a literal it is slow enough to type-check that the
-    /// compiler gives up.
     static let escapingPayloads: [Data] = {
         let allByteValues = Data(Array(UInt8.min...UInt8.max))
         return [
@@ -101,11 +83,6 @@ struct SLIPCodecTests {
         #expect(try OSCDecoder().decode(frame) == .message(message))
     }
 
-    // MARK: - Empty frames
-    //
-    // F53OSC's `processOscData:` returns early on `length == 0`. Dropping
-    // zero-length frames is the single mechanism that makes double-END and
-    // single-END senders parse identically, with no version flag.
 
     @Test("Discards zero-length frames")
     func discardsEmptyFrames() throws {
@@ -119,11 +96,8 @@ struct SLIPCodecTests {
     func singleEndFramingIsEquivalent() throws {
         let payload = Data([0x2F, 0x61, 0x00, 0x00])
 
-        // Double-END: delimiter on both sides.
         let double = try SLIPCodec.decodeAll(SLIPCodec.encode(payload))
 
-        // Single-END: trailing delimiter only, as older QLab builds were
-        // reported to send.
         var single = payload
         single.append(SLIPCodec.end)
         let singleFrames = try SLIPCodec.decodeAll(single)
@@ -144,10 +118,6 @@ struct SLIPCodecTests {
         #expect(frames == [Data([0x01]), Data([0x02]), Data([0x03])])
     }
 
-    // MARK: - Partial reads
-    //
-    // TCP gives no alignment guarantees, so the decoder must carry state
-    // across reads — including F53OSC's `dangling_ESC` case.
 
     @Test("Withholds a frame until its delimiter arrives")
     func withholdsIncompleteFrame() throws {
@@ -163,25 +133,19 @@ struct SLIPCodecTests {
         #expect(decoder.bufferedByteCount == 0)
     }
 
-    /// The `dangling_ESC` case: a read boundary falling between `ESC` and the
-    /// byte it escapes.
     @Test("Carries a dangling ESC across a read boundary")
     func carriesDanglingEscape() throws {
         var decoder = SLIPCodec.Decoder()
 
-        // First read ends on the ESC byte itself.
         let first = try decoder.decode([SLIPCodec.esc])
         #expect(first.isEmpty)
         #expect(decoder.hasDanglingEscape)
 
-        // Second read supplies the operand and the delimiter.
         let second = try decoder.decode([SLIPCodec.escEnd, SLIPCodec.end])
         #expect(second == [Data([SLIPCodec.end])])
         #expect(!decoder.hasDanglingEscape)
     }
 
-    /// Feeding a stream one byte at a time is the harshest fragmentation
-    /// possible, and must produce exactly the same frames as one bulk read.
     @Test("Decodes identically when fed one byte at a time")
     func decodesByteByByte() throws {
         let payloads = [
@@ -218,15 +182,9 @@ struct SLIPCodecTests {
         }
     }
 
-    // MARK: - Leniency
-    //
-    // F53OSC appends the byte "as-is" when an ESC is followed by something
-    // other than ESC_END or ESC_ESC. Cuety matches that: lenient about what it
-    // accepts, strict about what it sends.
 
     @Test("Treats an invalid escape sequence as a literal byte")
     func lenientOnInvalidEscape() throws {
-        // ESC followed by 'A', which is neither ESC_END nor ESC_ESC.
         let frames = try SLIPCodec.decodeAll(Data([
             SLIPCodec.end, SLIPCodec.esc, 0x41, 0x42, SLIPCodec.end,
         ]))
@@ -243,10 +201,6 @@ struct SLIPCodecTests {
         #expect(frames.last == Data([0x99]))
     }
 
-    // MARK: - Frame size cap
-    //
-    // A deliberate divergence: F53OSC has no limit. Cuety caps buffering so a
-    // peer that never sends a delimiter cannot grow our memory without bound.
 
     @Test("Throws once an undelimited frame exceeds the cap")
     func enforcesFrameSizeCap() {
@@ -280,8 +234,6 @@ struct SLIPCodecTests {
         #expect(!error.description.isEmpty)
     }
 
-    /// After the cap trips the decoder is reset, so a caller that chooses to
-    /// keep going is not stuck permanently over the limit.
     @Test("Resets after the cap trips")
     func resetsAfterCap() throws {
         var decoder = SLIPCodec.Decoder(maximumFrameSize: 16)
@@ -294,7 +246,6 @@ struct SLIPCodecTests {
         #expect(frames == [Data([0x01])])
     }
 
-    // MARK: - Reset
 
     @Test("Reset discards partial state")
     func resetDiscardsPartialState() throws {

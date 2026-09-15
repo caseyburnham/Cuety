@@ -1,30 +1,20 @@
 import SwiftUI
 
-/// Detailed transport, session, and health information for the current connection.
-///
-/// Grouped into five sections that answer five different questions: where are
-/// we connected, what did we negotiate, what is QLab, how healthy is the link,
-/// and what went wrong last.
 struct ConnectionInspectorView: View {
     @Environment(AppModel.self) private var model
 
     private var client: QLabClient { model.client }
 
-    /// The server behind the current session, for the facts that belong to the
-    /// machine rather than to the workspace on it.
     private var server: QLabServer? {
         model.selection.flatMap { model.browser.server(withID: $0.serverID) }
     }
 
-    /// Nothing has been attempted yet, so there are no details to show.
     private var isIdle: Bool {
         if case .offline = client.status, client.workspace == nil { return true }
         return false
     }
 
     var body: some View {
-        // An `if`, not an overlay: laying the empty state *over* a populated
-        // Form left the status section showing through behind it.
         if isIdle {
             ContentUnavailableView(
                 client.status.title,
@@ -50,17 +40,7 @@ struct ConnectionInspectorView: View {
         }
     }
 
-    // MARK: - Sections
 
-    /// The glyph, the state, and the one action that acts on it, on a single
-    /// centred line.
-    ///
-    /// All three are vertically centred against each other rather than pinned
-    /// to the top: the glyph and the button are one item each, so top-aligning
-    /// them against a two-line block left both sitting high with the detail
-    /// line hanging below. Disconnect is in this row at all because it acts on
-    /// the thing the row names — as its own row beneath, it read as one more
-    /// fact about the session.
     private var statusSection: some View {
         Section {
             HStack(spacing: 12) {
@@ -85,15 +65,6 @@ struct ConnectionInspectorView: View {
                 Spacer(minLength: 12)
 
                 if model.canDisconnect {
-                    // Tinted red rather than given a destructive role:
-                    // dropping the connection loses nothing and is a click
-                    // away from being undone, so the colour is there to make
-                    // it findable, not to warn.
-                    //
-                    // The condition is ``AppModel/canDisconnect``, not a third
-                    // opinion of its own. This used to ask whether a workspace
-                    // had been negotiated, which is neither what the menu asked
-                    // nor what the sidebar asked.
                     Button("Disconnect") {
                         model.disconnect()
                     }
@@ -109,8 +80,6 @@ struct ConnectionInspectorView: View {
             LabeledContent("Server", value: server?.name ?? "—")
             LabeledContent(
                 "Address",
-                // A Bonjour service has no address of ours to report: the
-                // system resolves it at connect time.
                 value: server?.address ?? "Resolved by Bonjour"
             )
             LabeledContent("Protocol", value: "TCP, SLIP-framed (OSC 1.1)")
@@ -130,9 +99,6 @@ struct ConnectionInspectorView: View {
                     LabeledContent("Listening Port", value: String(port))
                 }
             }
-            // A glyph as well as the words, because this is the one row in the
-            // section an operator scans for: a padlock reads at a glance where
-            // "In use" has to be read.
             LabeledContent("Passcode") {
                 Label(
                     client.usedPasscode ? "In use" : "Not required",
@@ -163,27 +129,11 @@ struct ConnectionInspectorView: View {
 
     private var healthSection: some View {
         Section("Health") {
-            // The same beating glyph the toolbar shows, rather than a count of
-            // beats: whether one is arriving *now* is the question, and the
-            // running total is a detail the tooltip can carry.
             LabeledContent("Heartbeat") {
                 HeartbeatIndicator()
                     .help(client.heartbeatSummary)
             }
 
-            // Counting down to the next one rather than up from the last.
-            //
-            // `.relative` on the last heartbeat rendered once, at the moment
-            // the view was built — and the only thing that rebuilt that row was
-            // a heartbeat arriving, at which point the answer is always zero.
-            // Hence "in 0 seconds", for ever, with the sign wrong too.
-            //
-            // A `SystemFormatStyle` fed `.currentDate` reschedules its own
-            // updates as the clock advances, and `.timer(countingDownIn:)`
-            // clamps at `0:00` once the deadline passes — so a QLab that has
-            // stopped answering shows a countdown stuck at zero beside a
-            // rising Missed Heartbeats, rather than a number that keeps
-            // climbing as though something were still happening.
             if let window = client.nextThumpWindow {
                 LabeledContent("Next Heartbeat") {
                     Text(.currentDate, format: .timer(
@@ -208,9 +158,6 @@ struct ConnectionInspectorView: View {
                 }
             }
 
-            // One row per direction, each pairing the count with the bytes it
-            // accounts for. Two labelled rows say what a single row of arrow
-            // characters only implied.
             LabeledContent("Sent", value: traffic(
                 messages: model.log.totalSent, bytes: model.log.bytesSent
             ))
@@ -241,8 +188,6 @@ struct ConnectionInspectorView: View {
                 """)
             }
 
-            // Only when it has happened. A permanent "Late Replies: 0" row
-            // would be one more number to scan past on a healthy session.
             if client.lateReplyCount > 0 {
                 LabeledContent("Late Replies") {
                     Text(client.lateReplyCount.formatted())
@@ -275,7 +220,6 @@ struct ConnectionInspectorView: View {
         }
     }
 
-    // MARK: - Derived values
 
     private var totalCueCount: Int {
         func count(_ cues: [Cue]) -> Int {
@@ -295,8 +239,6 @@ struct ConnectionInspectorView: View {
         return "\(count) messages · \(size)"
     }
 
-    /// Round trips on a LAN are sub-millisecond to single-digit milliseconds,
-    /// so milliseconds with one decimal is the readable unit.
     private func formatMilliseconds(_ interval: TimeInterval) -> String {
         (interval * 1000).formatted(.number.precision(.fractionLength(1))) + " ms"
     }

@@ -1,0 +1,153 @@
+{
+  "features" : [
+    "refractivity"
+  ],
+  "fill" : {
+    "automatic-gradient" : "srgb:0.57919,0.12801,0.57269,1.00000"
+  },
+  "groups" : [
+    {
+      "blur-material" : null,
+      "hidden" : false,
+      "layers" : [
+        {
+          "fill" : {
+            "automatic-gradient" : "srgb:1.00000,1.00000,1.00000,1.00000"
+          },
+          "hidden" : true,
+          "image-name" : "standing.svg",
+          "name" : "standing",
+          "position" : {
+            "scale" : 0.8,
+            "translation-in-points" : [
+              67,
+              12
+            ]
+          }
+        },
+        {
+          "fill" : {
+            "automatic-gradient" : "srgb:0.92143,0.92145,0.92144,1.00000"
+          },
+          "hidden" : false,
+          "image-name" : "Q.svg",
+          "name" : "Q",
+          "position" : {
+            "scale" : 0.65,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "blend-mode" : "normal",
+          "fill" : "automatic",
+          "glass" : true,
+          "hidden" : true,
+          "image-name" : "main_cue.svg",
+          "name" : "main_cue",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "fill" : {
+            "automatic-gradient" : "srgb:0.66422,0.66424,0.66423,1.00000"
+          },
+          "glass" : false,
+          "hidden" : true,
+          "image-name" : "playhead.svg",
+          "name" : "playhead",
+          "position" : {
+            "scale" : 3,
+            "translation-in-points" : [
+              1200,
+              0
+            ]
+          }
+        },
+        {
+          "hidden" : true,
+          "image-name" : "circ.svg",
+          "name" : "circ"
+        }
+      ],
+      "lighting" : "combined",
+      "refractivity" : {
+        "depth" : 0.5,
+        "enabled" : false,
+        "strength" : 0
+      },
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.87
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0.6
+      }
+    },
+    {
+      "hidden" : false,
+      "layers" : [
+        {
+          "fill" : {
+            "automatic-gradient" : "srgb:1.00000,0.83235,0.47321,1.00000"
+          },
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "load.svg",
+          "name" : "load",
+          "position" : {
+            "scale" : 1.06,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "fill" : {
+            "automatic-gradient" : "srgb:0.00000,0.00000,0.00000,0.75066"
+          },
+          "hidden" : true,
+          "image-name" : "circ2.svg",
+          "name" : "circ2",
+          "position" : {
+            "scale" : 0.8,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "lighting" : "individual",
+      "refractivity" : {
+        "depth" : 0,
+        "enabled" : true,
+        "strength" : 0.5
+      },
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 1
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.6
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}

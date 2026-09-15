@@ -1,22 +1,14 @@
 import Foundation
 
-/// Parses OSC packets from their wire representation.
-///
-/// Decoding is lenient in the same places `F53OSCParser` is lenient, because
-/// F53OSC is Figure 53's own implementation and therefore defines what QLab
-/// actually emits. Where a packet is genuinely unparseable this throws a typed
-/// ``OSCDecodingError`` carrying a byte offset; callers log it and drop the
-/// packet, never dropping the connection.
+/// Parses OSC 1.0/1.1 packets, including nested bundles, with bounds-checked reads.
+
 nonisolated struct OSCDecoder {
 
     func decode(_ data: Data) throws -> OSCPacket {
-        // Working over a flat byte array rather than a `Data` slice removes an
-        // entire class of index-origin bugs, and packets are small.
         var reader = OSCReader(bytes: Array(data))
         return try decodePacket(&reader, limit: reader.count)
     }
 
-    // MARK: - Packet dispatch
 
     private func decodePacket(_ reader: inout OSCReader, limit: Int) throws -> OSCPacket {
         guard let first = reader.peek() else {
@@ -25,8 +17,6 @@ nonisolated struct OSCDecoder {
             )
         }
 
-        // A packet is a bundle if it starts with '#', a message if it starts
-        // with '/'. Anything else is not an OSC packet at all.
         switch first {
         case UInt8(ascii: "#"):
             return .bundle(try decodeBundle(&reader, limit: limit))
@@ -37,7 +27,6 @@ nonisolated struct OSCDecoder {
         }
     }
 
-    // MARK: - Bundles
 
     private func decodeBundle(_ reader: inout OSCReader, limit: Int) throws -> OSCBundle {
         let identifierOffset = reader.offset
@@ -57,9 +46,6 @@ nonisolated struct OSCDecoder {
                 throw OSCDecodingError.negativeSize(offset: sizeOffset, declared: declaredSize)
             }
 
-            // F53OSC checks that a declared element length does not exceed the
-            // bytes remaining in the enclosing bundle. Without this a hostile
-            // or corrupt length would read past the end of the packet.
             let remaining = limit - reader.offset
             guard Int(declaredSize) <= remaining else {
                 throw OSCDecodingError.bundleElementOverrunsBuffer(
@@ -67,22 +53,17 @@ nonisolated struct OSCDecoder {
                 )
             }
 
-            // A zero-length element is meaningless but harmless; skip it
-            // rather than failing the whole bundle.
             guard declaredSize > 0 else { continue }
 
             let elementLimit = reader.offset + Int(declaredSize)
             elements.append(try decodePacket(&reader, limit: elementLimit))
 
-            // Trust the declared length over the parser's own advance, so one
-            // malformed element cannot desynchronise the rest of the bundle.
             reader.seek(to: elementLimit)
         }
 
         return OSCBundle(timeTag: timeTag, elements: elements)
     }
 
-    // MARK: - Messages
 
     private func decodeMessage(_ reader: inout OSCReader, limit: Int) throws -> OSCMessage {
         let addressOffset = reader.offset
@@ -91,8 +72,6 @@ nonisolated struct OSCDecoder {
             throw OSCDecodingError.invalidAddress(offset: addressOffset, address: address)
         }
 
-        // A message with no type tag string carries no arguments. Some senders
-        // omit it entirely for zero-argument messages, which is legal.
         guard reader.offset < limit else {
             return OSCMessage(address)
         }
@@ -144,19 +123,12 @@ nonisolated struct OSCDecoder {
         case "I":
             return .impulse
         default:
-            // An unknown tag has an unknown width, so we cannot skip past it
-            // and keep parsing — the rest of the message is unrecoverable.
             throw OSCDecodingError.unknownTypeTag(offset: tagOffset, tag: tag)
         }
     }
 }
 
-// MARK: - Bounds-checked byte reader
 
-/// A cursor over a byte buffer that bounds-checks every read.
-///
-/// `limit` is passed per-read rather than stored so a nested bundle element can
-/// be parsed against its own declared end without copying its bytes out.
 nonisolated private struct OSCReader {
     private let bytes: [UInt8]
     private(set) var offset: Int = 0
@@ -207,7 +179,6 @@ nonisolated private struct OSCReader {
         Int64(bitPattern: try readUInt64(limit: limit))
     }
 
-    /// Reads a null-terminated, 4-byte-padded OSC string.
     mutating func readString(limit: Int) throws -> String {
         let start = offset
         var terminator = offset
@@ -223,16 +194,11 @@ nonisolated private struct OSCReader {
             throw OSCDecodingError.invalidUTF8(offset: start)
         }
 
-        // Consume the string, its terminator, and the padding that rounds the
-        // whole thing up to a 4-byte boundary. Clamping rather than requiring
-        // the full padding tolerates a sender that truncates trailing padding
-        // on the final element of a packet.
         let padded = (length / OSCEncoder.alignment + 1) * OSCEncoder.alignment
         offset = min(start + padded, min(limit, bytes.count))
         return string
     }
 
-    /// Reads a length-prefixed, 4-byte-padded OSC blob.
     mutating func readBlob(limit: Int) throws -> Data {
         let sizeOffset = offset
         let declaredSize = try readInt32(limit: limit)
@@ -252,8 +218,6 @@ nonisolated private struct OSCReader {
         let end = start + Int(declaredSize)
         let blob = Data(bytes[start..<end])
 
-        // Padding brings the blob's *contents* up to a 4-byte boundary; the
-        // length prefix is already aligned so it does not enter the sum.
         let remainderBytes = Int(declaredSize) % OSCEncoder.alignment
         let padding = remainderBytes == 0 ? 0 : OSCEncoder.alignment - remainderBytes
         offset = min(end + padding, min(limit, bytes.count))

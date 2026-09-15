@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Prompts for a workspace passcode.
 struct PasscodeSheet: View {
     let prompt: AppModel.PasscodePrompt
 
@@ -30,9 +29,6 @@ struct PasscodeSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // Both buttons at the trailing edge, confirmation last. The default
-            // action styles itself prominently, so it needs no button style of
-            // its own.
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) {

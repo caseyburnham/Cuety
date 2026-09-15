@@ -1,13 +1,11 @@
 import SwiftUI
 
-/// A QLab workspace as reported by `/workspaces`.
 nonisolated struct QLabWorkspaceInfo: Decodable, Hashable, Sendable, Identifiable {
     let uniqueID: String
     let displayName: String
     let port: Int?
     let udpReplyPort: Int?
     let version: String?
-    /// QLab reports this on some builds; absent means "unknown", not "no passcode".
     let hasPasscode: Bool?
 
     var id: String { uniqueID }
@@ -22,43 +20,26 @@ nonisolated struct QLabWorkspaceInfo: Decodable, Hashable, Sendable, Identifiabl
     }
 }
 
-/// A cue, as reported by `/cueLists` and refined by `valuesForKeys`.
-///
-/// Only `uniqueID` is required. Everything else is optional because QLab omits
-/// keys that don't apply to a cue type, and because an absent value is
-/// meaningful in this app: a pill that isn't there tells the operator something.
 nonisolated struct Cue: Hashable, Sendable, Identifiable {
     let uniqueID: String
 
-    /// The cue number. Optional — unnumbered cues are legal and common.
     var number: String?
 
-    /// The name the operator typed, empty for a cue they never named.
     var name: String?
 
-    /// The name QLab *displays* for this cue in its cue list.
-    ///
-    /// Not the name of the containing cue list, despite how it reads. QLab
-    /// fills this in for a cue with no name of its own — an audio cue shows
-    /// its file, a group shows its type — so it is the closest thing to "what
-    /// QLab calls this cue" and nothing more. Ask
-    /// ``Swift/Array/cueList(containing:)`` for the list a cue belongs to.
     var listName: String?
 
-    /// QLab's cue type string, e.g. `"Audio"`, `"Group"`, `"Light"`.
     var type: String?
     var colorName: String?
     var isFlagged: Bool?
     var isArmed: Bool?
 
-    /// Populated lazily by `valuesForKeys` for the cue at the playhead only.
     var notes: String?
     var duration: TimeInterval?
     var preWait: TimeInterval?
     var postWait: TimeInterval?
     var continueMode: ContinueMode?
 
-    /// Child cues, for groups and cue lists.
     var children: [Cue] = []
 
     var id: String { uniqueID }
@@ -67,23 +48,13 @@ nonisolated struct Cue: Hashable, Sendable, Identifiable {
         self.uniqueID = uniqueID
     }
 
-    /// Whether this cue is a container rather than an action.
     var isGroup: Bool { !children.isEmpty || type?.caseInsensitiveCompare("group") == .orderedSame }
 
-    /// What to show as the headline when there is no cue number.
     var displayNumber: String? {
         guard let number, !number.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
         return number
     }
 
-    /// What to call this cue on screen.
-    ///
-    /// The operator's own ``name`` wins wherever they gave one. Failing that,
-    /// QLab's ``listName`` — the name it displays for an unnamed cue, such as
-    /// the audio file it plays — because that is the label the operator
-    /// already recognises from QLab's own window. Only when neither exists is
-    /// the cue genuinely nameless, and callers fall back to a placeholder or
-    /// promote the number instead.
     var displayName: String? {
         Self.trimmedNonEmpty(name) ?? Self.trimmedNonEmpty(listName)
     }
@@ -93,17 +64,6 @@ nonisolated struct Cue: Hashable, Sendable, Identifiable {
         return value
     }
 
-    /// The colour the operator gave this cue in QLab, or `nil` when they gave
-    /// it none.
-    ///
-    /// Mapped onto the system colours rather than sampled from QLab's own
-    /// palette: those are fixed sRGB values, while these adapt to light and
-    /// dark appearance and to Increase Contrast. A booth display has to stay
-    /// legible before it has to match QLab's inspector pixel for pixel.
-    ///
-    /// An unrecognised name — a colour a later QLab adds — also returns `nil`,
-    /// so the cue falls back to the standard text style instead of being
-    /// assigned a colour nobody chose.
     var color: Color? {
         switch colorName?.lowercased() {
         case "red": .red
@@ -116,37 +76,22 @@ nonisolated struct Cue: Hashable, Sendable, Identifiable {
     }
 }
 
-/// What Cuety knows about one cue list's playhead.
-///
-/// Three different things used to be one absent dictionary entry, and the
-/// display described all of them as "the playhead in this cue list is not
-/// set". Only one of them is that. A query Cuety never got an answer to, and a
-/// list it has not asked about yet, are both *ignorance* — and saying "not
-/// set" about a cue list that in fact has a cue standing by is the kind of
-/// quiet lie this app exists not to tell.
 nonisolated enum PlayheadState: Hashable, Sendable {
-    /// QLab answered with a cue.
     case cue(String)
-    /// QLab answered, and nothing is standing by. A real state with a real
-    /// empty display, not an absence of information.
     case unset
-    /// The query failed or was refused. Where the playhead is, is unknown.
     case unknown(reason: String)
 
-    /// The cue standing by, if one is known to be.
     var cueID: String? {
         guard case .cue(let id) = self else { return nil }
         return id
     }
 
-    /// Whether Cuety has an answer about this list at all.
     var isKnown: Bool {
         if case .unknown = self { return false }
         return true
     }
 }
 
-/// QLab's continue mode, which governs what happens after a cue fires.
 nonisolated enum ContinueMode: Int, Hashable, Sendable, Codable {
     case doNotContinue = 0
     case autoContinue = 1
@@ -169,11 +114,6 @@ nonisolated enum ContinueMode: Int, Hashable, Sendable, Codable {
     }
 }
 
-/// The subset of cue properties Cuety fetches with `valuesForKeys`.
-///
-/// Separate from ``Cue`` because these arrive later and only for the cue at the
-/// playhead — folding them into the main decoder would imply they're always
-/// present.
 nonisolated struct QLabCueValues: Decodable, Sendable {
     var notes: String?
     var duration: Double?
@@ -183,11 +123,6 @@ nonisolated struct QLabCueValues: Decodable, Sendable {
 }
 
 nonisolated extension Cue {
-    /// The lazily-fetched detail values this cue is currently holding.
-    ///
-    /// The inverse of ``apply(_:)``, so values already fetched can be carried
-    /// across a replacement of the cue tree — `/cueLists` does not report any
-    /// of them, so a refetched tree arrives with them all absent.
     var detailValues: QLabCueValues {
         QLabCueValues(
             notes: notes,
@@ -198,7 +133,6 @@ nonisolated extension Cue {
         )
     }
 
-    /// Merges fetched detail values into this cue.
     mutating func apply(_ values: QLabCueValues) {
         if let notes = values.notes { self.notes = notes }
         if let duration = values.duration { self.duration = duration }
@@ -211,10 +145,6 @@ nonisolated extension Cue {
 }
 
 nonisolated extension Array<Cue> {
-    /// Applies detail values to the cue with the given ID, searching nested
-    /// groups depth-first.
-    ///
-    /// - Returns: `true` if the cue was found and updated.
     @discardableResult
     mutating func applyValues(_ values: QLabCueValues, toCueWithID cueID: String) -> Bool {
         for index in indices {
@@ -229,7 +159,6 @@ nonisolated extension Array<Cue> {
         return false
     }
 
-    /// Finds a cue by ID, searching nested groups depth-first.
     func firstCue(withID cueID: String) -> Cue? {
         for cue in self {
             if cue.uniqueID == cueID { return cue }
@@ -238,20 +167,11 @@ nonisolated extension Array<Cue> {
         return nil
     }
 
-    /// The cue list containing `cueID`, given the array of cue lists QLab
-    /// returned from `/cueLists`.
-    ///
-    /// Derived from the tree, because nothing on a ``Cue`` records it:
-    /// ``Cue/listName`` is the cue's own displayed name, so reading it as the
-    /// containing list's name put the cue's name in the "Cue List" pill and
-    /// was wrong for every cue that had a name at all. A group's children are
-    /// searched too, so a nested cue reports the list rather than the group.
     func cueList(containing cueID: String) -> Cue? {
         first { $0.children.firstCue(withID: cueID) != nil }
     }
 }
 
-// MARK: - Decoding from /cueLists
 
 nonisolated extension Cue: Decodable {
     private enum CodingKeys: String, CodingKey {
@@ -288,7 +208,6 @@ nonisolated extension Cue: Decodable {
         postWait = try container.decodeIfPresent(Double.self, forKey: .postWait)
         continueMode = try container.decodeIfPresent(Int.self, forKey: .continueMode)
             .flatMap(ContinueMode.init(rawValue:))
-        // QLab nests children under `cues`. Absent for non-containers.
         children = try container.decodeIfPresent([Cue].self, forKey: .cues) ?? []
     }
 }

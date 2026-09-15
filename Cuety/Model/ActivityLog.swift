@@ -1,15 +1,9 @@
 import SwiftUI
 
-/// One entry in the OSC activity log.
-///
-/// Formatting happens once, here, at capture time rather than on every table
-/// redraw — the log can tick over several times a second during a busy cue
-/// sequence, and the window may not even be open.
 nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
     enum Direction: Hashable, Sendable {
         case outbound
         case inbound
-        /// A packet that arrived but could not be parsed.
         case malformed
 
         var systemImage: String {
@@ -28,9 +22,6 @@ nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
             }
         }
 
-        /// Kept on the direction rather than in the view, so the table's column
-        /// glyphs, the status bar's tallies, and the inspector cannot end up
-        /// colouring the same direction three different ways.
         var tint: Color {
             switch self {
             case .outbound: .blue
@@ -43,15 +34,8 @@ nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
     let id = UUID()
     let timestamp: Date
     let direction: Direction
-    /// The OSC address, or a short description for malformed packets.
     let address: String
-    /// The arguments rendered for display; empty when there are none.
-    ///
-    /// Already redacted. Every entry built from an ``OSCMessage`` goes through
-    /// ``OSCRedaction``, so this string is safe to show, search, and copy —
-    /// and there is deliberately nowhere else to get the unredacted form from.
     let arguments: String
-    /// Size of the packet on the wire, before SLIP framing.
     let byteCount: Int
 
     init(
@@ -68,12 +52,6 @@ nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
         self.byteCount = byteCount
     }
 
-    /// Builds an entry from a message, splitting address from arguments so the
-    /// table can align them in separate columns.
-    ///
-    /// Credentials are redacted here rather than at any of the three places
-    /// the entry is read from, so no call site can retain a passcode by
-    /// forgetting to ask for redaction — see ``OSCRedaction``.
     init(message: OSCMessage, direction: Direction, byteCount: Int, timestamp: Date = Date()) {
         let safe = OSCRedaction.redacting(message)
         let rendered = safe.description
@@ -85,14 +63,10 @@ nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
             direction: direction,
             address: safe.address,
             arguments: argumentText,
-            // The real packet size, deliberately: it describes what went out
-            // on the wire, and measuring the placeholder instead would
-            // misreport the traffic totals in the connection inspector.
             byteCount: byteCount
         )
     }
 
-    /// A single line suitable for the clipboard.
     var copyableDescription: String {
         let time = Self.clipboardFormatter.string(from: timestamp)
         let arrow = direction == .outbound ? "→" : (direction == .inbound ? "←" : "⚠")
@@ -108,30 +82,19 @@ nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
     }()
 }
 
-/// A bounded, newest-last log of OSC traffic.
-///
-/// The capacity cap is the point: a show can run for hours, and an unbounded
-/// log would be a slow memory leak in an app that is supposed to be left
-/// running all night.
 @Observable
 final class ActivityLog {
-    /// How many entries to retain before dropping the oldest.
     let capacity: Int
 
-    /// Entries in arrival order, oldest first.
     private(set) var entries: [OSCEvent] = []
 
-    /// Total messages seen since launch, including those aged out of `entries`.
     private(set) var totalReceived = 0
     private(set) var totalSent = 0
     private(set) var totalMalformed = 0
 
-    /// Total bytes on the wire, for the connection inspector.
     private(set) var bytesReceived = 0
     private(set) var bytesSent = 0
 
-    /// When paused, counters keep advancing but no entries are retained — so an
-    /// operator can freeze the view to read something without losing the tallies.
     var isPaused = false
 
     init(capacity: Int = 2000) {
@@ -164,7 +127,6 @@ final class ActivityLog {
         entries.removeAll(keepingCapacity: true)
     }
 
-    /// Resets counters as well as entries, when starting a fresh connection.
     func reset() {
         clear()
         totalReceived = 0

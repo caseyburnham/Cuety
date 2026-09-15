@@ -3,11 +3,6 @@ import Testing
 
 @testable import Cuety
 
-/// What the drawer is allowed to say about a cue list.
-///
-/// Two contracts are under test. A group is *one row* and its children are not
-/// rows — but they are still indexed, because the playhead can be parked on
-/// one of them and the display has to be able to name it.
 @Suite("Cue graph")
 struct CueGraphTests {
     private func cue(_ id: String, _ name: String, children: [Cue] = []) -> Cue {
@@ -18,8 +13,6 @@ struct CueGraphTests {
         return cue
     }
 
-    /// `1`, `2` (a group of `2.1`, `2.2` — the second itself a group of
-    /// `2.2.1`), `3`, `4`. Four rows; eight cues.
     private func showList() -> Cue {
         cue("list", "Main", children: [
             cue("1", "House to Half"),
@@ -45,8 +38,6 @@ struct CueGraphTests {
     func neighboursAreRows() {
         let graph = CueGraph(cueList: showList())
 
-        // Not "2.2.1", "2.2", "2.1" — the group's contents are not rows, so
-        // the row above `3` is the group itself.
         #expect(graph.rowsAbove("3", count: 2).map(\.uniqueID) == ["1", "2"])
         #expect(graph.rowsBelow("1", count: 2).map(\.uniqueID) == ["2", "3"])
     }
@@ -55,8 +46,6 @@ struct CueGraphTests {
     func nestedCuesRemainIndexed() {
         let graph = CueGraph(cueList: showList())
 
-        // The playhead can sit on any of these, and the display names the cue
-        // itself rather than the group standing in for it.
         #expect(graph.cue(withID: "2.1")?.displayName == "Thunder")
         #expect(graph.cue(withID: "2.2.1")?.displayName == "Drips")
         #expect(graph.cue(withID: "nope") == nil)
@@ -66,9 +55,6 @@ struct CueGraphTests {
     func nestedPlayheadUsesItsGroupsRow() {
         let graph = CueGraph(cueList: showList())
 
-        // Whether the playhead is on `2`, `2.1` or the doubly-nested `2.2.1`,
-        // the drawer shows the same neighbourhood — otherwise stepping into a
-        // group would blank it.
         for cueID in ["2", "2.1", "2.2", "2.2.1"] {
             #expect(graph.rowsAbove(cueID, count: 3).map(\.uniqueID) == ["1"])
             #expect(graph.rowsBelow(cueID, count: 3).map(\.uniqueID) == ["3", "4"])
@@ -80,19 +66,13 @@ struct CueGraphTests {
         let graph = CueGraph(cueList: showList())
 
         #expect(graph.containingRow(of: "2.1")?.uniqueID == "2")
-        // Nested two deep, and it still reports the outermost row rather than
-        // the immediate parent: that is the row on screen.
         #expect(graph.containingRow(of: "2.2.1")?.uniqueID == "2")
 
-        // A row is not inside anything, and neither is a cue this list has
-        // never heard of.
         #expect(graph.containingRow(of: "2") == nil)
         #expect(graph.containingRow(of: "1") == nil)
         #expect(graph.containingRow(of: "nope") == nil)
     }
 
-    /// The display prints "End of List" from `isLast`, so a false positive
-    /// here is a claim on screen that the show is over.
     @Test("Boundaries are claimed only for the first and last rows")
     func boundariesAreStrict() {
         let graph = CueGraph(cueList: cue("list", "Main", children: [
@@ -103,10 +83,6 @@ struct CueGraphTests {
         #expect(graph.isFirst("1"))
         #expect(graph.isLast("2"))
 
-        // A cue inside the first group has a group cue above it that the
-        // drawer is showing, so it is not the top of the cue list. A cue
-        // inside the last group has cues after it inside that group, so the
-        // list has not ended.
         #expect(!graph.isFirst("1.1"))
         #expect(!graph.isLast("2.1"))
     }
@@ -140,26 +116,19 @@ struct CueGraphTests {
         #expect(graph.rowsBelow("3", count: 5).map(\.uniqueID) == ["4"])
     }
 
-    // MARK: - Neighbourhoods
 
-    /// Six rows, no groups: enough to run out of at either end while still
-    /// having rows to lend.
     private func longList() -> Cue {
         cue("list", "Main", children: (1...6).map { cue("\($0)", "Cue \($0)") })
     }
 
-    /// The drawer used to shrink over the last few cues of a show, which is
-    /// exactly when the operator is watching it.
     @Test("Rows the end of the list cannot supply are shown above instead")
     func shortfallBelowIsSpentAbove() {
         let graph = CueGraph(cueList: longList())
 
-        // Second-to-last row: one below exists, so the other two go above.
         let nearEnd = graph.neighbourhood(around: "5", above: 3, below: 3)
         #expect(nearEnd.above.map(\.uniqueID) == ["1", "2", "3", "4"])
         #expect(nearEnd.below.map(\.uniqueID) == ["6"])
 
-        // Last row: nothing below at all, so all six are above.
         let atEnd = graph.neighbourhood(around: "6", above: 3, below: 3)
         #expect(atEnd.above.map(\.uniqueID) == ["1", "2", "3", "4", "5"])
         #expect(atEnd.below.isEmpty)
@@ -187,9 +156,6 @@ struct CueGraphTests {
         #expect(middle.below.map(\.uniqueID) == ["5", "6"])
     }
 
-    /// Zero is an instruction about what belongs on screen, not a number to be
-    /// made up elsewhere: an operator who never wants to look backwards must
-    /// not get five past cues because the show reached its last cue.
     @Test("A side set to none stays empty, and lends rather than borrows")
     func zeroIsRespectedInBothDirections() {
         let graph = CueGraph(cueList: longList())
@@ -198,8 +164,6 @@ struct CueGraphTests {
         #expect(atEnd.above.isEmpty)
         #expect(atEnd.below.isEmpty)
 
-        // The other way round: nothing above to show, and the three rows it
-        // could not use go nowhere because below is off.
         let atStart = graph.neighbourhood(around: "1", above: 3, below: 0)
         #expect(atStart.above.isEmpty)
         #expect(atStart.below.isEmpty)
@@ -224,8 +188,6 @@ struct CueGraphTests {
             cue("4", "Finale", children: [cue("4.1", "Inside finale")]),
         ]))
 
-        // `4.1` sits in the last row, so there is nothing below it to show —
-        // and the group is the row, so it is not shown either.
         let neighbourhood = graph.neighbourhood(around: "4.1", above: 2, below: 2)
         #expect(neighbourhood.above.map(\.uniqueID) == ["1", "2", "3"])
         #expect(neighbourhood.below.isEmpty)
@@ -240,10 +202,7 @@ struct CueGraphTests {
         #expect(neighbourhood.below.isEmpty)
     }
 
-    // MARK: - Cue numbers
 
-    /// The display sizes its headline to the widest of these, so a number
-    /// missing here is a number that would not fit on screen.
     @Test("Every cue's number is collected, including nested ones")
     func cueNumbersIncludeNestedCues() {
         let graph = CueGraph(cueList: showList())
@@ -256,7 +215,6 @@ struct CueGraphTests {
         var unnumbered = Cue(uniqueID: "blank")
         unnumbered.name = "Blackout"
         var blank = Cue(uniqueID: "whitespace")
-        // QLab reports a cleared number as whitespace rather than omitting it.
         blank.number = "  "
 
         let graph = CueGraph(cueList: cue("list", "Main", children: [

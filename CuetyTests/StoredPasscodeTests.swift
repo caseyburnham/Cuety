@@ -3,22 +3,9 @@ import Testing
 
 @testable import Cuety
 
-/// Saved-passcode behaviour: what the operator is told, what they see, and
-/// what stays separate from what.
-///
-/// Every test here injects a stub store. None of them touch the real Keychain
-/// — reaching into the developer's own credentials to test credential handling
-/// would be its own kind of wrong, and this project has already written test
-/// data into real preferences once.
 @Suite("Stored passcodes")
 @MainActor
 struct StoredPasscodeTests {
-    /// A model whose browser can see one workspace, with a passcode stored for
-    /// it, discovered the way the app discovers it.
-    ///
-    /// Built through `refreshStoredPasscodes()` rather than by poking the
-    /// observable set directly, so the setup exercises the same path the app
-    /// uses and the tests are not resting on a hook that only they call.
     private func makeModel(
         _ store: StubPasscodeStore, withStoredPasscode: Bool = true
     ) throws -> (model: AppModel, target: WorkspaceSelection) {
@@ -54,9 +41,6 @@ struct StoredPasscodeTests {
 
         model.forgetPasscode(for: target)
 
-        // Both, in one action. Settings reads the observable set, so this is
-        // what makes the row disappear — reading the Keychain from a computed
-        // view property gave Forget nothing to invalidate.
         #expect(store.stored.isEmpty)
         #expect(!model.storedPasscodeSelections.contains(target))
         #expect(model.credentialError == nil)
@@ -70,11 +54,8 @@ struct StoredPasscodeTests {
 
         model.forgetPasscode(for: target)
 
-        // `try?` used to swallow this, so a Forget that failed looked
-        // identical to one that worked.
         let error = try #require(model.credentialError)
         #expect(error.message.contains("could not remove"))
-        // And the row stays, because the credential is still there.
         #expect(model.storedPasscodeSelections.contains(target))
         #expect(store.hasPasscode(serverID: target.serverID, workspaceID: target.workspaceID))
     }
@@ -105,10 +86,6 @@ struct StoredPasscodeTests {
         #expect(model.storedPasscodeSelections.contains(target))
     }
 
-    /// The Keychain's own message is the useful half, and
-    /// `PasscodeStore.Failure` already words it for an operator. Falling back
-    /// to `localizedDescription` would report "The operation couldn't be
-    /// completed", which tells nobody anything.
     @Test("The reported reason comes from the Keychain, not from Swift")
     func failureReasonIsOperatorReadable() throws {
         let store = StubPasscodeStore()
@@ -125,12 +102,9 @@ struct StoredPasscodeTests {
     @Test("Rebuilding the set finds credentials for workspaces that become visible")
     func refreshFindsNewlyVisibleWorkspaces() throws {
         let store = StubPasscodeStore()
-        // Nothing stored at setup, so the set starts empty.
         let (model, target) = try makeModel(store, withStoredPasscode: false)
         try #require(model.storedPasscodeSelections.isEmpty)
 
-        // A credential from an earlier session, for a machine that has only
-        // just come back on the network.
         try store.save("hunter2", serverID: target.serverID, workspaceID: target.workspaceID)
         model.refreshStoredPasscodes()
 
@@ -138,13 +112,7 @@ struct StoredPasscodeTests {
     }
 }
 
-/// A credential store a test can make fail.
-///
-/// The real ``PasscodeStore`` cannot be made to fail on demand, which is how
-/// its error paths came to be `try?` and silent — untestable behaviour tends
-/// to stay untested.
 private final class StubPasscodeStore: PasscodeStoring, @unchecked Sendable {
-    /// Keyed by `[serverID, workspaceID]`, so the key order is explicit.
     var stored: [[String]: String] = [:]
     var saveError: (any Error)?
     var removeError: (any Error)?

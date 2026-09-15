@@ -1,9 +1,6 @@
 import SwiftUI
 
-/// Typography and layout choices for the cue display and the drawer.
 struct DisplaySettingsView: View {
-    /// The height this pane needs to show everything without scrolling.
-    /// Applied by ``SettingsView``; measured, not guessed.
     static let settingsHeight: CGFloat = 555
 
     @Environment(AppModel.self) private var model
@@ -12,9 +9,6 @@ struct DisplaySettingsView: View {
 
     var body: some View {
         Form {
-            // The system font, in one of two designs and six weights. Choosing
-            // an arbitrary installed family was offered here and withdrawn —
-            // see ``Typography/font(size:weight:)`` for why it never worked.
             Section("Cue Number") {
                 Picker("Weight", selection: Bindable(preferences).fontWeight) {
                     ForEach(FontWeightChoice.allCases) { choice in
@@ -40,10 +34,6 @@ struct DisplaySettingsView: View {
                     set: { _ in model.toggleDrawer() }
                 ))
 
-                // Rows, deliberately, not "previous" and "upcoming" cues. The
-                // drawer reads the cue list either side of the playhead; it
-                // has no way to know what has been taken or what the next GO
-                // will do, so the labels must not imply either.
                 SteppedField(
                     title: "Rows above the playhead",
                     value: Bindable(preferences).drawerRowsAboveCount,
@@ -74,12 +64,6 @@ struct DisplaySettingsView: View {
         .formStyle(.grouped)
     }
 
-    /// A live preview of the chosen weight and design, so the choice can be
-    /// judged on the glyphs themselves rather than on two names.
-    ///
-    /// The weight comes from ``Typography/cueNumberWeight`` rather than being
-    /// fixed here: a Weight picker whose preview ignored it would be the one
-    /// control in this pane that showed nothing.
     private var sample: some View {
         let typography = Typography(preferences: preferences)
 

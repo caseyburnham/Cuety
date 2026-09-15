@@ -1,8 +1,8 @@
 import Foundation
 
-/// An OSC message: an address pattern plus zero or more arguments.
+/// An OSC address must begin with `/`; pattern characters remain valid for QLab dictionaries.
+
 nonisolated struct OSCMessage: Hashable, Sendable {
-    /// The OSC address pattern, always beginning with `/`.
     var address: String
     var arguments: [OSCValue]
 
@@ -17,20 +17,10 @@ nonisolated struct OSCMessage: Hashable, Sendable {
 }
 
 nonisolated extension OSCMessage {
-    /// The address split into its parts, with the leading slash removed.
-    ///
-    /// `"/update/workspace/ABC/cueList/DEF/playbackPosition"` becomes
-    /// `["update", "workspace", "ABC", "cueList", "DEF", "playbackPosition"]`.
     var addressComponents: [String] {
         address.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
     }
 
-    /// Whether the address is well-formed enough to send.
-    ///
-    /// Outgoing addresses are held to a stricter standard than incoming ones:
-    /// a leading slash, no whitespace, and no embedded nulls. Pattern
-    /// characters (`*`, `?`, `[]`, `{}`) are allowed, because QLab's dictionary
-    /// uses them — `/cue/*/stop` is a legitimate address to send.
     var isValidForSending: Bool {
         guard address.hasPrefix("/") else { return false }
         guard !address.unicodeScalars.contains(where: {
@@ -41,7 +31,6 @@ nonisolated extension OSCMessage {
 }
 
 nonisolated extension OSCMessage: CustomStringConvertible {
-    /// A single-line rendering used by the Activity Log and by log messages.
     var description: String {
         guard !arguments.isEmpty else { return address }
         let rendered = arguments.map { value -> String in
@@ -63,9 +52,7 @@ nonisolated extension OSCMessage: CustomStringConvertible {
     }
 }
 
-/// An OSC bundle: a time tag plus nested packets, which may themselves be bundles.
 nonisolated struct OSCBundle: Hashable, Sendable {
-    /// The literal that every bundle begins with on the wire.
     static let identifier = "#bundle"
 
     var timeTag: OSCTimeTag
@@ -76,10 +63,6 @@ nonisolated struct OSCBundle: Hashable, Sendable {
         self.elements = elements
     }
 
-    /// Every message in the bundle, flattened depth-first through nested bundles.
-    ///
-    /// Cuety dispatches on messages, not bundles, so this is how an incoming
-    /// bundle gets turned into work.
     var flattenedMessages: [OSCMessage] {
         elements.flatMap { element in
             switch element {
@@ -90,12 +73,10 @@ nonisolated struct OSCBundle: Hashable, Sendable {
     }
 }
 
-/// Either of the two things an OSC packet can be.
 nonisolated enum OSCPacket: Hashable, Sendable {
     case message(OSCMessage)
     case bundle(OSCBundle)
 
-    /// Every message in the packet, flattened through any nested bundles.
     var flattenedMessages: [OSCMessage] {
         switch self {
         case .message(let message): [message]
