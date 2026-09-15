@@ -115,6 +115,9 @@ final class AppModel {
     /// Holds the display awake while enabled.
     private let displaySleepBlocker = DisplaySleepBlocker()
 
+    /// Keeps the Dock tile's badge on the cue standing by.
+    private let dockBadge = DockBadge()
+
     init(
         preferences: Preferences = Preferences(),
         passcodes: any PasscodeStoring = PasscodeStore()
@@ -192,6 +195,12 @@ final class AppModel {
     /// behaviour where every window started its own untracked launch sequence.
     func start() {
         guard startupTask == nil else { return }
+
+        // Started here rather than in `init` so that a preview or a test
+        // building an ``AppModel`` does not reach for the running app's Dock
+        // tile. Idempotent in its own right, so the guard above is not what
+        // makes this safe.
+        dockBadge.follow { [weak self] in self?.dockBadgeLabel ?? nil }
 
         browser.start()
         startupTask = Task { [weak self] in
@@ -644,6 +653,33 @@ final class AppModel {
         browser.server(withID: selection.serverID)?
             .workspaces.first { $0.uniqueID == selection.workspaceID }?
             .displayName
+    }
+
+    // MARK: - Readouts outside the window
+
+    /// The cue standing by, and only while the session is live enough for it
+    /// to still be standing by.
+    ///
+    /// The same contract ``CueDisplayView/liveCue`` states for the headline,
+    /// for the surfaces that are not the headline: the menu bar item and the
+    /// Dock badge. A stale cue number on a stage display is the worst thing
+    /// this app can do, and one sitting on the Dock after the session dropped
+    /// is the same lie told somewhere the operator is even less likely to
+    /// question it.
+    var standbyCue: Cue? {
+        guard client.status.hasLiveData else { return nil }
+        return client.playheadCue
+    }
+
+    /// What the Dock tile should be badged with, or `nil` for no badge.
+    ///
+    /// The cue number and nothing else. ``MenuBarReadout`` offers the
+    /// connection status and the heartbeat as well, because a menu bar item
+    /// can draw a glyph; a Dock badge is a short string, and "Degraded"
+    /// spelled out in a red pill would be neither readable nor useful.
+    var dockBadgeLabel: String? {
+        guard preferences.showsDockBadge else { return nil }
+        return standbyCue?.displayNumber
     }
 
     // MARK: - Chrome

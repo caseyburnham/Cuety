@@ -12,7 +12,7 @@
 			containerPortal = 000000000000000000000000 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 000000000000000100000000;
-			remoteInfo = MyApp;
+			remoteInfo = Cuety;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -83,7 +83,7 @@
 				000000000000000000000010 /* Cuety */,
 			);
 			name = Cuety;
-			productName = MyApp;
+			productName = Cuety;
 			productReference = 000000000000000000000120 /* Cuety.app */;
 			productType = "com.apple.product-type.application";
 		};

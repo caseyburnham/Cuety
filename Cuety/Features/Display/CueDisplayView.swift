@@ -98,18 +98,10 @@ struct CueDisplayView: View {
     @ViewBuilder
     private func numberOrName(_ cue: Cue) -> some View {
         if let number = cue.displayNumber {
-            Text(number)
-                .font(typography.cueNumber)
-                // The base size is far larger than any window, so the scale
-                // factor is what actually sizes the text. This is how the
-                // number stays "as big as it can be" through resizes and
-                // presentation mode without measuring anything by hand.
-                .minimumScaleFactor(Typography.cueNumberMinimumScale)
-                .lineLimit(1)
+            headline(number)
                 .monospacedDigit()
                 .foregroundStyle(.primary)
                 .contentTransition(.numericText())
-                .frame(maxWidth: .infinity)
                 .accessibilityLabel("Cue number \(number)")
         } else if let name = cue.displayName {
             VStack(spacing: 6) {
@@ -132,13 +124,56 @@ struct CueDisplayView: View {
             }
             .accessibilityLabel("Unnumbered cue, \(name)")
         } else {
-            Text(verbatim: "—")
-                .font(typography.cueNumber)
-                .minimumScaleFactor(Typography.cueNumberMinimumScale)
-                .lineLimit(1)
+            // Standing in for a number, so sized like one.
+            headline("—")
                 .foregroundStyle(.tertiary)
                 .accessibilityLabel("Cue with no number or name")
         }
+    }
+
+    /// The headline number, set at one size for the whole cue list.
+    ///
+    /// The size fits the *widest* number the watched list can show here, and
+    /// every cue is then drawn at that size. `minimumScaleFactor` alone fits
+    /// whichever number happens to be standing by, which made the point size a
+    /// function of how many digits that cue had: the headline jumped between
+    /// sizes every time the playhead moved, on a display whose whole job is to
+    /// be read at a glance from the back of a room.
+    ///
+    /// The trade is deliberate — a one-digit cue no longer fills the window
+    /// edge to edge — and it buys a display that holds still.
+    private func headline(_ text: String) -> some View {
+        // Resolved out here rather than inside the geometry closure: it walks
+        // the cue list, and the closure runs on every frame of a window
+        // resize. The reference number does not depend on the size anyway.
+        let reference = referenceNumber(for: text)
+
+        // The space left after the captions, name and pills have taken theirs,
+        // which is what the number is being fitted to.
+        return GeometryReader { geometry in
+            Text(text)
+                .font(typography.cueNumber(
+                    size: typography.cueNumberPointSize(fitting: reference, in: geometry.size)
+                ))
+                // A guard rather than the sizing mechanism it used to be: the
+                // size already fits every number in the list. It catches a
+                // custom family whose drawn width differs from the face
+                // ``Typography`` measured.
+                .minimumScaleFactor(0.5)
+                .lineLimit(1)
+                .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+    }
+
+    /// The number the headline is sized for: the widest in the watched cue
+    /// list.
+    ///
+    /// `text` is in the running too. The playhead can sit on a cue from a list
+    /// Cuety is not watching, and a number that isn't in the reference set is a
+    /// number that would not fit.
+    private func referenceNumber(for text: String) -> String {
+        let candidates = (client.watchedGraph?.cueNumbers ?? []) + [text]
+        return typography.widestCueNumber(among: candidates) ?? text
     }
 
     private var standingByCaption: some View {

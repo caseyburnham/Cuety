@@ -72,6 +72,23 @@ enum FontWeightChoice: String, CaseIterable, Codable, Hashable, Sendable, Identi
         case .black: .black
         }
     }
+
+    /// The same weight in AppKit's terms.
+    ///
+    /// ``Typography`` measures cue numbers before drawing them, and a `Font`
+    /// cannot be measured — only an `NSFont` can. A bold face is wider than a
+    /// regular one, so measuring at the wrong weight would size the display
+    /// for a font it is not using.
+    var appKitWeight: NSFont.Weight {
+        switch self {
+        case .regular: .regular
+        case .medium: .medium
+        case .semibold: .semibold
+        case .bold: .bold
+        case .heavy: .heavy
+        case .black: .black
+        }
+    }
 }
 
 /// How large the detail pills beneath the cue name are drawn.
@@ -209,14 +226,6 @@ final class Preferences {
         didSet { defaults.set(appearance.rawValue, forKey: Key.appearance) }
     }
 
-    /// A font family name from ``FontCatalog``, or `nil` for the system font.
-    ///
-    /// The system font is the default deliberately: it has the best numeric
-    /// figures and the widest weight range of anything guaranteed installed.
-    var fontFamily: String? {
-        didSet { defaults.set(fontFamily, forKey: Key.fontFamily) }
-    }
-
     var usesRoundedSystemFont: Bool {
         didSet { defaults.set(usesRoundedSystemFont, forKey: Key.usesRoundedSystemFont) }
     }
@@ -299,6 +308,29 @@ final class Preferences {
         pillOrder.filter(enabledPills.contains)
     }
 
+    // MARK: Menu bar and Dock
+
+    /// Whether Cuety puts a readout in the system menu bar.
+    ///
+    /// Off by default. A menu bar item is space taken from every other app on
+    /// the machine, so it is the operator's to ask for — the same reasoning
+    /// that keeps ``autoConnect`` off.
+    var showsMenuBarExtra: Bool {
+        didSet { defaults.set(showsMenuBarExtra, forKey: Key.showsMenuBarExtra) }
+    }
+
+    /// What that readout shows.
+    var menuBarReadout: MenuBarReadout {
+        didSet { defaults.set(menuBarReadout.rawValue, forKey: Key.menuBarReadout) }
+    }
+
+    /// Whether the Dock tile is badged with the cue standing by.
+    ///
+    /// Off by default, for the same reason as ``showsMenuBarExtra``.
+    var showsDockBadge: Bool {
+        didSet { defaults.set(showsDockBadge, forKey: Key.showsDockBadge) }
+    }
+
     // MARK: System
 
     var keepsDisplayAwake: Bool {
@@ -366,7 +398,6 @@ final class Preferences {
 
         appearance = defaults.string(forKey: Key.appearance)
             .flatMap(AppearanceMode.init(rawValue:)) ?? .automatic
-        fontFamily = defaults.string(forKey: Key.fontFamily)
         usesRoundedSystemFont = defaults.bool(forKey: Key.usesRoundedSystemFont)
         // `.bold` is what the cue number was set at before this was a choice,
         // so an existing install looks unchanged until the operator says
@@ -397,6 +428,11 @@ final class Preferences {
         pillSize = defaults.string(forKey: Key.pillSize)
             .flatMap(PillSize.init(rawValue:)) ?? .default
         showsCueTypeLabel = defaults.object(forKey: Key.showsCueTypeLabel) as? Bool ?? true
+
+        showsMenuBarExtra = defaults.bool(forKey: Key.showsMenuBarExtra)
+        menuBarReadout = defaults.string(forKey: Key.menuBarReadout)
+            .flatMap(MenuBarReadout.init(rawValue:)) ?? .default
+        showsDockBadge = defaults.bool(forKey: Key.showsDockBadge)
 
         keepsDisplayAwake = defaults.bool(forKey: Key.keepsDisplayAwake)
 
@@ -450,7 +486,6 @@ final class Preferences {
 
     private enum Key {
         static let appearance = "appearance"
-        static let fontFamily = "fontFamily"
         static let usesRoundedSystemFont = "usesRoundedSystemFont"
         static let fontWeight = "fontWeight"
         static let showsCueName = "showsCueName"
@@ -463,6 +498,9 @@ final class Preferences {
         static let enabledPills = "enabledPills"
         static let pillSize = "pillSize"
         static let showsCueTypeLabel = "showsCueTypeLabel"
+        static let showsMenuBarExtra = "showsMenuBarExtra"
+        static let menuBarReadout = "menuBarReadout"
+        static let showsDockBadge = "showsDockBadge"
         static let keepsDisplayAwake = "keepsDisplayAwake"
         static let defaultPort = "defaultPort"
         static let heartbeatInterval = "heartbeatInterval"

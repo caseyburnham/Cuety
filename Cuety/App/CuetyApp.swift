@@ -60,6 +60,26 @@ struct CuetyApp: App {
         .windowResizability(.contentMinSize)
         .keyboardShortcut("i", modifiers: [.command, .shift])
 
+        // Cuety's readout in the system menu bar, off until the operator asks
+        // for it in Settings.
+        //
+        // `isInserted` is a two-way binding, which is the reason to use it
+        // rather than putting this scene behind an `if`: ⌘-dragging the item
+        // off the menu bar is how macOS expects one to be removed, and that
+        // gesture writes `false` straight back to the preference. The Settings
+        // toggle and the menu bar therefore cannot end up disagreeing about
+        // whether the item is there.
+        //
+        // No `menuBarExtraStyle`: `.menu` is the default and is what this
+        // wants — a list of commands, not a window.
+        MenuBarExtra(isInserted: Bindable(model.preferences).showsMenuBarExtra) {
+            CueMenuBarContent(model: model)
+                .environment(model)
+        } label: {
+            CueMenuBarLabel()
+                .environment(model)
+        }
+
         Settings {
             SettingsView()
                 .environment(model)

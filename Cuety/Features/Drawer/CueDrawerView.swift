@@ -47,17 +47,23 @@ struct CueDrawerView: View {
 
     @ViewBuilder
     private func content(graph: CueGraph, playheadID: String) -> some View {
-        let above = graph.rowsAbove(
-            playheadID, count: model.preferences.drawerRowsAboveCount
-        )
-        let below = graph.rowsBelow(
-            playheadID, count: model.preferences.drawerRowsBelowCount
+        // One call rather than two, so a side with rows to spare can lend them
+        // to the side that has run out — see ``CueGraph/neighbourhood(around:above:below:)``.
+        let neighbourhood = graph.neighbourhood(
+            around: playheadID,
+            above: model.preferences.drawerRowsAboveCount,
+            below: model.preferences.drawerRowsBelowCount
         )
 
         VStack(alignment: .leading, spacing: 0) {
             Divider()
 
-            rows(graph: graph, playheadID: playheadID, above: above, below: below)
+            rows(
+                graph: graph,
+                playheadID: playheadID,
+                above: neighbourhood.above,
+                below: neighbourhood.below
+            )
         }
         // A thinner material than the app's status bars use, because this is a
         // content area rather than a strip of chrome: the cue rows should read

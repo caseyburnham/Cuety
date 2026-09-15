@@ -308,6 +308,42 @@ struct QLabDisconnectTests {
         #expect(client.connectedSince == nil)
     }
 
+    /// The same contract as ``dropInvalidatesCueDataOnScreen``, for the
+    /// surface that has no caption to explain itself.
+    ///
+    /// The cue display can say "Reconnecting" beside a blank number. A Dock
+    /// badge is a number and nothing else, sitting in a Dock the operator is
+    /// glancing at from inside QLab — so if it kept showing a cue after the
+    /// session dropped, there would be no way to tell from looking at it.
+    @Test("A drop takes the cue number off the Dock badge")
+    func dropClearsTheDockBadge() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = Self.populatedShow
+        let port = try await peer.start()
+        let model = AppModel(preferences: try makePreferences(requestTimeout: 0.3))
+        defer { model.disconnect() }
+        model.preferences.showsDockBadge = true
+
+        await model.client.connect(
+            to: .localhost(port: port), workspaceID: "W", passcode: nil
+        )
+        try #require(model.client.status == .connected)
+        // The badge has to be showing something for its disappearance to mean
+        // anything — the requirement the first disconnect test lacked.
+        try #require(model.dockBadgeLabel == "1")
+
+        peer.stop()
+
+        let deadline = ContinuousClock.now + .seconds(3)
+        while model.client.status.hasLiveData, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(!model.client.status.hasLiveData)
+        #expect(model.standbyCue == nil)
+        #expect(model.dockBadgeLabel == nil)
+    }
+
     @Test("A reconnect repopulates the display without a manual refresh")
     func reconnectRepopulatesCueData() async throws {
         let peer = try AuthorizationPeer()

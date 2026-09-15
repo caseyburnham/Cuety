@@ -26,6 +26,15 @@ nonisolated struct CueGraph: Sendable {
     /// ``cue(withID:)`` and ``rowIndexByCueID``.
     let rows: [Cue]
 
+    /// Every cue number in the list, in the order the cues are indexed —
+    /// groups, their children, and their children's children.
+    ///
+    /// Nested cues included, and for the same reason ``cue(withID:)`` includes
+    /// them: the playhead can be parked inside a group, so any of these numbers
+    /// can end up in the display's headline. The headline is sized to fit the
+    /// widest of them, which is what keeps it one size for a whole cue list.
+    let cueNumbers: [String]
+
     /// Every cue in the list by ID — groups, their children, and their
     /// children's children.
     private let cuesByID: [String: Cue]
@@ -44,11 +53,15 @@ nonisolated struct CueGraph: Sendable {
 
         var cues: [String: Cue] = [:]
         var rowIndices: [String: Int] = [:]
+        var numbers: [String] = []
         for (index, row) in cueList.children.enumerated() {
-            Self.index(row, asRow: index, cues: &cues, rowIndices: &rowIndices)
+            Self.index(
+                row, asRow: index, cues: &cues, rowIndices: &rowIndices, numbers: &numbers
+            )
         }
         self.cuesByID = cues
         self.rowIndexByCueID = rowIndices
+        self.cueNumbers = numbers
     }
 
     /// Records a cue and everything inside it against the top-level row that
@@ -57,16 +70,20 @@ nonisolated struct CueGraph: Sendable {
         _ cue: Cue,
         asRow rowIndex: Int,
         cues: inout [String: Cue],
-        rowIndices: inout [String: Int]
+        rowIndices: inout [String: Int],
+        numbers: inout [String]
     ) {
         // First occurrence wins. QLab IDs are unique, but a defensive choice
         // here beats a crash on a duplicate.
         if cues[cue.uniqueID] == nil {
             cues[cue.uniqueID] = cue
             rowIndices[cue.uniqueID] = rowIndex
+            if let number = cue.displayNumber { numbers.append(number) }
         }
         for child in cue.children {
-            Self.index(child, asRow: rowIndex, cues: &cues, rowIndices: &rowIndices)
+            Self.index(
+                child, asRow: rowIndex, cues: &cues, rowIndices: &rowIndices, numbers: &numbers
+            )
         }
     }
 
@@ -111,6 +128,68 @@ nonisolated struct CueGraph: Sendable {
         guard start < rows.count else { return [] }
         let end = min(rows.count, start + count)
         return Array(rows[start..<end])
+    }
+
+    /// The rows either side of `cueID`, each side making up what the other
+    /// could not fill.
+    ///
+    /// Near the end of a cue list there are not `below` rows left to show, and
+    /// asking for them separately meant the drawer simply got shorter — the
+    /// display shifting under the operator over the last few cues of a show,
+    /// which is exactly when they are looking at it. The rows a side cannot
+    /// use are spent on the other side instead, so the drawer holds its shape:
+    /// three and three becomes five and one on the second-to-last row, and six
+    /// and none on the last. The same at the top of the list, in the other
+    /// direction.
+    ///
+    /// A side set to **zero** stays empty, and is not a place the other side's
+    /// shortfall can go. Zero rows above is an instruction about what belongs
+    /// on screen, not an arithmetic detail to be made up elsewhere — an
+    /// operator who has said they never want to look backwards should not find
+    /// six past cues in the drawer because the show reached its last cue.
+    ///
+    /// Returns fewer rows than asked for in total only when the list itself is
+    /// too short to fill them: nothing is padded with blanks.
+    func neighbourhood(around cueID: String, above: Int, below: Int) -> Neighbourhood {
+        guard let index = rowIndexByCueID[cueID] else {
+            return Neighbourhood(above: [], below: [])
+        }
+
+        let wantedAbove = max(0, above)
+        let wantedBelow = max(0, below)
+        let availableAbove = index
+        let availableBelow = rows.count - index - 1
+
+        let fittedAbove = min(wantedAbove, availableAbove)
+        let fittedBelow = min(wantedBelow, availableBelow)
+
+        // What each side asked for and the list could not give it, offered to
+        // the other side up to the room that side has left.
+        let spareAbove = wantedAbove > 0
+            ? min(wantedBelow - fittedBelow, availableAbove - fittedAbove) : 0
+        let spareBelow = wantedBelow > 0
+            ? min(wantedAbove - fittedAbove, availableBelow - fittedBelow) : 0
+
+        return Neighbourhood(
+            above: rowsAbove(cueID, count: fittedAbove + spareAbove),
+            below: rowsBelow(cueID, count: fittedBelow + spareBelow)
+        )
+    }
+
+    /// The drawer's window onto the list: the rows either side of one cue.
+    ///
+    /// List position, like everything else here. Neither side is a record of
+    /// what has fired or a prediction of what will.
+    nonisolated struct Neighbourhood: Hashable, Sendable {
+        /// The rows above, nearest last — so the final element is the row
+        /// directly above the cue.
+        let above: [Cue]
+
+        /// The rows below, nearest first.
+        let below: [Cue]
+
+        /// How many rows in total, the cue's own row aside.
+        var count: Int { above.count + below.count }
     }
 
     /// Whether `cueID` *is* the first row of the list.

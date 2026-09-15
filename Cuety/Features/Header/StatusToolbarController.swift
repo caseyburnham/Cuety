@@ -165,31 +165,32 @@ final class StatusToolbarController: NSObject, NSToolbarDelegate {
 
     // MARK: NSToolbarDelegate
 
-    /// The sidebar control, then the title, then the status cluster at the
-    /// trailing edge — the standard composition for a window with a sidebar.
-    /// The fixed space keeps the keep-awake toggle from reading as a third
-    /// status glyph.
+    /// The sidebar control at the leading edge, then the status cluster at the
+    /// trailing one. The fixed space keeps the keep-awake toggle from reading
+    /// as a third status glyph.
     ///
-    /// The first two are the system's own items, not Cuety's. `.toggleSidebar`
-    /// sends `toggleSidebar:` down the responder chain, where the
-    /// `NSSplitViewController` behind `NavigationSplitView` answers it, and
-    /// `columnVisibility` writes the result back to
-    /// ``AppModel/sidebarVisibility`` — so the model still hears about it
-    /// without Cuety owning the control. Being the *standard* item is also
-    /// what lets AppKit place it against the sidebar's edge and move it with
-    /// the divider; a custom item in the same slot is just an item that
-    /// happens to be first.
+    /// `.toggleSidebar` is the system's own item, not Cuety's: it sends
+    /// `toggleSidebar:` down the responder chain, where the split view behind
+    /// `NavigationSplitView` answers it, and `columnVisibility` writes the
+    /// result back to ``AppModel/sidebarVisibility`` — so the model still hears
+    /// about it without Cuety owning the control.
     ///
-    /// The sidebar toggle goes *after* the separator, not before it. Items
-    /// ahead of a tracking separator are laid out inside the sidebar's own
-    /// width, so putting it first pinned it to the far left and — once the
-    /// sidebar collapsed and that region went to zero — left it nowhere to fit,
-    /// at which point AppKit moved it into the overflow chevron at the far
-    /// right and re-laid-out every other item to do it. Behind the separator it
-    /// sits at the leading edge of the detail pane and travels with the
-    /// divider, which is where Mail and Notes keep theirs.
+    /// There is deliberately no `.sidebarTrackingSeparator`, and the cost is
+    /// that this toggle sits at the leading edge of the *items* rather than out
+    /// over the sidebar where Finder's is.
+    ///
+    /// A tracking separator aligns itself with a titlebar *section*, and a
+    /// window only has one of those when its content is an
+    /// `NSSplitViewController` whose sidebar `NSSplitViewItem` has
+    /// `behavior == .sidebar`. `NavigationSplitView` is not that: the window's
+    /// content controller is SwiftUI's own hosting controller with a bare
+    /// `NSSplitView` inside it. Measured rather than assumed — with the
+    /// separator in this list, and the sidebar open with a real divider, it
+    /// reported `isVisible == false` both immediately and two seconds after
+    /// layout settled. It never draws. What it *did* do is take up a position,
+    /// so anything listed behind it was laid out in the detail region — which
+    /// is how the toggle ended up to the right of the divider.
     private static let identifiers: [NSToolbarItem.Identifier] = [
-        .sidebarTrackingSeparator,
         .toggleSidebar,
         .flexibleSpace,
         .cuetyKeepAwake,
@@ -270,9 +271,9 @@ final class StatusToolbarController: NSObject, NSToolbarDelegate {
             return item
 
         default:
-            // The sidebar toggle, the tracking separator and the spacers. The
-            // toolbar builds all of those itself, which is the point of using
-            // their identifiers rather than items of Cuety's own.
+            // The sidebar toggle and the spacers. The toolbar builds those
+            // itself, which is the point of using their identifiers rather than
+            // items of Cuety's own.
             return nil
         }
     }

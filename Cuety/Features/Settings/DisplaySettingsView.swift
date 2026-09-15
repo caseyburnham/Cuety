@@ -4,56 +4,26 @@ import SwiftUI
 struct DisplaySettingsView: View {
     /// The height this pane needs to show everything without scrolling.
     /// Applied by ``SettingsView``; measured, not guessed.
-    static let settingsHeight: CGFloat = 585
+    static let settingsHeight: CGFloat = 555
 
     @Environment(AppModel.self) private var model
-
-    /// Loaded once in `task` rather than read in `body`: building the catalogue
-    /// walks every installed family and probes each for a digit glyph, which is
-    /// far too much work to repeat on every view update.
-    @State private var allFamilies: [String] = []
-    @State private var recommendedFamilies: [String] = []
 
     private var preferences: Preferences { model.preferences }
 
     var body: some View {
         Form {
+            // The system font, in one of two designs and six weights. Choosing
+            // an arbitrary installed family was offered here and withdrawn —
+            // see ``Typography/font(size:weight:)`` for why it never worked.
             Section("Cue Number") {
-                Picker("Font", selection: Bindable(preferences).fontFamily) {
-                    Text("System").tag(String?.none)
-
-                    if !recommendedFamilies.isEmpty {
-                        Section("Suited to Large Numbers") {
-                            ForEach(recommendedFamilies, id: \.self) { family in
-                                Text(family).tag(String?.some(family))
-                            }
-                        }
-                    }
-
-                    if !allFamilies.isEmpty {
-                        Section("All Fonts") {
-                            ForEach(allFamilies, id: \.self) { family in
-                                Text(family).tag(String?.some(family))
-                            }
-                        }
-                    }
-                }
-
                 Picker("Weight", selection: Bindable(preferences).fontWeight) {
                     ForEach(FontWeightChoice.allCases) { choice in
                         Text(choice.title).tag(choice)
                     }
                 }
 
-                // Only meaningful for the system font — a custom family brings
-                // its own shapes, so there is no rounded variant to opt into.
                 Toggle("Use the rounded system font", isOn: Bindable(preferences).usesRoundedSystemFont)
-                    .disabled(preferences.fontFamily != nil)
-                    .help(
-                        preferences.fontFamily == nil
-                            ? "Switches the system font to its rounded design."
-                            : "Only applies when the cue number uses the system font."
-                    )
+                    .help("Switches the system font to its rounded design.")
 
                 sample
             }
@@ -94,18 +64,17 @@ struct DisplaySettingsView: View {
             } footer: {
                 Text("""
                 The drawer shows the watched cue list either side of the playhead. \
-                A group counts as one row; the cues inside it are not listed.
+                A group counts as one row; the cues inside it are not listed. \
+                Near either end of the list, rows one side has run out of are \
+                shown on the other instead, so the drawer keeps its size — \
+                unless that side is set to none.
                 """)
             }
         }
         .formStyle(.grouped)
-        .task {
-            allFamilies = FontCatalog.availableFamilies
-            recommendedFamilies = FontCatalog.recommendedFamilies
-        }
     }
 
-    /// A live preview of the chosen family and weight, so the choice can be
+    /// A live preview of the chosen weight and design, so the choice can be
     /// judged on the glyphs themselves rather than on two names.
     ///
     /// The weight comes from ``Typography/cueNumberWeight`` rather than being
@@ -123,7 +92,7 @@ struct DisplaySettingsView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
                 .frame(maxWidth: .infinity, alignment: .trailing)
-                .accessibilityLabel("Sample cue number in the selected font")
+                .accessibilityLabel("Sample cue number at the selected weight")
         }
     }
 }
