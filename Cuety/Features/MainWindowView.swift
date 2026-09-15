@@ -7,6 +7,12 @@ struct MainWindowView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: Bindable(model).sidebarVisibility) {
             WorkspaceSidebar()
+                // The toolbar is an `NSToolbar` now — see ``StatusToolbar``.
+                // SwiftUI's automatic sidebar toggle would put a second,
+                // SwiftUI-owned toolbar on the window and the two would take
+                // turns evicting each other; ``StatusToolbarController``
+                // contributes the sidebar control instead.
+                .toolbar(removing: .sidebarToggle)
         } detail: {
             detail
         }
@@ -32,12 +38,23 @@ struct MainWindowView: View {
                 model.setPresenting(isFullScreen)
             }
         )
-        // The toolbar's own full-screen behaviour is what hides it now, in
-        // place of the hard hide `isPresenting` used to apply. `.onHover`
-        // brings it back when the pointer reaches the top of the display,
-        // exactly as the menu bar and Dock do, so the status glyph stays
-        // reachable without leaving stage mode.
-        .windowToolbarFullScreenVisibility(.onHover)
+        // Also zero-sized, and here for the same reason: the window's toolbar
+        // is the window's, and SwiftUI can only describe one.
+        //
+        // Which is why there is no `.toolbar` or `.windowToolbarFullScreenVisibility`
+        // anywhere in this view. Both ask SwiftUI to configure a toolbar, and
+        // SwiftUI configures a toolbar by installing one of its own — so having
+        // either meant SwiftUI and ``StatusToolbarController`` each replacing
+        // the other's, rebuilding every item in the process. That showed up as
+        // all four buttons flashing whenever the sidebar moved, and as a
+        // freshly installed toolbar re-measuring and deciding the sidebar
+        // control belonged in the overflow menu.
+        //
+        // Presentation mode loses nothing by it: hiding the toolbar in full
+        // screen and revealing it when the pointer reaches the top of the
+        // display is what macOS does with a title bar by default, and it is
+        // where `.onHover` was asking for that behaviour from.
+        .background(StatusToolbar())
     }
 
     /// The largest share of the detail area the drawer may occupy.
@@ -66,7 +83,6 @@ struct MainWindowView: View {
                     }
                 }
         }
-        .toolbar { StatusToolbarContent() }
         .navigationTitle(navigationTitle)
         .navigationSubtitle(navigationSubtitle)
         // Escape leaves presentation mode. Still needed with real full screen:
