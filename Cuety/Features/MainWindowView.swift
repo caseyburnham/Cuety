@@ -5,17 +5,18 @@ struct MainWindowView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        NavigationSplitView(columnVisibility: Bindable(model).sidebarVisibility) {
+        // A real `NSSplitViewController`, not a `NavigationSplitView` — see
+        // ``MainSplitViewController`` for what that buys and why nothing else
+        // would. It also means there is no `.toolbar(removing: .sidebarToggle)`
+        // here any more: that existed to stop SwiftUI contributing a sidebar
+        // control of its own, and SwiftUI has no split view to contribute one
+        // for now.
+        MainSplitView(model: model) {
             WorkspaceSidebar()
-                // The toolbar is an `NSToolbar` now — see ``StatusToolbar``.
-                // SwiftUI's automatic sidebar toggle would put a second,
-                // SwiftUI-owned toolbar on the window and the two would take
-                // turns evicting each other; ``StatusToolbarController``
-                // contributes the sidebar control instead.
-                .toolbar(removing: .sidebarToggle)
         } detail: {
             detail
         }
+        .ignoresSafeArea()
         .task {
             // Browsing starts with the window, not with the app, so a launch
             // straight into a background scene doesn't hold the network open.
@@ -28,6 +29,13 @@ struct MainWindowView: View {
         }
         .sheet(item: Bindable(model).passcodePrompt) { prompt in
             PasscodeSheet(prompt: prompt)
+        }
+        // Presented here rather than from the sidebar, which used to own it
+        // because it had the button that opened it. ⌘K from the Connection
+        // menu is the only way in now, and a sheet the whole window puts up
+        // should not depend on the sidebar being in the tree to do it.
+        .sheet(isPresented: Bindable(model).isAddingServer) {
+            AddServerSheet()
         }
         // Presentation mode is real full screen, which is the window's state
         // and not the layout's — see ``FullScreenPresentation``. A background
@@ -83,8 +91,15 @@ struct MainWindowView: View {
                     }
                 }
         }
-        .navigationTitle(navigationTitle)
-        .navigationSubtitle(navigationSubtitle)
+        // No `.navigationTitle`/`.navigationSubtitle`. Those were what put a
+        // leading titlebar accessory on the window, and an accessory holding
+        // the leading region is what squeezed the toolbar into a trailing strip
+        // the width of its own items — the toolbar's flexible space had nothing
+        // left to expand into, so every control, the sidebar toggle included,
+        // sat bunched at the right. ``StatusToolbarController`` sets
+        // `NSWindow.title` and `.subtitle` directly instead, which is the same
+        // two strings in the same place without the accessory.
+        //
         // Escape leaves presentation mode. Still needed with real full screen:
         // macOS does not exit full screen on Escape, so without this the only
         // ways out are the menu bar and the green button — both of which have
@@ -94,18 +109,6 @@ struct MainWindowView: View {
         }
     }
 
-    private var navigationTitle: String {
-        model.client.workspace?.displayName ?? "Cuety"
-    }
-
-    private var navigationSubtitle: String {
-        guard model.client.status.hasLiveData else { return model.client.status.title }
-        guard let listID = model.client.watchedCueListID,
-              let list = model.client.cueLists.first(where: { $0.uniqueID == listID }),
-              let name = list.displayName
-        else { return model.client.status.title }
-        return name
-    }
 }
 
 #Preview {

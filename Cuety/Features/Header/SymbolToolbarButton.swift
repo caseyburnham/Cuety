@@ -20,6 +20,12 @@ final class SymbolToolbarButton: NSButton {
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 
+    /// Refuses the mouse for the same reason the glyph does: the button has to
+    /// stay clickable while it is showing progress.
+    private final class NonInteractiveProgressIndicator: NSProgressIndicator {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+
     /// Toolbar glyphs are the large-scale variant of a symbol at the system's
     /// default point size. Asked for by scale rather than by a literal size,
     /// so the glyph tracks whatever the system considers standard instead of a
@@ -126,6 +132,48 @@ final class SymbolToolbarButton: NSButton {
     /// Bounces the glyph once.
     func bounce() {
         glyphState.beat += 1
+    }
+
+    /// Built on first use, because only the Refresh item asks for one.
+    private var spinner: NonInteractiveProgressIndicator?
+
+    /// Shows the system's indeterminate spinner in place of the glyph, or puts
+    /// the glyph back.
+    ///
+    /// A real `NSProgressIndicator` rather than an animated symbol. Two
+    /// earlier attempts at this control got it wrong the same way — a rotating
+    /// `arrow.clockwise`, then a magic replace into `progress.indicator` —
+    /// and both were glyphs *depicting* progress. macOS has the thing itself,
+    /// everyone recognises it, and it does not need to look like the rest of
+    /// Cuety to be understood.
+    ///
+    /// The button stays enabled and clickable throughout, which is why the
+    /// spinner is layered over it rather than swapped in for it: pressing
+    /// Refresh again while a refresh runs supersedes it rather than being
+    /// ignored, so the control must not go inert just because it is busy.
+    func setSpinning(_ spinning: Bool) {
+        if spinning, spinner == nil {
+            let indicator = NonInteractiveProgressIndicator()
+            indicator.style = .spinning
+            indicator.controlSize = .small
+            indicator.isIndeterminate = true
+            // Nothing to see when it is not running: the glyph is back by then.
+            indicator.isDisplayedWhenStopped = false
+            indicator.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(indicator)
+            NSLayoutConstraint.activate([
+                indicator.centerXAnchor.constraint(equalTo: centerXAnchor),
+                indicator.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+            spinner = indicator
+        }
+
+        glyph.isHidden = spinning
+        if spinning {
+            spinner?.startAnimation(nil)
+        } else {
+            spinner?.stopAnimation(nil)
+        }
     }
 
     /// Cycles the glyph's layers to convey work in progress, or stops.

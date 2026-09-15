@@ -1,7 +1,4 @@
 import Foundation
-// For `NavigationSplitViewVisibility`, which presentation mode saves and
-// restores.
-import SwiftUI
 import Testing
 
 @testable import Cuety
@@ -172,15 +169,29 @@ struct AppModelLifecycleTests {
     @Test("Leaving presentation mode restores the sidebar it collapsed")
     func presentationRestoresTheSidebar() throws {
         let model = try makeModel()
-        model.sidebarVisibility = .all
+        model.isSidebarVisible = true
 
         model.togglePresentationMode()
         #expect(model.isPresenting)
-        #expect(model.sidebarVisibility == .detailOnly)
+        #expect(!model.isSidebarVisible)
 
         model.togglePresentationMode()
         #expect(!model.isPresenting)
-        #expect(model.sidebarVisibility == .all)
+        #expect(model.isSidebarVisible)
+    }
+
+    @Test("A sidebar collapsed before presenting stays collapsed afterwards")
+    func presentationRestoresACollapsedSidebar() throws {
+        // The other direction of the same guarantee, and the one a single
+        // `Bool` makes worth stating: restoring must put back what was there,
+        // not reveal a sidebar the operator had deliberately hidden.
+        let model = try makeModel()
+        model.isSidebarVisible = false
+
+        model.togglePresentationMode()
+        model.togglePresentationMode()
+
+        #expect(!model.isSidebarVisible)
     }
 
     @Test("A window already presenting does not overwrite the sidebar to restore")
@@ -194,12 +205,12 @@ struct AppModelLifecycleTests {
         // `.detailOnly` as the visibility to restore, and the sidebar would
         // never come back from presentation mode.
         let model = try makeModel()
-        model.sidebarVisibility = .all
+        model.isSidebarVisible = true
 
         model.setPresenting(true)
         model.setPresenting(true)
         model.setPresenting(false)
 
-        #expect(model.sidebarVisibility == .all)
+        #expect(model.isSidebarVisible)
     }
 }

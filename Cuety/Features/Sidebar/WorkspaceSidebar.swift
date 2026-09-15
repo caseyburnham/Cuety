@@ -6,15 +6,7 @@ struct WorkspaceSidebar: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    // Both owned by the Add Server sheet's `onAppear`, which is the only thing
-    // that seeds them — `newPort` used to start at ``QLabServer/defaultPort``
-    // here and then be overwritten with the operator's stored default before
-    // the field was ever seen, so the constant read as the value in use and
-    // was not.
-    @State private var newHost = ""
-    @State private var newPort = ""
     @State private var isConnecting = false
-    @FocusState private var hostIsFocused: Bool
 
     private enum Selection: Hashable {
         case workspace(WorkspaceSelection)
@@ -115,52 +107,19 @@ struct WorkspaceSidebar: View {
         // opaque background of its own by default, which sits on top of the
         // translucency the system already provides and flattens it.
         .scrollContentBackground(.hidden)
-        .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack {
-                Button {
-                    model.isAddingServer = true
-                } label: {
-                    Label("Add Server…", systemImage: "plus")
-                }
-                Spacer()
-                Button {
-                    Task { await model.refresh() }
-                } label: {
-                    // The system's own indeterminate spinner, not a symbol
-                    // standing in for one.
-                    //
-                    // Two earlier attempts got this wrong in the same way — a
-                    // rotating `arrow.clockwise`, then a magic replace into
-                    // `progress.indicator`. Both were glyphs *depicting*
-                    // progress. macOS already has the thing itself, everyone
-                    // recognises it, and it does not need to look like the
-                    // rest of Cuety to be understood.
-                    if model.isRefreshing {
-                        ProgressView()
-                            .controlSize(.small)
-                            .transition(.blurReplace)
-                    } else {
-                        Label("Refresh Connections", systemImage: "arrow.clockwise")
-                            .transition(.blurReplace)
-                    }
-                }
-                .motion(Motion.status, value: model.isRefreshing)
-                .labelStyle(.iconOnly)
-                .disabled(!model.canRefresh)
-                // Still enabled while refreshing: pressing it again starts over
-                // rather than being ignored.
-                .help(model.isRefreshing
-                    ? "Searching. Click again to start over."
-                    : "Re-ask every server what it has open, and rebuild the current QLab connection.")
-            }
-            .padding(10)
-            .background(.bar)
-        }
-        .sheet(isPresented: Bindable(model).isAddingServer) {
-            addServerSheet
-        }
     }
+    // No `.navigationSplitViewColumnWidth` either. The sidebar is an
+    // `NSSplitViewItem` now, so its width is `minimumThickness` and
+    // `maximumThickness` on that item — and the divider the operator drags is
+    // autosaved by the split view rather than reset to an `ideal` on every
+    // launch. See ``MainSplitViewController``.
+    // No bottom bar. There is no sidebar bottom-bar API for
+    // `NavigationSplitView` on macOS — `tabViewSidebarBottomBar` is
+    // `TabView`-only and `accessoryBar(id:)` sits under the toolbar — so the
+    // one that used to be here was a `safeAreaInset` holding an `HStack` over
+    // `.bar`, a hand-built approximation of a control the platform does not
+    // offer. Refresh is a toolbar item now, and Add Server is ⌘K in the
+    // Connection menu, which is where a command with no live state belongs.
 
     /// What the sidebar highlights, read straight from the model and stored
     /// nowhere else.
@@ -344,55 +303,6 @@ struct WorkspaceSidebar: View {
         .tag(Selection.cueList(list.uniqueID))
         .help(list.displayName ?? "Untitled Cue List")
         .accessibilityHint("Watches this cue list's playhead")
-    }
-
-    private var addServerSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Add Server").font(.headline)
-            Text("Enter the address of the Mac running QLab.")
-                .foregroundStyle(.secondary)
-            Form {
-                TextField("Host", text: $newHost, prompt: Text("192.168.1.10"))
-                    .focused($hostIsFocused)
-                TextField("Port", text: $newPort)
-                    .monospacedDigit()
-            }
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel) { model.isAddingServer = false }
-                    .keyboardShortcut(.cancelAction)
-                Button("Add", action: addServer)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(host.isEmpty || port == nil)
-            }
-        }
-        .padding(20)
-        .frame(width: 380)
-        .onAppear {
-            // Reset here rather than in the button that opens the sheet, since
-            // ⌘K from the Connection menu opens it too and cannot reach this
-            // view's state. Both paths now get empty fields.
-            newHost = ""
-            newPort = String(model.preferences.defaultPort)
-            hostIsFocused = true
-        }
-    }
-
-    private var host: String { newHost.trimmingCharacters(in: .whitespacesAndNewlines) }
-    /// The typed port, or `nil` when Add should stay disabled.
-    ///
-    /// Bounded by ``Preferences/Limits/port`` rather than by `UInt16` parsing
-    /// alone, so the field and the stored default agree on what a port is.
-    private var port: UInt16? {
-        guard let value = Int(newPort), Preferences.Limits.port.contains(value) else { return nil }
-        return UInt16(value)
-    }
-
-    private func addServer() {
-        guard !host.isEmpty, let port else { return }
-        let server = model.browser.addManualServer(host: host, port: port)
-        model.isAddingServer = false
-        probeWorkspaces(on: server)
     }
 
     /// Asks a single server what it has open, leaving the other servers and the

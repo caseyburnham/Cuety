@@ -10,6 +10,22 @@ struct AppCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .sidebar) {
+            // Cuety's own, because nothing contributes it any more. SwiftUI
+            // added Show/Hide Sidebar for as long as the window was a
+            // `NavigationSplitView`; it is an `NSSplitViewController` now —
+            // see ``MainSplitViewController`` — and SwiftUI has no split view
+            // to offer a command for. ⌃⌘S is the system's shortcut for it, so
+            // the item that replaces it answers to the same keys.
+            //
+            // Written against ``AppModel/isSidebarVisible`` rather than by
+            // sending `toggleSidebar:` down the responder chain: the model is
+            // what presentation mode saves and restores, so routing the menu
+            // around it would let the two disagree.
+            Button(model.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar") {
+                model.toggleSidebar()
+            }
+            .keyboardShortcut("s", modifiers: [.command, .control])
+
             Button(model.isPresenting ? "Exit Presentation Mode" : "Enter Presentation Mode") {
                 model.togglePresentationMode()
             }

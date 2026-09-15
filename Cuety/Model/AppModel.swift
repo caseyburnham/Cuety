@@ -106,11 +106,17 @@ final class AppModel {
     /// screen has entrances Cuety does not own.
     var isPresenting = false
 
-    /// Sidebar visibility in the main window, tracked here so the presentation
-    /// mode command can collapse it and restore it afterwards.
-    var sidebarVisibility: NavigationSplitViewVisibility = .automatic
+    /// Whether the main window's sidebar is showing, tracked here so the
+    /// presentation mode command can collapse it and restore it afterwards.
+    ///
+    /// A `Bool`, because a sidebar either is or is not collapsed. This was a
+    /// `NavigationSplitViewVisibility` while the window was a
+    /// `NavigationSplitView`, and the third state was never Cuety's to want:
+    /// `.automatic` meant "whatever SwiftUI decides", which is not a thing
+    /// presentation mode can save and put back.
+    var isSidebarVisible = true
 
-    private var sidebarVisibilityBeforePresenting: NavigationSplitViewVisibility = .automatic
+    private var wasSidebarVisibleBeforePresenting = true
 
     /// Holds the display awake while enabled.
     private let displaySleepBlocker = DisplaySleepBlocker()
@@ -707,14 +713,23 @@ final class AppModel {
         guard presenting != isPresenting else { return }
         withAnimation(Motion.chrome.unlessMotionIsReduced) {
             if presenting {
-                sidebarVisibilityBeforePresenting = sidebarVisibility
+                wasSidebarVisibleBeforePresenting = isSidebarVisible
                 isPresenting = true
-                sidebarVisibility = .detailOnly
+                isSidebarVisible = false
             } else {
                 isPresenting = false
-                sidebarVisibility = sidebarVisibilityBeforePresenting
+                isSidebarVisible = wasSidebarVisibleBeforePresenting
             }
         }
+    }
+
+    /// Collapses or reveals the sidebar.
+    ///
+    /// Unanimated here: ``MainSplitViewController`` animates the collapse
+    /// itself, the way AppKit does it, so wrapping this in `withAnimation`
+    /// would only add a second opinion about the timing.
+    func toggleSidebar() {
+        isSidebarVisible.toggle()
     }
 
     func toggleDrawer() {

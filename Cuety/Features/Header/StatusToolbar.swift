@@ -28,8 +28,34 @@ struct StatusToolbar: View {
             heartbeatTint: client.heartbeatTint,
             heartbeatCount: client.heartbeatCount,
             heartbeatSummary: client.heartbeatSummary,
-            status: client.status
+            status: client.status,
+            isRefreshing: model.isRefreshing,
+            canRefresh: model.canRefresh,
+            windowTitle: windowTitle,
+            windowSubtitle: windowSubtitle
         )
+    }
+
+    /// The window's title: the workspace, which is the thing the window is
+    /// showing.
+    ///
+    /// Carried in the readout and written to `NSWindow` rather than declared
+    /// with `.navigationTitle`, which installs a titlebar accessory — see the
+    /// note in ``MainWindowView``.
+    private var windowTitle: String {
+        model.client.workspace?.displayName ?? "Cuety"
+    }
+
+    /// The cue list being watched, falling back to the connection state when
+    /// there is no live list to name.
+    private var windowSubtitle: String {
+        let client = model.client
+        guard client.status.hasLiveData else { return client.status.title }
+        guard let listID = client.watchedCueListID,
+              let list = client.cueLists.first(where: { $0.uniqueID == listID }),
+              let name = list.displayName
+        else { return client.status.title }
+        return name
     }
 
     private var actions: StatusToolbarActions {
@@ -39,7 +65,8 @@ struct StatusToolbar: View {
             // setting and the actual assertion drift apart.
             toggleKeepAwake: { model.toggleKeepAwake() },
             openActivityLog: { openWindow(id: WindowID.activityLog.rawValue) },
-            openConnectionInspector: { openWindow(id: WindowID.connectionInspector.rawValue) }
+            openConnectionInspector: { openWindow(id: WindowID.connectionInspector.rawValue) },
+            refresh: { Task { await model.refresh() } }
         )
     }
 }
