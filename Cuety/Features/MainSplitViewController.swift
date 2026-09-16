@@ -1,5 +1,7 @@
-import AppKit
 import SwiftUI
+
+#if os(macOS)
+import AppKit
 
 @MainActor
 final class MainSplitViewController: NSSplitViewController {
@@ -37,7 +39,6 @@ final class MainSplitViewController: NSSplitViewController {
         super.viewDidLoad()
         splitView.autosaveName = "com.ivxx.Cuety.mainSplitView"
     }
-
 
     var isSidebarVisible: Bool { !sidebarItem.isCollapsed }
 
@@ -81,3 +82,38 @@ struct MainSplitView<Sidebar: View, Detail: View>: NSViewControllerRepresentable
         controller.setSidebarVisible(model.isSidebarVisible)
     }
 }
+#else
+struct MainSplitView<Sidebar: View, Detail: View>: View {
+    let model: AppModel
+    @ViewBuilder let sidebar: () -> Sidebar
+    @ViewBuilder let detail: () -> Detail
+
+    var body: some View {
+        NavigationSplitView(columnVisibility: $sidebarVisibility) {
+            sidebar()
+                .navigationTitle("Workspaces")
+        } detail: {
+            detail()
+        }
+        .onChange(of: model.isSidebarVisible) { _, visible in
+            sidebarVisibility = visible ? .all : .detailOnly
+        }
+        .onChange(of: sidebarVisibility) { _, visibility in
+            model.isSidebarVisible = visibility != .detailOnly
+        }
+    }
+
+    @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
+
+    init(
+        model: AppModel,
+        @ViewBuilder sidebar: @escaping () -> Sidebar,
+        @ViewBuilder detail: @escaping () -> Detail
+    ) {
+        self.model = model
+        self.sidebar = sidebar
+        self.detail = detail
+        _sidebarVisibility = State(initialValue: model.isSidebarVisible ? .all : .detailOnly)
+    }
+}
+#endif

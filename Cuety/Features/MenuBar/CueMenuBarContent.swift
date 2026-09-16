@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import SwiftUI
 
@@ -67,5 +68,6 @@ struct CueMenuBarContent: View {
     private func showMainWindow() {
         NSApp.activate()
         openWindow(id: WindowID.main.rawValue)
-    }
+    } 
 }
+#endif

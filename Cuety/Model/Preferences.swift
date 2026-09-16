@@ -1,4 +1,11 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+typealias PlatformFont = NSFont
+#else
+import UIKit
+typealias PlatformFont = UIFont
+#endif
 
 enum AppearanceMode: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     case automatic
@@ -64,7 +71,7 @@ enum FontWeightChoice: String, CaseIterable, Codable, Hashable, Sendable, Identi
         }
     }
 
-    var appKitWeight: NSFont.Weight {
+    var platformWeight: PlatformFont.Weight {
         switch self {
         case .regular: .regular
         case .medium: .medium

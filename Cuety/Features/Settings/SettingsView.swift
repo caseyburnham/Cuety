@@ -1,5 +1,7 @@
-import AppKit
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 struct SettingsView: View {
     static let width: CGFloat = 540
@@ -47,15 +49,18 @@ struct SettingsView: View {
             minHeight: Pane.shortest,
             maxHeight: .infinity
         )
+#if os(macOS)
         .background(
             SettingsWindowHeight(
                 height: pane.height,
                 isAnimated: !reduceMotion
             )
         )
+#endif
     }
 }
 
+#if os(macOS)
 private struct SettingsWindowHeight: NSViewRepresentable {
     let height: CGFloat
 
@@ -121,6 +126,7 @@ private struct SettingsWindowHeight: NSViewRepresentable {
         }
     }
 }
+#endif
 
 #Preview {
     SettingsView()

@@ -3,6 +3,12 @@ import SwiftUI
 struct MainWindowView: View {
     @Environment(AppModel.self) private var model
 
+#if os(iOS)
+    @State private var isShowingSettings = false
+    @State private var isShowingActivityLog = false
+    @State private var isShowingConnectionInspector = false
+#endif
+
     var body: some View {
         MainSplitView(model: model) {
             WorkspaceSidebar()
@@ -25,6 +31,55 @@ struct MainWindowView: View {
             }
         )
         .background(StatusToolbar())
+#if os(iOS)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    Task { await model.refresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(!model.canRefresh)
+
+                Button {
+                    isShowingConnectionInspector = true
+                } label: {
+                    Image(systemName: model.client.status.systemImage)
+                }
+
+                Button {
+                    isShowingActivityLog = true
+                } label: {
+                    Image(systemName: "heart.fill")
+                }
+
+                Button {
+                    isShowingSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+            }
+        }
+        .sheet(isPresented: $isShowingSettings) {
+            SettingsView()
+                .environment(model)
+                .preferredColorScheme(model.preferences.appearance.colorScheme)
+        }
+        .sheet(isPresented: $isShowingActivityLog) {
+            ActivityLogView()
+                .environment(model)
+                .preferredColorScheme(model.preferences.appearance.colorScheme)
+        }
+        .sheet(isPresented: $isShowingConnectionInspector) {
+            ConnectionInspectorView()
+                .environment(model)
+                .preferredColorScheme(model.preferences.appearance.colorScheme)
+        }
+#else
+        .onExitCommand {
+            if model.isPresenting { model.togglePresentationMode() }
+        }
+#endif
     }
 
     static let drawerHeightShare: CGFloat = 0.45
@@ -41,11 +96,7 @@ struct MainWindowView: View {
                     }
                 }
         }
-        .onExitCommand {
-            if model.isPresenting { model.togglePresentationMode() }
-        }
     }
-
 }
 
 #Preview {

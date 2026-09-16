@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// `Window` keeps one shared cue display; `MenuBarExtra(isInserted:)` stays bound to the preference.
-
 enum WindowID: String {
     case main = "main"
     case activityLog = "activity-log"
@@ -13,6 +11,7 @@ struct CuetyApp: App {
     @State private var model = AppModel()
 
     var body: some Scene {
+#if os(macOS)
         Window("Cuety", id: WindowID.main.rawValue) {
             MainWindowView()
                 .environment(model)
@@ -54,5 +53,13 @@ struct CuetyApp: App {
                 .environment(model)
                 .preferredColorScheme(model.preferences.appearance.colorScheme)
         }
+#else
+        WindowGroup {
+            MainWindowView()
+                .environment(model)
+                .preferredColorScheme(model.preferences.appearance.colorScheme)
+        }
+
+#endif
     }
 }

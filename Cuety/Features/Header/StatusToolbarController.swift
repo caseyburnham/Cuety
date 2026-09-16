@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import SwiftUI
 
@@ -303,3 +304,4 @@ private extension ConnectionStatus {
         return systemImage
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import Observation
 
@@ -16,5 +17,11 @@ final class DockBadge {
             }
         }
     }
-
+ 
 }
+#else
+@MainActor
+final class DockBadge {
+    func follow(_ label: @escaping @Sendable @MainActor () -> String?) {}
+}
+#endif

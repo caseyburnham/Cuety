@@ -1,5 +1,7 @@
-import AppKit
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 enum Motion {
     static let cueChange = Animation.spring(response: 0.34, dampingFraction: 0.82)
@@ -33,6 +35,10 @@ private struct ReducibleMotion<V: Equatable>: ViewModifier {
 extension Animation {
     @MainActor
     var unlessMotionIsReduced: Animation? {
+#if os(macOS)
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : self
+#else
+        self
+#endif
     }
 }

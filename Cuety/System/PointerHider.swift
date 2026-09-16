@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 
 /// Restores the window's original mouse-move setting when presentation mode ends.
@@ -55,5 +56,6 @@ final class PointerHider {
             guard !Task.isCancelled else { return }
             NSCursor.setHiddenUntilMouseMoves(true)
         }
-    }
+    } 
 }
+#endif

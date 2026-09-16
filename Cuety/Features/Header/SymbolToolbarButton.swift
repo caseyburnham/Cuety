@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import SwiftUI
 
@@ -127,5 +128,6 @@ final class SymbolToolbarButton: NSButton {
         let placeholder = NSImage(size: size, flipped: false) { _ in true }
         placeholder.isTemplate = true
         return placeholder
-    }
+    } 
 }
+#endif

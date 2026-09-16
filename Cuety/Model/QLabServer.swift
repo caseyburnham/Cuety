@@ -95,8 +95,7 @@ nonisolated struct QLabServer: Identifiable, Hashable, Sendable {
             "0000:0000:0000:0000:0000:0000:0000:0001",
         ]
 
-        for name in [Host.current().localizedName, ProcessInfo.processInfo.hostName] {
-            guard let name else { continue }
+        for name in [ProcessInfo.processInfo.hostName] {
             let normalized = normalizedHost(name)
             guard !normalized.isEmpty else { continue }
             aliases.insert(normalized)

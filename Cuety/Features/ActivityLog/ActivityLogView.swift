@@ -1,3 +1,8 @@
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 import SwiftUI
 
 struct ActivityLogView: View {
@@ -100,7 +105,6 @@ struct ActivityLogView: View {
             }
             .width(min: 50, ideal: 60, max: 80)
         }
-        .tableStyle(.inset(alternatesRowBackgrounds: true))
         .overlay { emptyState }
         .copyable(filteredEntries.filter { selection.contains($0.id) }.map(\.copyableDescription))
         .contextMenu(forSelectionType: OSCEvent.ID.self) { ids in
@@ -305,8 +309,12 @@ struct ActivityLogView: View {
             .map(\.copyableDescription)
         guard !lines.isEmpty else { return }
 
+#if os(macOS)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
+#else
+        UIPasteboard.general.string = lines.joined(separator: "\n")
+#endif
     }
 }
 

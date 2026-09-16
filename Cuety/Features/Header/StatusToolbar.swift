@@ -1,7 +1,7 @@
-import AppKit
 import SwiftUI
 
 struct StatusToolbar: View {
+#if os(macOS)
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
 
@@ -49,21 +49,24 @@ struct StatusToolbar: View {
             refresh: { Task { await model.refresh() } }
         )
     }
-}
 
-private struct StatusToolbarHost: NSViewRepresentable {
-    let readout: StatusToolbarReadout
-    let actions: StatusToolbarActions
+    private struct StatusToolbarHost: NSViewRepresentable {
+        let readout: StatusToolbarReadout
+        let actions: StatusToolbarActions
 
-    func makeCoordinator() -> StatusToolbarController { StatusToolbarController() }
+        func makeCoordinator() -> StatusToolbarController { StatusToolbarController() }
 
-    func makeNSView(context: Context) -> NSView { NSView() }
+        func makeNSView(context: Context) -> NSView { NSView() }
 
-    func updateNSView(_ view: NSView, context: Context) {
-        let controller = context.coordinator
-        let readout = readout
-        controller.actions = actions
-
-        controller.scheduleUpdate(for: view, readout: readout)
+        func updateNSView(_ view: NSView, context: Context) {
+            let controller = context.coordinator
+            controller.actions = actions
+            controller.scheduleUpdate(for: view, readout: readout)
+        }
     }
+#else
+    var body: some View {
+        Color.clear.frame(height: 0)
+    }
+#endif
 }

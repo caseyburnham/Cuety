@@ -1,25 +1,27 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+typealias MeasuringFont = NSFont
+#else
+import UIKit
+typealias MeasuringFont = UIFont
+#endif
 
 @MainActor
 struct Typography {
     static let cueNumberBaseSize: CGFloat = 720
-
     static let cueNumberMinimumScale: CGFloat = 0.02
-
     static var cueNumberMinimumSize: CGFloat { cueNumberBaseSize * cueNumberMinimumScale }
-
     static let measuringPointSize: CGFloat = 100
 
     let usesRounded: Bool
-
     let cueNumberWeight: Font.Weight
-
-    private let measuringWeight: NSFont.Weight
+    private let measuringWeight: MeasuringFont.Weight
 
     init(preferences: Preferences) {
         self.usesRounded = preferences.usesRoundedSystemFont
         self.cueNumberWeight = preferences.fontWeight.weight
-        self.measuringWeight = preferences.fontWeight.appKitWeight
+        self.measuringWeight = preferences.fontWeight.platformWeight
     }
 
     private var design: Font.Design {
@@ -45,7 +47,6 @@ struct Typography {
     private func font(size: CGFloat, weight: Font.Weight) -> Font {
         .system(size: size, weight: weight, design: design)
     }
-
 
     func cueNumberPointSize(fitting text: String, in space: CGSize) -> CGFloat {
         guard space.width > 0, space.height > 0, !text.isEmpty else {
@@ -90,11 +91,7 @@ struct Typography {
         return widest
     }
 
-    private func measuringFont(size: CGFloat) -> NSFont {
-        let system = NSFont.monospacedDigitSystemFont(ofSize: size, weight: measuringWeight)
-        guard usesRounded,
-              let descriptor = system.fontDescriptor.withDesign(.rounded)
-        else { return system }
-        return NSFont(descriptor: descriptor, size: size) ?? system
+    private func measuringFont(size: CGFloat) -> MeasuringFont {
+        MeasuringFont.monospacedDigitSystemFont(ofSize: size, weight: measuringWeight)
     }
 }

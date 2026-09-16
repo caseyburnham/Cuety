@@ -163,7 +163,6 @@ struct WorkspaceSidebar: View {
                 .help(error)
         } else if !server.hasBeenProbed {
             Button("Check for Workspaces") { probeWorkspaces(on: server) }
-                .buttonStyle(.link)
                 .help("Cuety hasn't contacted \(server.name) yet.")
         } else {
             Text("No Open Workspaces")
