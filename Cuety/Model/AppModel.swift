@@ -381,4 +381,8 @@ final class AppModel {
         preferences.keepsDisplayAwake.toggle()
         displaySleepBlocker.setEnabled(preferences.keepsDisplayAwake)
     }
+
+    func togglePerformanceMode() {
+        preferences.performanceMode.toggle()
+    }
 }

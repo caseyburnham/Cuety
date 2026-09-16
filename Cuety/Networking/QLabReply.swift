@@ -143,6 +143,14 @@ nonisolated enum QLabReplyParser {
             return envelope.address
         }
 
-        return String(message.address.dropFirst(replyPrefix.count))
+        return oscCorrelationAddress(of: message)
+    }
+
+    /// Fast production-path correlation. The OSC reply address is sufficient
+    /// for QLab replies and avoids parsing a potentially large JSON payload.
+    static func oscCorrelationAddress(of message: OSCMessage) -> String? {
+        guard isReply(message) else { return nil }
+        let address = String(message.address.dropFirst(replyPrefix.count))
+        return address.isEmpty ? nil : address
     }
 }

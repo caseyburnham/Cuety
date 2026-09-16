@@ -16,7 +16,7 @@ struct GeneralSettingsView: View {
                     }
                 }
             } footer: {
-                Text("Automatic follows the system setting. A dark display is usually the right choice in a booth.")
+                Text("Automatic follows the system setting.")
             }
 
             Section {
@@ -24,8 +24,10 @@ struct GeneralSettingsView: View {
                     get: { model.preferences.keepsDisplayAwake },
                     set: { _ in model.toggleKeepAwake() }
                 ))
+
+                Toggle("Performance mode", isOn: Bindable(preferences).performanceMode)
             } footer: {
-                Text("Prevents the screen from sleeping while Cuety is running, so the cue display stays visible through a long act.")
+                Text("Disables visual effects.")
             }
 
             Section {
@@ -42,10 +44,7 @@ struct GeneralSettingsView: View {
                 Text("Menu Bar")
             } footer: {
                 Text("""
-                The menu bar item is visible wherever you are — including \
-                while another app is in front, and while Cuety is presenting \
-                full screen. Its menu can change workspace, disconnect and \
-                enter presentation mode without going back to the window.
+                Display the standby cue number, connection status, or heartbeat in the menu bar.
                 """)
             }
 
@@ -55,10 +54,7 @@ struct GeneralSettingsView: View {
                 Text("Dock")
             } footer: {
                 Text("""
-                A badge on Cuety's Dock icon, the way an unread count is \
-                shown; a long cue number is shortened to fit. The Dock hides \
-                itself while Cuety presents full screen, so this is for \
-                glancing down from QLab rather than for the show itself.
+                Display the standby cue number in a Dock icon badge.
                 """)
             }
         }

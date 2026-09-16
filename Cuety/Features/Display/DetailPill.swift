@@ -10,6 +10,8 @@ struct DetailPill: View {
 
     var showsCueTypeLabel = true
 
+    var performanceMode = false
+
     var body: some View {
         if let content = Self.content(for: kind, cue: cue, cueListName: cueListName) {
             if content.isFlexible {
@@ -23,16 +25,24 @@ struct DetailPill: View {
         }
     }
 
+    @ViewBuilder
     private func capsule(for content: Content, hugsText: Bool) -> some View {
-        label(for: content)
+        let contentView = label(for: content)
             .font(size.font)
             .fixedSize(horizontal: hugsText || !content.isFlexible, vertical: false)
             .layoutPriority(content.isFlexible ? -1 : 0)
             .padding(.horizontal, size.horizontalPadding)
             .padding(.vertical, size.verticalPadding)
-            .glassEffect(Self.glass(for: content), in: .capsule)
-            .help(content.help)
-            .accessibilityLabel("\(kind.title): \(content.text)")
+
+        Group {
+            if performanceMode {
+                contentView.background(.quaternary, in: .capsule)
+            } else {
+                contentView.glassEffect(Self.glass(for: content), in: .capsule)
+            }
+        }
+        .help(content.help)
+        .accessibilityLabel("\(kind.title): \(content.text)")
     }
 
     @ViewBuilder
@@ -325,6 +335,8 @@ struct DetailPillsRow: View {
 
     var showsCueTypeLabel = true
 
+    var performanceMode = false
+
     @Namespace private var glassNamespace
 
     private var populated: [DetailPillKind] {
@@ -341,36 +353,56 @@ struct DetailPillsRow: View {
 
     var body: some View {
         if !populated.isEmpty {
-            GlassEffectContainer(spacing: size.glassSpacing) {
-                VStack(spacing: size.spacing) {
-                    if !inlineKinds.isEmpty {
-                        WrappingPillLayout(spacing: size.spacing) {
-                            ForEach(inlineKinds) { kind in
-                                pill(kind)
-                            }
-                        }
-                    }
-
-                    if let noteKind {
-                        pill(noteKind)
-                    }
-                }
-            }
-            .motion(Motion.pill, value: populated)
-            .motion(Motion.pill, value: cue.uniqueID)
+            pillContainer
         }
     }
 
+    @ViewBuilder
+    private var pillContainer: some View {
+        if performanceMode {
+            pillStack
+        } else {
+            GlassEffectContainer(spacing: size.glassSpacing) {
+                pillStack
+            }
+            .motion(Motion.pill, value: populated)
+        }
+    }
+
+    private var pillStack: some View {
+        VStack(spacing: size.spacing) {
+            if !inlineKinds.isEmpty {
+                WrappingPillLayout(spacing: size.spacing) {
+                    ForEach(inlineKinds) { kind in
+                        pill(kind)
+                    }
+                }
+            }
+
+            if let noteKind {
+                pill(noteKind)
+            }
+        }
+    }
+
+    @ViewBuilder
     private func pill(_ kind: DetailPillKind) -> some View {
-        DetailPill(
+        let detailPill = DetailPill(
             kind: kind,
             cue: cue,
             cueListName: cueListName,
             size: size,
-            showsCueTypeLabel: showsCueTypeLabel
+            showsCueTypeLabel: showsCueTypeLabel,
+            performanceMode: performanceMode
         )
-        .glassEffectID(kind, in: glassNamespace)
-        .glassEffectTransition(.matchedGeometry)
+
+        if performanceMode {
+            detailPill
+        } else {
+            detailPill
+                .glassEffectID(kind, in: glassNamespace)
+                .glassEffectTransition(.matchedGeometry)
+        }
     }
 }
 

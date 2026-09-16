@@ -19,7 +19,14 @@ struct CueDisplayView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .motion(Motion.cueChange, value: client.currentPlayheadCueID)
+        // Performance mode disables the container animation; normal mode
+        // retains the animated number transition and display resizing.
+        .motion(
+            Motion.cueChange,
+            value: model.preferences.performanceMode
+                ? nil
+                : client.currentPlayheadCueID
+        )
         .onChange(of: headlineSizingInvalidationKey) { _, _ in
             headlineSizingCache.invalidate()
         }
@@ -52,7 +59,7 @@ struct CueDisplayView: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.5)
-                    .transition(.blurReplace)
+                    .transition(.opacity)
                     .id(cue.uniqueID)
             }
 
@@ -62,7 +69,8 @@ struct CueDisplayView: View {
                     kinds: model.preferences.visiblePills,
                     cueListName: cueListName(containing: cue),
                     size: model.preferences.pillSize,
-                    showsCueTypeLabel: model.preferences.showsCueTypeLabel
+                    showsCueTypeLabel: model.preferences.showsCueTypeLabel,
+                    performanceMode: model.preferences.performanceMode
                 )
             }
         }
@@ -77,7 +85,9 @@ struct CueDisplayView: View {
             headline(number)
                 .monospacedDigit()
                 .foregroundStyle(.primary)
-                .contentTransition(.numericText())
+                .contentTransition(
+                    model.preferences.performanceMode ? .identity : .numericText()
+                )
                 .accessibilityLabel("Cue number \(number)")
         } else if let name = cue.displayName {
             VStack(spacing: 6) {
@@ -87,7 +97,7 @@ struct CueDisplayView: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(cue.color ?? .primary)
-                    .transition(.blurReplace)
+                    .transition(.opacity)
 
                 caption("Unnumbered")
                     .foregroundStyle(.tertiary)

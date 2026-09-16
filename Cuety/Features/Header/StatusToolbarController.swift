@@ -3,6 +3,7 @@ import SwiftUI
 
 struct StatusToolbarReadout: Equatable {
     var keepsDisplayAwake: Bool
+    var performanceMode: Bool
     var heartbeatSymbol: String
     var heartbeatTint: Color
     var heartbeatCount: Int
@@ -16,6 +17,7 @@ struct StatusToolbarReadout: Equatable {
 
 struct StatusToolbarActions {
     var toggleKeepAwake: () -> Void = {}
+    var togglePerformanceMode: () -> Void = {}
     var openActivityLog: () -> Void = {}
     var openConnectionInspector: () -> Void = {}
     var refresh: () -> Void = {}
@@ -24,6 +26,7 @@ struct StatusToolbarActions {
 private extension NSToolbarItem.Identifier {
     static let cuetyRefresh = Self("com.ivxx.Cuety.toolbar.refresh")
     static let cuetyKeepAwake = Self("com.ivxx.Cuety.toolbar.keepAwake")
+    static let cuetyPerformanceMode = Self("com.ivxx.Cuety.toolbar.performanceMode")
     static let cuetyActivityLog = Self("com.ivxx.Cuety.toolbar.activityLog")
     static let cuetyConnectionStatus = Self("com.ivxx.Cuety.toolbar.connectionStatus")
 }
@@ -39,6 +42,7 @@ final class StatusToolbarController: NSObject, NSToolbarDelegate {
 
     private weak var refreshButton: SymbolToolbarButton?
     private weak var keepAwakeButton: SymbolToolbarButton?
+    private weak var performanceModeButton: SymbolToolbarButton?
     private weak var heartbeatButton: SymbolToolbarButton?
     private weak var statusButton: SymbolToolbarButton?
 
@@ -84,8 +88,8 @@ final class StatusToolbarController: NSObject, NSToolbarDelegate {
             if previous?.isRefreshing != readout.isRefreshing {
                 refreshButton.setSpinning(readout.isRefreshing)
                 refreshButton.toolTip = readout.isRefreshing
-                    ? "Searching. Click again to start over."
-                    : "Re-ask every server what it has open, and rebuild the current QLab connection."
+                    ? "Searching. Click again to refresh."
+                    : "Refresh Connections."
             }
             if previous?.canRefresh != readout.canRefresh {
                 refreshButton.isEnabled = readout.canRefresh
@@ -103,6 +107,20 @@ final class StatusToolbarController: NSObject, NSToolbarDelegate {
                 ? "The display is being kept awake."
                 : "The display can sleep."
             keepAwakeButton.setAccessibilityValue(isOn ? "On" : "Off")
+        }
+
+        if let performanceModeButton,
+           previous?.performanceMode != readout.performanceMode {
+            let isOn = readout.performanceMode
+            performanceModeButton.state = isOn ? .on : .off
+            performanceModeButton.glyphTint = isOn
+                ? Color(nsColor: .alternateSelectedControlTextColor)
+                : nil
+            performanceModeButton.setSymbol(isOn ? "speedometer" : "gauge.with.dots.needle.33percent")
+            performanceModeButton.toolTip = isOn
+                ? "Performance mode is on."
+                : "Performance mode is off."
+            performanceModeButton.setAccessibilityValue(isOn ? "On" : "Off")
         }
 
         if let heartbeatButton {
@@ -135,11 +153,11 @@ final class StatusToolbarController: NSObject, NSToolbarDelegate {
     private static let identifiers: [NSToolbarItem.Identifier] = [
         .flexibleSpace,
         .cuetyRefresh,
-        .space,
-        .space,
         .toggleSidebar,
         .sidebarTrackingSeparator,
         .cuetyKeepAwake,
+        .space,
+        .cuetyPerformanceMode,
         .space,
         .cuetyActivityLog,
         .cuetyConnectionStatus,
@@ -190,6 +208,18 @@ final class StatusToolbarController: NSObject, NSToolbarDelegate {
             )
             button.setButtonType(.pushOnPushOff)
             if flag { keepAwakeButton = button }
+            return item
+
+        case .cuetyPerformanceMode:
+            let (item, button) = makeItem(
+                identifier: identifier,
+                label: "Performance Mode",
+                symbols: ["gauge.with.dots.needle.33percent", "speedometer"],
+                action: #selector(togglePerformanceMode)
+            )
+            button.setButtonType(.pushOnPushOff)
+            button.setAccessibilityHelp("Disables expensive pill effects for lower CPU usage")
+            if flag { performanceModeButton = button }
             return item
 
         case .cuetyActivityLog:
@@ -252,6 +282,10 @@ final class StatusToolbarController: NSObject, NSToolbarDelegate {
 
     @objc private func toggleKeepAwake(_ sender: Any?) {
         actions.toggleKeepAwake()
+    }
+
+    @objc private func togglePerformanceMode(_ sender: Any?) {
+        actions.togglePerformanceMode()
     }
 
     @objc private func openActivityLog(_ sender: Any?) {

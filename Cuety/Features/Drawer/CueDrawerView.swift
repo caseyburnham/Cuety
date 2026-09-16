@@ -34,7 +34,6 @@ struct CueDrawerView: View {
             )
         }
         .background(.thinMaterial)
-        .motion(Motion.drawerShift, value: playheadID)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Cue list around the playhead")
     }

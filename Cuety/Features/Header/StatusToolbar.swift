@@ -13,6 +13,7 @@ struct StatusToolbar: View {
         let client = model.client
         return StatusToolbarReadout(
             keepsDisplayAwake: model.preferences.keepsDisplayAwake,
+            performanceMode: model.preferences.performanceMode,
             heartbeatSymbol: client.heartbeatSymbol,
             heartbeatTint: client.heartbeatTint,
             heartbeatCount: client.heartbeatCount,
@@ -42,6 +43,7 @@ struct StatusToolbar: View {
     private var actions: StatusToolbarActions {
         StatusToolbarActions(
             toggleKeepAwake: { model.toggleKeepAwake() },
+            togglePerformanceMode: { model.togglePerformanceMode() },
             openActivityLog: { openWindow(id: WindowID.activityLog.rawValue) },
             openConnectionInspector: { openWindow(id: WindowID.connectionInspector.rawValue) },
             refresh: { Task { await model.refresh() } }

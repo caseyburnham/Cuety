@@ -416,23 +416,55 @@ final class QLabClient {
         guard let connection else { throw RequestFailure.disconnected }
         let replyMessage = try await sendAndAwaitReply(message, over: connection)
         guard self.connection === connection else { throw RequestFailure.disconnected }
-        return try validateSessionReply(replyMessage, as: payloadType)
+
+        // JSON decoding can be substantial for cue-list replies. Keep it off
+        // the main actor so decoding does not compete with SwiftUI rendering.
+        do {
+            let reply = try await Task.detached(priority: .userInitiated) {
+                try QLabReplyParser.parse(replyMessage, as: payloadType)
+            }.value
+            return try validateSessionReply(reply)
+        } catch {
+            // Error/denied replies commonly omit the requested payload. Parse
+            // the small envelope only in that failure path so authorization
+            // errors retain their specific behavior.
+            let envelope = try await Task.detached(priority: .userInitiated) {
+                try QLabReplyParser.parse(replyMessage, as: QLabEmptyPayload.self)
+            }.value
+            _ = try validateSessionReply(envelope)
+            throw error
+        }
     }
 
+    func validateSessionReply<Payload: Decodable & Sendable>(
+        _ reply: QLabReply<Payload>
+    ) throws -> QLabReply<Payload> {
+        if reply.status == .denied {
+            requirePasscode()
+            throw RequestFailure.passcodeRequired
+        }
+        guard reply.status.isSuccess else {
+            throw RequestFailure.handshakeFailed(
+                step: reply.address, detail: "QLab returned \(reply.status)."
+            )
+        }
+        return reply
+    }
+
+    // Kept as a convenience for callers that already have a raw OSC message.
     func validateSessionReply<Payload: Decodable & Sendable>(
         _ message: OSCMessage, as payloadType: Payload.Type
     ) throws -> QLabReply<Payload> {
         let envelope = try QLabReplyParser.parse(message, as: QLabEmptyPayload.self)
-        if envelope.status == .denied {
-            requirePasscode()
-            throw RequestFailure.passcodeRequired
-        }
         guard envelope.status.isSuccess else {
+            _ = try validateSessionReply(envelope)
             throw RequestFailure.handshakeFailed(
-                step: envelope.address, detail: "QLab returned \(envelope.status)."
+                step: envelope.address, detail: "QLab returned (envelope.status)."
             )
         }
-        return try QLabReplyParser.parse(message, as: payloadType)
+        return try validateSessionReply(
+            QLabReplyParser.parse(message, as: payloadType)
+        )
     }
 
     private func requirePasscode() {
@@ -471,7 +503,9 @@ final class QLabClient {
                   QLabReplyParser.correlationKey(for: echoed) == expected
             else { continue }
             do {
-                return try QLabReplyParser.parse(incoming, as: payloadType)
+                return try await Task.detached(priority: .userInitiated) {
+                    try QLabReplyParser.parse(incoming, as: payloadType)
+                }.value
             } catch {
                 throw RequestFailure.replyUnreadable(error.operatorDescription)
             }
@@ -636,7 +670,9 @@ final class QLabClient {
 
     private func route(_ message: OSCMessage) async {
         if QLabReplyParser.isReply(message) {
-            guard let address = QLabReplyParser.correlationAddress(of: message) else { return }
+            guard let address = QLabReplyParser.oscCorrelationAddress(of: message) else {
+                return
+            }
             let key = QLabReplyParser.correlationKey(for: address)
 
             if consumeAbandonedReply(forKey: key) {
@@ -853,7 +889,9 @@ final class QLabClient {
             playheads[listID] = .unset
             return
         }
-        playheads[listID] = .cue(cueID)
+        let nextState = PlayheadState.cue(cueID)
+        guard playheads[listID] != nextState else { return }
+        playheads[listID] = nextState
     }
 
     var watchedPlayhead: PlayheadState? {

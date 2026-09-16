@@ -133,14 +133,33 @@ nonisolated extension Cue {
         )
     }
 
-    mutating func apply(_ values: QLabCueValues) {
-        if let notes = values.notes { self.notes = notes }
-        if let duration = values.duration { self.duration = duration }
-        if let preWait = values.preWait { self.preWait = preWait }
-        if let postWait = values.postWait { self.postWait = postWait }
-        if let mode = values.continueMode.flatMap(ContinueMode.init(rawValue:)) {
-            self.continueMode = mode
+    @discardableResult
+    mutating func apply(_ values: QLabCueValues) -> Bool {
+        var changed = false
+
+        if let notes = values.notes, self.notes != notes {
+            self.notes = notes
+            changed = true
         }
+        if let duration = values.duration, self.duration != duration {
+            self.duration = duration
+            changed = true
+        }
+        if let preWait = values.preWait, self.preWait != preWait {
+            self.preWait = preWait
+            changed = true
+        }
+        if let postWait = values.postWait, self.postWait != postWait {
+            self.postWait = postWait
+            changed = true
+        }
+        if let mode = values.continueMode.flatMap(ContinueMode.init(rawValue:)),
+           self.continueMode != mode {
+            self.continueMode = mode
+            changed = true
+        }
+
+        return changed
     }
 }
 
@@ -149,8 +168,7 @@ nonisolated extension Array<Cue> {
     mutating func applyValues(_ values: QLabCueValues, toCueWithID cueID: String) -> Bool {
         for index in indices {
             if self[index].uniqueID == cueID {
-                self[index].apply(values)
-                return true
+                return self[index].apply(values)
             }
             if self[index].children.applyValues(values, toCueWithID: cueID) {
                 return true

@@ -223,6 +223,10 @@ final class Preferences {
         didSet { defaults.set(keepsDisplayAwake, forKey: Key.keepsDisplayAwake) }
     }
 
+    var performanceMode: Bool {
+        didSet { defaults.set(performanceMode, forKey: Key.performanceMode) }
+    }
+
 
     var defaultPort: Int {
         get { storedDefaultPort }
@@ -290,6 +294,7 @@ final class Preferences {
         showsDockBadge = defaults.bool(forKey: Key.showsDockBadge)
 
         keepsDisplayAwake = defaults.bool(forKey: Key.keepsDisplayAwake)
+        performanceMode = defaults.bool(forKey: Key.performanceMode)
 
         storedDefaultPort = Limits.port.clamping(
             defaults.object(forKey: Key.defaultPort) as? Int ?? 53000
@@ -350,6 +355,7 @@ final class Preferences {
         static let menuBarReadout = "menuBarReadout"
         static let showsDockBadge = "showsDockBadge"
         static let keepsDisplayAwake = "keepsDisplayAwake"
+        static let performanceMode = "performanceMode"
         static let defaultPort = "defaultPort"
         static let heartbeatInterval = "heartbeatInterval"
         static let requestTimeout = "requestTimeout"
