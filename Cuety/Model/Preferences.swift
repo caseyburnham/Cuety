@@ -141,14 +141,13 @@ final class Preferences {
         static let port = 1...65_535
         static let heartbeatInterval = 1.0...60.0
         static let requestTimeout = 1.0...60.0
-        static let drawerRows = 0...10
+        static let drawerRows = 1...10
     }
 
     let defaults: UserDefaults
 
 
-    private var storedDrawerRowsAbove: Int
-    private var storedDrawerRowsBelow: Int
+    private var storedDrawerRowCount: Int
     private var storedDefaultPort: Int
     private var storedHeartbeatInterval: TimeInterval
     private var storedRequestTimeout: TimeInterval
@@ -175,19 +174,14 @@ final class Preferences {
         didSet { defaults.set(showsDrawer, forKey: Key.showsDrawer) }
     }
 
-    var drawerRowsAboveCount: Int {
-        get { storedDrawerRowsAbove }
+    /// How many rows the drawer shows either side of the playhead. The drawer's
+    /// height follows from this, so it is set by dragging the drawer's handle
+    /// rather than in Settings.
+    var drawerRowCount: Int {
+        get { storedDrawerRowCount }
         set {
-            storedDrawerRowsAbove = Limits.drawerRows.clamping(newValue)
-            defaults.set(storedDrawerRowsAbove, forKey: Key.drawerRowsAboveCount)
-        }
-    }
-
-    var drawerRowsBelowCount: Int {
-        get { storedDrawerRowsBelow }
-        set {
-            storedDrawerRowsBelow = Limits.drawerRows.clamping(newValue)
-            defaults.set(storedDrawerRowsBelow, forKey: Key.drawerRowsBelowCount)
+            storedDrawerRowCount = Limits.drawerRows.clamping(newValue)
+            defaults.set(storedDrawerRowCount, forKey: Key.drawerRowCount)
         }
     }
 
@@ -282,11 +276,8 @@ final class Preferences {
 
         showsCueName = defaults.object(forKey: Key.showsCueName) as? Bool ?? true
         showsDrawer = defaults.object(forKey: Key.showsDrawer) as? Bool ?? true
-        storedDrawerRowsAbove = Limits.drawerRows.clamping(
-            defaults.object(forKey: Key.drawerRowsAboveCount) as? Int ?? 3
-        )
-        storedDrawerRowsBelow = Limits.drawerRows.clamping(
-            defaults.object(forKey: Key.drawerRowsBelowCount) as? Int ?? 3
+        storedDrawerRowCount = Limits.drawerRows.clamping(
+            defaults.object(forKey: Key.drawerRowCount) as? Int ?? 3
         )
 
         pillOrder = Self.loadPillOrder(from: defaults)
@@ -352,8 +343,7 @@ final class Preferences {
         static let fontWeight = "fontWeight"
         static let showsCueName = "showsCueName"
         static let showsDrawer = "showsDrawer"
-        static let drawerRowsAboveCount = "drawerPreviousCount"
-        static let drawerRowsBelowCount = "drawerUpcomingCount"
+        static let drawerRowCount = "drawerRowCount"
         static let pillOrder = "pillOrder"
         static let enabledPills = "enabledPills"
         static let pillSize = "pillSize"

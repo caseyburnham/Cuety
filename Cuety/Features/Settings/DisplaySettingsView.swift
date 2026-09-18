@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct DisplaySettingsView: View {
-    static let settingsHeight: CGFloat = 555
+    static let settingsHeight: CGFloat = 500
 
     @Environment(AppModel.self) private var model
 
@@ -33,31 +33,17 @@ struct DisplaySettingsView: View {
                     get: { preferences.showsDrawer },
                     set: { _ in model.toggleDrawer() }
                 ))
-
-                SteppedField(
-                    title: "Rows above the playhead",
-                    value: Bindable(preferences).drawerRowsAboveCount,
-                    range: Preferences.Limits.drawerRows,
-                    format: IntegerFormatStyle<Int>.number.grouping(.never)
-                )
-                .disabled(!preferences.showsDrawer)
-
-                SteppedField(
-                    title: "Rows below the playhead",
-                    value: Bindable(preferences).drawerRowsBelowCount,
-                    range: Preferences.Limits.drawerRows,
-                    format: IntegerFormatStyle<Int>.number.grouping(.never)
-                )
-                .disabled(!preferences.showsDrawer)
             } header: {
                 Text("Cue Drawer")
             } footer: {
                 Text("""
                 The drawer shows the watched cue list either side of the playhead. \
+                Drag its handle up or down to set how many rows it shows; the \
+                height snaps to a row either side at a time, and dragging it \
+                all the way down collapses the drawer to its handle. \
                 A group counts as one row; the cues inside it are not listed. \
                 Near either end of the list, rows one side has run out of are \
-                shown on the other instead, so the drawer keeps its size — \
-                unless that side is set to none.
+                shown on the other instead, so the drawer keeps its size.
                 """)
             }
         }

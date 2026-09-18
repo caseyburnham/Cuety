@@ -78,9 +78,13 @@ final class AppModel {
             guard let self else { return }
             switch end {
             case .workspaceClosed:
-                let serverID = self.selection?.serverID
+                let closedSelection = self.selection
                 self.selection = nil
-                guard let serverID else { return }
+                if let closedSelection,
+                   self.preferences.lastWorkspace == closedSelection {
+                    self.preferences.lastWorkspace = nil
+                }
+                guard let serverID = closedSelection?.serverID else { return }
                 Task { await self.refreshWorkspaces(onServerWithID: serverID) }
             }
         }
@@ -374,6 +378,23 @@ final class AppModel {
     func toggleDrawer() {
         withAnimation(Motion.chrome.unlessMotionIsReduced) {
             preferences.showsDrawer.toggle()
+        }
+    }
+
+    /// The drawer's height as a step count: zero is collapsed to its handle,
+    /// and every step above that is one more row either side of the playhead.
+    var drawerStep: Int {
+        preferences.showsDrawer ? preferences.drawerRowCount : 0
+    }
+
+    /// Sets the drawer's height to a step, collapsing it at anything below one.
+    func resizeDrawer(toStep step: Int) {
+        let step = max(0, step)
+        guard step != drawerStep else { return }
+
+        withAnimation(Motion.drawerShift.unlessMotionIsReduced) {
+            preferences.showsDrawer = step > 0
+            if step > 0 { preferences.drawerRowCount = step }
         }
     }
 

@@ -4,9 +4,11 @@ struct MainWindowView: View {
     @Environment(AppModel.self) private var model
 
 #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var isShowingSettings = false
     @State private var isShowingActivityLog = false
     @State private var isShowingConnectionInspector = false
+    @State private var isShowingPresentationPIP = false
 #endif
 
     var body: some View {
@@ -45,12 +47,27 @@ struct MainWindowView: View {
                     isShowingConnectionInspector = true
                 } label: {
                     Image(systemName: model.client.status.systemImage)
+                        .foregroundStyle(model.client.status.tint)
                 }
+                .accessibilityLabel("Connection status")
+                .accessibilityValue(model.client.status.title)
 
                 Button {
                     isShowingActivityLog = true
                 } label: {
-                    Image(systemName: "heart.fill")
+                    Image(systemName: model.client.heartbeatSymbol)
+                        .foregroundStyle(model.client.heartbeatTint)
+                }
+                .accessibilityLabel("Heartbeat and activity log")
+                .accessibilityValue(model.client.heartbeatSummary)
+
+                if horizontalSizeClass == .regular {
+                    Button {
+                        isShowingPresentationPIP = true
+                    } label: {
+                        Image(systemName: "rectangle.inset.filled.and.person.filled")
+                    }
+                    .accessibilityLabel("Open presentation in a floating window")
                 }
 
                 Button {
@@ -58,7 +75,22 @@ struct MainWindowView: View {
                 } label: {
                     Image(systemName: "gearshape")
                 }
+
+                if model.canDisconnect {
+                    Button(role: .destructive) {
+                        model.disconnect()
+                    } label: {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                    }
+                    .accessibilityLabel("Disconnect")
+                }
             }
+        }
+        .popover(isPresented: $isShowingPresentationPIP) {
+            CueDisplayView()
+                .environment(model)
+                .preferredColorScheme(model.preferences.appearance.colorScheme)
+                .frame(minWidth: 360, idealWidth: 420, minHeight: 220, idealHeight: 260)
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
@@ -82,15 +114,14 @@ struct MainWindowView: View {
 #endif
     }
 
-    static let drawerHeightShare: CGFloat = 0.45
-
     private var detail: some View {
         GeometryReader { proxy in
             CueDisplayView()
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if model.preferences.showsDrawer && !model.isPresenting {
+                    if !model.isPresenting {
                         CueDrawerView(
-                            maxHeight: proxy.size.height * Self.drawerHeightShare
+                            availableHeight: proxy.size.height,
+                            onClose: { model.resizeDrawer(toStep: 0) }
                         )
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                     }

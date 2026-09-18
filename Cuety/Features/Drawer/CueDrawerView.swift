@@ -1,11 +1,40 @@
 import SwiftUI
 
 struct CueDrawerView: View {
-    var maxHeight: CGFloat?
+    let availableHeight: CGFloat
+    var onClose: () -> Void = {}
 
     @Environment(AppModel.self) private var model
 
+    @State private var dragStartStep = 0
+    @State private var isResizing = false
+
     private var client: QLabClient { model.client }
+
+    static let maxHeightShare: CGFloat = 0.45
+    static let handleHeight: CGFloat = 22
+    static let estimatedRowHeight: CGFloat = 29
+
+    static func estimatedHeight(atStep step: Int) -> CGFloat {
+        handleHeight + 24 + CGFloat(max(0, step * 2)) * estimatedRowHeight
+    }
+
+    static func stepsFitting(_ height: CGFloat) -> Int {
+        let available = max(0, height * maxHeightShare - handleHeight - 24)
+        return max(
+            Preferences.Limits.drawerRows.lowerBound,
+            min(
+                Preferences.Limits.drawerRows.upperBound,
+                Int(available / (estimatedRowHeight * 2))
+            )
+        )
+    }
+
+    private var maximumStep: Int {
+        Self.stepsFitting(availableHeight)
+    }
+
+    private var isCollapsed: Bool { model.drawerStep == 0 }
 
     var body: some View {
         if client.status.hasLiveData,
@@ -17,25 +46,81 @@ struct CueDrawerView: View {
 
     @ViewBuilder
     private func content(graph: CueGraph, playheadID: String) -> some View {
+        let step = min(model.drawerStep, maximumStep)
         let neighbourhood = graph.neighbourhood(
             around: playheadID,
-            above: model.preferences.drawerRowsAboveCount,
-            below: model.preferences.drawerRowsBelowCount
+            above: step,
+            below: step
         )
 
         VStack(alignment: .leading, spacing: 0) {
             Divider()
 
-            rows(
-                graph: graph,
-                playheadID: playheadID,
-                above: neighbourhood.above,
-                below: neighbourhood.below
-            )
+            drawerHandle
+
+            if !isCollapsed {
+                rows(
+                    graph: graph,
+                    playheadID: playheadID,
+                    above: neighbourhood.above,
+                    below: neighbourhood.below
+                )
+            }
         }
         .background(.thinMaterial)
+        .overlay(alignment: .topTrailing) {
+            if !isCollapsed {
+                Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .padding(.trailing, 12)
+            .padding(.top, 8)
+                    .accessibilityLabel("Hide Cue Drawer")
+                }
+            }
+        .contentShape(Rectangle())
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Cue list around the playhead")
+    }
+
+    private var drawerHandle: some View {
+        HStack {
+            Capsule()
+                .fill(.secondary.opacity(0.55))
+                .frame(width: 38, height: 5)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 22)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 2)
+                .onChanged { value in
+                    if !isResizing {
+                        isResizing = true
+                        dragStartStep = model.drawerStep
+                    }
+
+                    let rowPitch = Self.estimatedRowHeight * 2
+                    let proposedStep = dragStartStep - Int((value.translation.height / rowPitch).rounded())
+                    model.resizeDrawer(toStep: min(maximumStep, max(0, proposedStep)))
+                }
+                .onEnded { _ in
+                    isResizing = false
+                    dragStartStep = model.drawerStep
+                }
+        )
+        .onTapGesture {
+            if isCollapsed {
+                model.resizeDrawer(toStep: min(1, maximumStep))
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Cue drawer")
+        .accessibilityHint("Drag up or down to show one more or fewer cues on each side")
     }
 
     @ViewBuilder
@@ -67,7 +152,10 @@ struct CueDrawerView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
 
-        stack.scrollingBound(to: maxHeight)
+        // The step already keeps the rows inside the drawer's share of the
+        // window; the bound is what catches a step whose rows measure taller
+        // than they were estimated to, so the display is never squeezed.
+        stack.scrollingBound(to: availableHeight * Self.maxHeightShare)
     }
 
     private func playheadMarker(insideGroup group: Cue?) -> some View {
@@ -296,12 +384,12 @@ struct CueRowView: View {
 }
 
 #Preview {
-    CueDrawerView()
+    CueDrawerView(availableHeight: 560)
         .environment(AppModel())
         .frame(width: 900)
 }
 
-#Preview("Drawer at maximum rows") {
+#Preview("Drawer at the tallest step a window allows") {
     func cue(_ number: Int) -> Cue {
         var cue = Cue(uniqueID: "\(number)")
         cue.number = "\(number)"
@@ -310,6 +398,7 @@ struct CueRowView: View {
     }
 
     let height: CGFloat = 560
+    let step = CueDrawerView.stepsFitting(height)
 
     return VStack(spacing: 0) {
         Text("42")
@@ -320,18 +409,18 @@ struct CueRowView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(1...10, id: \.self) {
-                    CueRowView(cue: cue($0), role: .above(distance: 11 - $0))
+                ForEach(1...step, id: \.self) {
+                    CueRowView(cue: cue($0), role: .above(distance: step + 1 - $0))
                 }
                 Rectangle().fill(.tint.opacity(0.5))
                     .frame(height: 1).padding(.vertical, 5)
-                ForEach(1...10, id: \.self) {
-                    CueRowView(cue: cue($0 + 10), role: .below(distance: $0))
+                ForEach(1...step, id: \.self) {
+                    CueRowView(cue: cue($0 + step), role: .below(distance: $0))
                 }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
-            .scrollingBound(to: height * MainWindowView.drawerHeightShare)
+            .scrollingBound(to: height * CueDrawerView.maxHeightShare)
         }
         .background(.thinMaterial)
     }

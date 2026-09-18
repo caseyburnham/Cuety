@@ -43,9 +43,9 @@ final class MainSplitViewController: NSSplitViewController {
     var isSidebarVisible: Bool { !sidebarItem.isCollapsed }
 
     func setSidebarVisible(_ visible: Bool) {
-        guard sidebarItem.isCollapsed == visible else { return }
+        guard isSidebarVisible != visible else { return }
         lastReportedVisibility = visible
-        toggleSidebar(nil)
+        sidebarItem.isCollapsed = !visible
     }
 
     override func splitViewDidResizeSubviews(_ notification: Notification) {

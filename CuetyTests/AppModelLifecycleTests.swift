@@ -121,6 +121,22 @@ struct AppModelLifecycleTests {
         #expect(startup.isCancelled)
     }
 
+    @Test("Closing the selected workspace clears its persisted last workspace")
+    func workspaceClosureClearsMatchingLastWorkspace() throws {
+        let target = WorkspaceSelection(serverID: "S", workspaceID: "W")
+        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let preferences = Preferences(defaults: defaults)
+        preferences.lastWorkspace = target
+        let model = AppModel(preferences: preferences)
+        model.selection = target
+
+        model.client.onSessionEnded?(.workspaceClosed)
+
+        #expect(model.selection == nil)
+        #expect(model.preferences.lastWorkspace == nil)
+        #expect(Preferences(defaults: defaults).lastWorkspace == nil)
+    }
+
 
     @Test("Leaving presentation mode restores the sidebar it collapsed")
     func presentationRestoresTheSidebar() throws {

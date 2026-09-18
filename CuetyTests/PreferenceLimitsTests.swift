@@ -15,14 +15,12 @@ struct PreferenceLimitsTests {
     func assignmentClampsHigh() throws {
         let preferences = try preferences()
 
-        preferences.drawerRowsAboveCount = 99
-        preferences.drawerRowsBelowCount = 99
+        preferences.drawerRowCount = 99
         preferences.defaultPort = 70_000
         preferences.heartbeatInterval = 600
         preferences.requestTimeout = 600
 
-        #expect(preferences.drawerRowsAboveCount == Preferences.Limits.drawerRows.upperBound)
-        #expect(preferences.drawerRowsBelowCount == Preferences.Limits.drawerRows.upperBound)
+        #expect(preferences.drawerRowCount == Preferences.Limits.drawerRows.upperBound)
         #expect(preferences.defaultPort == Preferences.Limits.port.upperBound)
         #expect(preferences.heartbeatInterval == Preferences.Limits.heartbeatInterval.upperBound)
         #expect(preferences.requestTimeout == Preferences.Limits.requestTimeout.upperBound)
@@ -32,12 +30,12 @@ struct PreferenceLimitsTests {
     func assignmentClampsLow() throws {
         let preferences = try preferences()
 
-        preferences.drawerRowsAboveCount = -4
+        preferences.drawerRowCount = -4
         preferences.defaultPort = 0
         preferences.heartbeatInterval = 0
         preferences.requestTimeout = 0
 
-        #expect(preferences.drawerRowsAboveCount == Preferences.Limits.drawerRows.lowerBound)
+        #expect(preferences.drawerRowCount == Preferences.Limits.drawerRows.lowerBound)
         #expect(preferences.defaultPort == Preferences.Limits.port.lowerBound)
         #expect(preferences.heartbeatInterval == Preferences.Limits.heartbeatInterval.lowerBound)
         #expect(preferences.requestTimeout == Preferences.Limits.requestTimeout.lowerBound)
@@ -47,12 +45,12 @@ struct PreferenceLimitsTests {
     func inRangeValuesPassThrough() throws {
         let preferences = try preferences()
 
-        preferences.drawerRowsAboveCount = 4
+        preferences.drawerRowCount = 4
         preferences.defaultPort = 53_001
         preferences.heartbeatInterval = 2.5
         preferences.requestTimeout = 12
 
-        #expect(preferences.drawerRowsAboveCount == 4)
+        #expect(preferences.drawerRowCount == 4)
         #expect(preferences.defaultPort == 53_001)
         #expect(preferences.heartbeatInterval == 2.5)
         #expect(preferences.requestTimeout == 12)
@@ -63,11 +61,11 @@ struct PreferenceLimitsTests {
         let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
         let preferences = Preferences(defaults: defaults)
 
-        preferences.drawerRowsAboveCount = 99
+        preferences.drawerRowCount = 99
         preferences.requestTimeout = 600
 
         let reloaded = Preferences(defaults: defaults)
-        #expect(reloaded.drawerRowsAboveCount == Preferences.Limits.drawerRows.upperBound)
+        #expect(reloaded.drawerRowCount == Preferences.Limits.drawerRows.upperBound)
         #expect(reloaded.requestTimeout == Preferences.Limits.requestTimeout.upperBound)
     }
 
@@ -75,16 +73,14 @@ struct PreferenceLimitsTests {
     @Test("An out-of-range stored value is clamped as it is read")
     func loadingClampsStoredValues() throws {
         let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
-        defaults.set(99, forKey: "drawerPreviousCount")
-        defaults.set(-1, forKey: "drawerUpcomingCount")
+        defaults.set(99, forKey: "drawerRowCount")
         defaults.set(70_000, forKey: "defaultPort")
         defaults.set(0.0, forKey: "heartbeatInterval")
         defaults.set(600.0, forKey: "requestTimeout")
 
         let preferences = Preferences(defaults: defaults)
 
-        #expect(preferences.drawerRowsAboveCount == Preferences.Limits.drawerRows.upperBound)
-        #expect(preferences.drawerRowsBelowCount == Preferences.Limits.drawerRows.lowerBound)
+        #expect(preferences.drawerRowCount == Preferences.Limits.drawerRows.upperBound)
         #expect(preferences.defaultPort == Preferences.Limits.port.upperBound)
         #expect(preferences.heartbeatInterval == Preferences.Limits.heartbeatInterval.lowerBound)
         #expect(preferences.requestTimeout == Preferences.Limits.requestTimeout.upperBound)
@@ -94,8 +90,7 @@ struct PreferenceLimitsTests {
     func emptyStoreLoadsDefaults() throws {
         let preferences = try preferences()
 
-        #expect(preferences.drawerRowsAboveCount == 3)
-        #expect(preferences.drawerRowsBelowCount == 3)
+        #expect(preferences.drawerRowCount == 3)
         #expect(preferences.defaultPort == Int(QLabServer.defaultPort))
         #expect(preferences.heartbeatInterval == 5)
         #expect(preferences.requestTimeout == 5)
@@ -108,12 +103,12 @@ struct PreferenceLimitsTests {
 
         await confirmation("observers were notified") { notified in
             withObservationTracking {
-                _ = preferences.drawerRowsAboveCount
+                _ = preferences.drawerRowCount
             } onChange: {
                 notified()
             }
 
-            preferences.drawerRowsAboveCount = 7
+            preferences.drawerRowCount = 7
         }
     }
 }

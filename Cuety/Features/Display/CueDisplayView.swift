@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CueDisplayView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var headlineSizingCache = HeadlineSizingCache()
 
@@ -30,6 +31,10 @@ struct CueDisplayView: View {
         .onChange(of: headlineSizingInvalidationKey) { _, _ in
             headlineSizingCache.invalidate()
         }
+    }
+
+    private var detailPillSize: PillSize {
+        horizontalSizeClass == .compact ? .small : model.preferences.pillSize
     }
 
     private func cueListName(containing cue: Cue) -> String? {
@@ -68,7 +73,7 @@ struct CueDisplayView: View {
                     cue: cue,
                     kinds: model.preferences.visiblePills,
                     cueListName: cueListName(containing: cue),
-                    size: model.preferences.pillSize,
+                    size: detailPillSize,
                     showsCueTypeLabel: model.preferences.showsCueTypeLabel,
                     performanceMode: model.preferences.performanceMode
                 )

@@ -577,6 +577,7 @@ struct QLabDisconnectTests {
         #expect(model.client.status == .workspaceClosed)
         #expect(!model.client.isSessionActive)
         #expect(model.selection == nil)
+        #expect(preferences.lastWorkspace == nil)
     }
 
     @Test("A rejected passcode keeps the model selection for the retry prompt")

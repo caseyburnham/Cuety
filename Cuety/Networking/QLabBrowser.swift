@@ -22,6 +22,9 @@ final class QLabBrowser {
     var onServerDiscovered: ((QLabServer) -> Void)?
 
     private var browser: NWBrowser?
+    private let pathMonitor = NWPathMonitor()
+    private let pathMonitorQueue = DispatchQueue(label: "com.ivxx.Cuety.browserPathMonitor")
+    private var lastPathStatus: NWPath.Status?
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -50,6 +53,25 @@ final class QLabBrowser {
         }
 
         browser.start(queue: .main)
+
+        if lastPathStatus == nil {
+            pathMonitor.pathUpdateHandler = { [weak self] path in
+                Task { @MainActor in
+                    self?.handlePathUpdate(path)
+                }
+            }
+            pathMonitor.start(queue: pathMonitorQueue)
+        }
+    }
+
+    private func handlePathUpdate(_ path: NWPath) {
+        let wasSatisfied = lastPathStatus == .satisfied
+        lastPathStatus = path.status
+
+        guard path.status == .satisfied, !wasSatisfied else { return }
+        // A browser that started before Ethernet/Wi-Fi became available can
+        // remain failed or waiting. Recreate it when a usable path appears.
+        restartBrowsing()
     }
 
     func restartBrowsing() {
