@@ -38,6 +38,7 @@ struct ActivityLogRedactionTests {
         let message = connectMessage()
         let wireSize = OSCEncoder().encode(message).count
         let log = ActivityLog()
+        log.addViewer()
 
         log.record(OSCEvent(message: message, direction: .outbound, byteCount: wireSize))
 
@@ -49,6 +50,7 @@ struct ActivityLogRedactionTests {
     @Test("A passcode is absent from every entry the log holds")
     func logHoldsNoPasscode() {
         let log = ActivityLog()
+        log.addViewer()
         log.record(OSCEvent(message: connectMessage(), direction: .outbound, byteCount: 44))
         log.record(OSCEvent(
             message: OSCMessage("/reply/workspace/ABC/connect", [.string(
@@ -94,5 +96,45 @@ struct ActivityLogRedactionTests {
 
         #expect(redacted.arguments.count == 2)
         #expect(redacted.arguments.allSatisfy { $0.stringValue == OSCRedaction.placeholder })
+    }
+
+    @Test("Paused logging skips event construction while retaining counters")
+    func pausedLoggingSkipsEventConstruction() {
+        let log = ActivityLog()
+        log.addViewer()
+        log.isPaused = true
+        var wasConstructed = false
+
+        func makeEvent() -> OSCEvent {
+            wasConstructed = true
+            return OSCEvent(
+                timestamp: Date(), direction: .inbound,
+                address: "/large-reply", arguments: String(repeating: "x", count: 10_000),
+                byteCount: 10_000
+            )
+        }
+
+        log.record(direction: .inbound, byteCount: 10_000, event: makeEvent())
+
+        #expect(!wasConstructed)
+        #expect(log.totalReceived == 1)
+        #expect(log.bytesReceived == 10_000)
+        #expect(log.entries.isEmpty)
+    }
+
+    @Test("Retained events stay ordered within count and byte limits")
+    func retainedEventsRespectLimits() {
+        // An entry costs twice its text: once as shown, once lowercased for
+        // searching. 34 bytes is room for the last two entries and no more.
+        let log = ActivityLog(capacity: 3, byteCapacity: 34)
+        log.addViewer()
+
+        for address in ["/one", "/two", "/three", "/four"] {
+            log.record(OSCEvent(
+                direction: .inbound, address: address, arguments: "123", byteCount: 4
+            ))
+        }
+
+        #expect(log.entries.map(\.address) == ["/three", "/four"])
     }
 }

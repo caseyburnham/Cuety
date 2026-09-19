@@ -5,12 +5,6 @@ struct WorkspaceSidebar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var isConnecting = false
-#if os(iOS)
-    @State private var isShowingSettings = false
-    @State private var isShowingActivityLog = false
-    @State private var isShowingConnectionInspector = false
-    @State private var isShowingPresentationPIP = false
-#endif
 
     private enum Selection: Hashable {
         case workspace(WorkspaceSelection)
@@ -103,70 +97,8 @@ struct WorkspaceSidebar: View {
                 }
                 .accessibilityLabel("Show Cue Display")
             }
-
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    Task { await model.refresh() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .disabled(!model.canRefresh)
-                .accessibilityLabel("Refresh")
-
-                Button {
-                    isShowingConnectionInspector = true
-                } label: {
-                    Image(systemName: model.client.status.systemImage)
-                        .foregroundStyle(model.client.status.tint)
-                }
-                .accessibilityLabel("Connection status")
-                .accessibilityValue(model.client.status.title)
-
-                Button {
-                    isShowingActivityLog = true
-                } label: {
-                    Image(systemName: model.client.heartbeatSymbol)
-                        .foregroundStyle(model.client.heartbeatTint)
-                }
-                .accessibilityLabel("Heartbeat and activity log")
-                .accessibilityValue(model.client.heartbeatSummary)
-
-                Button {
-                    isShowingPresentationPIP = true
-                } label: {
-                    Image(systemName: "rectangle.inset.filled.and.person.filled")
-                }
-                .accessibilityLabel("Open floating cue display")
-
-                Button {
-                    isShowingSettings = true
-                } label: {
-                    Image(systemName: "gearshape")
-                }
-                .accessibilityLabel("Settings")
-            }
         }
-        .popover(isPresented: $isShowingPresentationPIP) {
-            CueDisplayView()
-                .environment(model)
-                .preferredColorScheme(model.preferences.appearance.colorScheme)
-                .frame(minWidth: 360, idealWidth: 420, minHeight: 220, idealHeight: 260)
-        }
-        .sheet(isPresented: $isShowingSettings) {
-            SettingsView()
-                .environment(model)
-                .preferredColorScheme(model.preferences.appearance.colorScheme)
-        }
-        .sheet(isPresented: $isShowingActivityLog) {
-            ActivityLogView()
-                .environment(model)
-                .preferredColorScheme(model.preferences.appearance.colorScheme)
-        }
-        .sheet(isPresented: $isShowingConnectionInspector) {
-            ConnectionInspectorView()
-                .environment(model)
-                .preferredColorScheme(model.preferences.appearance.colorScheme)
-        }
+        .compactToolbarActions()
 #endif
     }
 

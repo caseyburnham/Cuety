@@ -17,7 +17,7 @@ struct ConnectionSettingsView: View {
             passcodeSection
         }
         .formStyle(.grouped)
-        .task { model.refreshStoredPasscodes() }
+        .task { await model.refreshStoredPasscodes() }
         .confirmationDialog(
             "Forget every saved passcode?",
             isPresented: $isConfirmingForgetAll

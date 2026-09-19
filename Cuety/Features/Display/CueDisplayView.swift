@@ -28,9 +28,6 @@ struct CueDisplayView: View {
                 ? nil
                 : client.currentPlayheadCueID
         )
-        .onChange(of: headlineSizingInvalidationKey) { _, _ in
-            headlineSizingCache.invalidate()
-        }
     }
 
     private var detailPillSize: PillSize {
@@ -40,7 +37,7 @@ struct CueDisplayView: View {
     private func cueListName(containing cue: Cue) -> String? {
         if let watchedID = client.watchedCueListID,
            let watched = client.cueLists.first(where: { $0.uniqueID == watchedID }),
-           watched.children.firstCue(withID: cue.uniqueID) != nil {
+           client.watchedGraph?.cue(withID: cue.uniqueID) != nil {
             return watched.displayName
         }
         return client.cueLists.cueList(containing: cue.uniqueID)?.displayName
@@ -88,6 +85,8 @@ struct CueDisplayView: View {
     private func numberOrName(_ cue: Cue) -> some View {
         if let number = cue.displayNumber {
             headline(number)
+                // Keep the native numeric transition, but composite it on the GPU.
+                .environment(\.contentTransitionAddsDrawingGroup, true)
                 .monospacedDigit()
                 .foregroundStyle(.primary)
                 .contentTransition(
@@ -127,15 +126,6 @@ struct CueDisplayView: View {
                 .lineLimit(1)
                 .frame(width: geometry.size.width, height: geometry.size.height)
         }
-    }
-
-    private var headlineSizingInvalidationKey: HeadlineSizingInvalidationKey {
-        HeadlineSizingInvalidationKey(
-            cueListID: client.watchedCueListID,
-            cueNumbers: client.watchedGraph?.cueNumbers ?? [],
-            usesRounded: model.preferences.usesRoundedSystemFont,
-            fontWeight: model.preferences.fontWeight
-        )
     }
 
     private func referenceNumber(for text: String) -> String {
@@ -244,35 +234,28 @@ struct CueDisplayView: View {
 private final class HeadlineSizingCache {
     private struct Inputs: Equatable {
         let cueNumbers: [String]
-        let text: String
+        let usesRounded: Bool
+        let fontWeight: Font.Weight
     }
 
     private var inputs: Inputs?
-    private var cachedReference: String?
+    private var cachedListReference: String?
 
     func referenceNumber(for text: String, cueNumbers: [String], typography: Typography) -> String {
-        let inputs = Inputs(cueNumbers: cueNumbers, text: text)
-        if self.inputs == inputs, let cachedReference {
-            return cachedReference
+        let inputs = Inputs(
+            cueNumbers: cueNumbers,
+            usesRounded: typography.usesRounded,
+            fontWeight: typography.cueNumberWeight
+        )
+
+        if self.inputs != inputs {
+            cachedListReference = typography.widestCueNumber(among: cueNumbers)
+            self.inputs = inputs
         }
 
-        let reference = typography.widestCueNumber(among: cueNumbers + [text]) ?? text
-        self.inputs = inputs
-        cachedReference = reference
-        return reference
+        guard let cachedListReference else { return text }
+        return typography.widestCueNumber(among: [cachedListReference, text]) ?? text
     }
-
-    func invalidate() {
-        inputs = nil
-        cachedReference = nil
-    }
-}
-
-private struct HeadlineSizingInvalidationKey: Equatable {
-    let cueListID: String?
-    let cueNumbers: [String]
-    let usesRounded: Bool
-    let fontWeight: FontWeightChoice
 }
 
 #Preview {

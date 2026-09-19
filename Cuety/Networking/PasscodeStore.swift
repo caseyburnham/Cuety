@@ -5,9 +5,22 @@ import os
 nonisolated protocol PasscodeStoring: Sendable {
     func passcode(serverID: String, workspaceID: String) -> String?
     func hasPasscode(serverID: String, workspaceID: String) -> Bool
+    func selectionsWithPasscodes(
+        _ selections: Set<WorkspaceSelection>
+    ) -> Set<WorkspaceSelection>
     func save(_ passcode: String, serverID: String, workspaceID: String) throws
     func remove(serverID: String, workspaceID: String) throws
     func removeAll() throws
+}
+
+nonisolated extension PasscodeStoring {
+    func selectionsWithPasscodes(
+        _ selections: Set<WorkspaceSelection>
+    ) -> Set<WorkspaceSelection> {
+        Set(selections.filter { hasPasscode(
+            serverID: $0.serverID, workspaceID: $0.workspaceID
+        ) })
+    }
 }
 
 nonisolated struct PasscodeStore: PasscodeStoring {
@@ -85,20 +98,47 @@ nonisolated struct PasscodeStore: PasscodeStoring {
     }
 
     func hasPasscode(serverID: String, workspaceID: String) -> Bool {
-        // Checking whether a credential exists should not return its secret data.
-        // Returning data can trigger a Keychain authorization prompt, and this
-        // method is called while repeatedly refreshing the workspace list.
+        selectionsWithPasscodes([
+            WorkspaceSelection(serverID: serverID, workspaceID: workspaceID)
+        ]).isEmpty == false
+    }
+
+    func selectionsWithPasscodes(
+        _ selections: Set<WorkspaceSelection>
+    ) -> Set<WorkspaceSelection> {
+        guard !selections.isEmpty else { return [] }
+
+        let selectionsByAccount = Dictionary(
+            uniqueKeysWithValues: selections.map { selection in
+                (account(serverID: selection.serverID, workspaceID: selection.workspaceID), selection)
+            }
+        )
+        var found: Set<WorkspaceSelection> = []
+
         for service in [Self.service, Self.legacyService] {
-            let query = baseQuery(
-                serverID: serverID, workspaceID: workspaceID, service: service
-            )
-            let status = SecItemCopyMatching(query as CFDictionary, nil)
-            if status == errSecSuccess { return true }
-            if status != errSecItemNotFound {
-                logger.warning("Keychain existence check failed with status \(status)")
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecMatchLimit as String: kSecMatchLimitAll,
+                kSecReturnAttributes as String: true,
+            ]
+            var item: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &item)
+
+            if status == errSecSuccess {
+                let attributes = (item as? [[String: Any]]) ?? []
+                for attribute in attributes {
+                    guard let account = attribute[kSecAttrAccount as String] as? String,
+                          let selection = selectionsByAccount[account]
+                    else { continue }
+                    found.insert(selection)
+                }
+            } else if status != errSecItemNotFound {
+                logger.warning("Keychain batch read failed with status \(status)")
             }
         }
-        return false
+
+        return found
     }
 
 

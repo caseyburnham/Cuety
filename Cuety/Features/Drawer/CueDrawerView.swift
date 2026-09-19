@@ -131,7 +131,7 @@ struct CueDrawerView: View {
             if graph.isFirst(playheadID) {
                 boundaryRow("Top of cue list", systemImage: "arrow.up.to.line")
             } else {
-                ForEach(Array(above.enumerated()), id: \.element.id) { offset, cue in
+                ForEach(above.enumerated(), id: \.element.id) { offset, cue in
                     CueRowView(
                         cue: cue,
                         role: .above(distance: above.count - offset)
@@ -144,7 +144,7 @@ struct CueDrawerView: View {
             if graph.isLast(playheadID) {
                 boundaryRow("End of cue list", systemImage: "arrow.down.to.line")
             } else {
-                ForEach(Array(below.enumerated()), id: \.element.id) { offset, cue in
+                ForEach(below.enumerated(), id: \.element.id) { offset, cue in
                     CueRowView(cue: cue, role: .below(distance: offset + 1))
                 }
             }

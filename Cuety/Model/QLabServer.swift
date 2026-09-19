@@ -5,13 +5,6 @@ nonisolated struct QLabServer: Identifiable, Hashable, Sendable {
     enum Source: Hashable, Sendable {
         case bonjour
         case manual
-
-        var sectionTitle: String {
-            switch self {
-            case .bonjour: "Bonjour"
-            case .manual: "Local"
-            }
-        }
     }
 
     let id: String

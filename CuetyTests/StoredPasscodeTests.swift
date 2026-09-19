@@ -8,7 +8,7 @@ import Testing
 struct StoredPasscodeTests {
     private func makeModel(
         _ store: StubPasscodeStore, withStoredPasscode: Bool = true
-    ) throws -> (model: AppModel, target: WorkspaceSelection) {
+    ) async throws -> (model: AppModel, target: WorkspaceSelection) {
         let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
         let model = AppModel(
             preferences: Preferences(defaults: defaults), passcodes: store
@@ -28,15 +28,15 @@ struct StoredPasscodeTests {
         if withStoredPasscode {
             try store.save("hunter2", serverID: serverID, workspaceID: "W")
         }
-        model.refreshStoredPasscodes()
+        await model.refreshStoredPasscodes()
 
         return (model, target)
     }
 
     @Test("Forget removes the credential and the row together")
-    func forgetUpdatesObservableState() throws {
+    func forgetUpdatesObservableState() async throws {
         let store = StubPasscodeStore()
-        let (model, target) = try makeModel(store)
+        let (model, target) = try await makeModel(store)
         try #require(model.storedPasscodeSelections.contains(target))
 
         model.forgetPasscode(for: target)
@@ -47,9 +47,9 @@ struct StoredPasscodeTests {
     }
 
     @Test("A Forget that fails says so, and does not pretend the row is gone")
-    func forgetFailureIsSurfaced() throws {
+    func forgetFailureIsSurfaced() async throws {
         let store = StubPasscodeStore()
-        let (model, target) = try makeModel(store)
+        let (model, target) = try await makeModel(store)
         store.removeError = PasscodeStore.Failure.keychain(errSecAuthFailed)
 
         model.forgetPasscode(for: target)
@@ -61,9 +61,9 @@ struct StoredPasscodeTests {
     }
 
     @Test("Forget All clears the credentials and the rows")
-    func forgetAllSucceeds() throws {
+    func forgetAllSucceeds() async throws {
         let store = StubPasscodeStore()
-        let (model, target) = try makeModel(store)
+        let (model, target) = try await makeModel(store)
         try #require(model.storedPasscodeSelections.contains(target))
 
         model.forgetAllPasscodes()
@@ -74,9 +74,9 @@ struct StoredPasscodeTests {
     }
 
     @Test("A Forget All that fails says so")
-    func forgetAllFailureIsSurfaced() throws {
+    func forgetAllFailureIsSurfaced() async throws {
         let store = StubPasscodeStore()
-        let (model, target) = try makeModel(store)
+        let (model, target) = try await makeModel(store)
         store.removeAllError = PasscodeStore.Failure.keychain(errSecAuthFailed)
 
         model.forgetAllPasscodes()
@@ -87,9 +87,9 @@ struct StoredPasscodeTests {
     }
 
     @Test("The reported reason comes from the Keychain, not from Swift")
-    func failureReasonIsOperatorReadable() throws {
+    func failureReasonIsOperatorReadable() async throws {
         let store = StubPasscodeStore()
-        let (model, target) = try makeModel(store)
+        let (model, target) = try await makeModel(store)
         store.removeError = PasscodeStore.Failure.keychain(errSecAuthFailed)
 
         model.forgetPasscode(for: target)
@@ -100,13 +100,13 @@ struct StoredPasscodeTests {
     }
 
     @Test("Rebuilding the set finds credentials for workspaces that become visible")
-    func refreshFindsNewlyVisibleWorkspaces() throws {
+    func refreshFindsNewlyVisibleWorkspaces() async throws {
         let store = StubPasscodeStore()
-        let (model, target) = try makeModel(store, withStoredPasscode: false)
+        let (model, target) = try await makeModel(store, withStoredPasscode: false)
         try #require(model.storedPasscodeSelections.isEmpty)
 
         try store.save("hunter2", serverID: target.serverID, workspaceID: target.workspaceID)
-        model.refreshStoredPasscodes()
+        await model.refreshStoredPasscodes()
 
         #expect(model.storedPasscodeSelections.contains(target))
     }

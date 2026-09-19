@@ -78,7 +78,9 @@ private struct SettingsWindowHeight: NSViewRepresentable {
         ) {
             pendingUpdate?.cancel()
             pendingUpdate = Task { @MainActor [weak self, weak view] in
-                guard let self, let view, let window = view.window else { return }
+                guard !Task.isCancelled,
+                      let self, let view, let window = view.window
+                else { return }
                 SettingsWindowHeight.apply(
                     height: height,
                     paneHeight: view.frame.size.height,

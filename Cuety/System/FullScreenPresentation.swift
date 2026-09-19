@@ -52,7 +52,9 @@ struct FullScreenPresentation: NSViewRepresentable {
         func scheduleApply(isPresenting presenting: Bool, to view: NSView) {
             pendingUpdate?.cancel()
             pendingUpdate = Task { @MainActor [weak self, weak view] in
-                guard let self, let view, let window = view.window else { return }
+                guard !Task.isCancelled,
+                      let self, let view, let window = view.window
+                else { return }
                 self.observe(window)
                 self.apply(isPresenting: presenting, to: window)
             }

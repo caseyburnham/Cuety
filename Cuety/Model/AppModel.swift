@@ -126,6 +126,7 @@ final class AppModel {
     }
 
     private static let refreshDiscoveryPasses = 3
+    private static let maxConcurrentProbes = 3
 
     private var refreshTask: Task<Void, Never>?
 
@@ -143,15 +144,33 @@ final class AppModel {
         for _ in 0..<Self.refreshDiscoveryPasses {
             let pending = browser.servers.filter { !probed.contains($0.id) }
             guard !pending.isEmpty else { break }
+            probed.formUnion(pending.map(\.id))
 
-            for target in pending {
-                guard !Task.isCancelled else { return }
-                probed.insert(target.id)
-                await probeWorkspaces(on: target)
+            await withTaskGroup(of: Void.self) { group in
+                var nextIndex = 0
+                for _ in 0..<min(Self.maxConcurrentProbes, pending.count) {
+                    let target = pending[nextIndex]
+                    nextIndex += 1
+                    group.addTask { await self.probeWorkspaces(on: target) }
+                }
+
+                while await group.next() != nil {
+                    guard !Task.isCancelled else {
+                        group.cancelAll()
+                        return
+                    }
+                    guard nextIndex < pending.count else { continue }
+                    let target = pending[nextIndex]
+                    nextIndex += 1
+                    group.addTask { await self.probeWorkspaces(on: target) }
+                }
             }
+
+            guard !Task.isCancelled else { return }
         }
 
         guard !Task.isCancelled else { return }
+        await refreshStoredPasscodes()
 
         if client.isSessionActive {
             await client.reconnect()
@@ -161,12 +180,29 @@ final class AppModel {
     func refreshWorkspaces(onServerWithID id: String) async {
         guard let server = browser.server(withID: id) else { return }
         await probeWorkspaces(on: server)
+        await refreshStoredPasscodes()
     }
 
+    private var probeTasks: [String: Task<Void, Never>] = [:]
     private var probeGenerationByServerID: [String: Int] = [:]
     private var lastProbeGeneration = 0
 
     private func probeWorkspaces(on target: QLabServer) async {
+        if let existing = probeTasks[target.id] {
+            await existing.value
+            return
+        }
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performProbe(target)
+        }
+        probeTasks[target.id] = task
+        await task.value
+        probeTasks.removeValue(forKey: target.id)
+    }
+
+    private func performProbe(_ target: QLabServer) async {
         lastProbeGeneration += 1
         let generation = lastProbeGeneration
         probeGenerationByServerID[target.id] = generation
@@ -189,8 +225,6 @@ final class AppModel {
         guard probeGenerationByServerID[target.id] == generation else { return }
         relinquishProbe(of: target.id, generation: generation)
         browser.update(server)
-
-        refreshStoredPasscodes()
     }
 
     private func relinquishProbe(of serverID: String, generation: Int) {
@@ -321,20 +355,20 @@ final class AppModel {
         }
     }
 
-    func refreshStoredPasscodes() {
-        var found: Set<WorkspaceSelection> = []
+    func refreshStoredPasscodes() async {
+        var selections: Set<WorkspaceSelection> = []
         for server in browser.servers {
-            for workspace in server.workspaces {
-                let selection = WorkspaceSelection(
-                    serverID: server.id, workspaceID: workspace.uniqueID
-                )
-                if passcodes.hasPasscode(
-                    serverID: selection.serverID, workspaceID: selection.workspaceID
-                ) {
-                    found.insert(selection)
-                }
-            }
+            selections.formUnion(server.workspaces.map { workspace in
+                WorkspaceSelection(serverID: server.id, workspaceID: workspace.uniqueID)
+            })
         }
+
+        let passcodes = self.passcodes
+        let found = await Task.detached(priority: .utility) {
+            passcodes.selectionsWithPasscodes(Set(selections))
+        }.value
+
+        guard !Task.isCancelled else { return }
         storedPasscodeSelections = found
     }
 

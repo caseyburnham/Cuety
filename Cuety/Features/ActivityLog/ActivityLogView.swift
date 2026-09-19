@@ -5,18 +5,14 @@ import UIKit
 #endif
 import SwiftUI
 
-struct ActivityLogView: View {
-    @Environment(AppModel.self) private var model
-
-    @State private var searchText = ""
-    @State private var directionFilter: DirectionFilter = .all
-    @State private var selection: Set<OSCEvent.ID> = []
-    @State private var isShowingInspector = false
-    @State private var sortOrder = [
-        KeyPathComparator(\OSCEvent.timestamp, order: .reverse)
-    ]
-
-    private enum DirectionFilter: String, CaseIterable, Identifiable {
+/// Holds the activity log's filter state and turns the log's entries into the
+/// rows the table shows. The result is cached against the log's revision and
+/// the filter inputs, so a burst of traffic filters and sorts once per redraw
+/// rather than once per message.
+@MainActor
+@Observable
+final class ActivityLogPresenter {
+    enum DirectionFilter: String, CaseIterable, Identifiable {
         case all, sent, received, malformed
 
         var id: String { rawValue }
@@ -40,32 +36,71 @@ struct ActivityLogView: View {
         }
     }
 
-    private var query: String {
-        searchText.trimmingCharacters(in: .whitespaces).lowercased()
+    struct Snapshot {
+        let allEntries: [OSCEvent]
+        let filteredEntries: [OSCEvent]
+        let query: String
+        let isFiltered: Bool
     }
 
-    private var isFiltered: Bool {
-        directionFilter != .all || !query.isEmpty
+    var searchText = ""
+    var directionFilter: DirectionFilter = .all
+    var sortOrder = [KeyPathComparator(\OSCEvent.timestamp, order: .reverse)]
+
+    private struct CacheKey: Equatable {
+        let revision: Int
+        let entryCount: Int
+        let query: String
+        let directionFilter: DirectionFilter
+        let sortOrder: [KeyPathComparator<OSCEvent>]
     }
 
-    private var filteredEntries: [OSCEvent] {
-        model.log.entries
-            .filter { entry in
-                guard directionFilter.matches(entry.direction) else { return false }
-                guard !query.isEmpty else { return true }
-                return entry.address.lowercased().contains(query)
-                    || entry.arguments.lowercased().contains(query)
-            }
+    @ObservationIgnored private var cache: (key: CacheKey, snapshot: Snapshot)?
+
+    func snapshot(of log: ActivityLog) -> Snapshot {
+        let allEntries = log.entries
+        let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        let key = CacheKey(
+            revision: log.revision,
+            entryCount: allEntries.count,
+            query: query,
+            directionFilter: directionFilter,
+            sortOrder: sortOrder
+        )
+
+        if let cache, cache.key == key { return cache.snapshot }
+
+        let filteredEntries = allEntries
+            .filter { directionFilter.matches($0.direction) && $0.matches(lowercasedQuery: query) }
             .sorted(using: sortOrder)
-    }
 
-    private var inspectedEntry: OSCEvent? {
+        let snapshot = Snapshot(
+            allEntries: allEntries,
+            filteredEntries: filteredEntries,
+            query: query,
+            isFiltered: directionFilter != .all || !query.isEmpty
+        )
+        cache = (key, snapshot)
+        return snapshot
+    }
+}
+
+struct ActivityLogView: View {
+    @Environment(AppModel.self) private var model
+
+    @State private var presenter = ActivityLogPresenter()
+    @State private var selection: Set<OSCEvent.ID> = []
+    @State private var isShowingInspector = false
+
+    private func inspectedEntry(in entries: [OSCEvent]) -> OSCEvent? {
         guard selection.count == 1, let id = selection.first else { return nil }
-        return model.log.entries.first { $0.id == id }
+        return entries.first { $0.id == id }
     }
 
     var body: some View {
-        Table(filteredEntries, selection: $selection, sortOrder: $sortOrder) {
+        let snapshot = presenter.snapshot(of: model.log)
+
+        Table(snapshot.filteredEntries, selection: $selection, sortOrder: $presenter.sortOrder) {
             TableColumn("") { entry in
                 Image(systemName: entry.direction.systemImage)
                     .foregroundStyle(entry.direction.tint)
@@ -105,14 +140,14 @@ struct ActivityLogView: View {
             }
             .width(min: 50, ideal: 60, max: 80)
         }
-        .overlay { emptyState }
-        .copyable(filteredEntries.filter { selection.contains($0.id) }.map(\.copyableDescription))
+        .overlay { emptyState(for: snapshot) }
+        .copyable(copyableLines(for: selection, in: snapshot.filteredEntries))
         .contextMenu(forSelectionType: OSCEvent.ID.self) { ids in
             if ids.count == 1 {
                 Button("Show Message") { isShowingInspector = true }
             }
             Button(ids.count > 1 ? "Copy \(ids.count) Messages" : "Copy Message") {
-                copy(ids)
+                copy(ids, in: snapshot.filteredEntries)
             }
             .disabled(ids.isEmpty)
         } primaryAction: { ids in
@@ -120,16 +155,19 @@ struct ActivityLogView: View {
             isShowingInspector = true
         }
         .inspector(isPresented: $isShowingInspector) {
-            messageInspector
+            messageInspector(for: snapshot)
         }
-        .searchable(text: $searchText, prompt: "Filter by address or arguments")
+        .searchable(text: $presenter.searchText, prompt: "Filter by address or arguments")
         .safeAreaInset(edge: .bottom) {
-            statusBar
+            statusBar(for: snapshot)
         }
+        // The log only keeps rows while something is showing them.
+        .onAppear { model.log.addViewer() }
+        .onDisappear { model.log.removeViewer() }
         .toolbar {
             ToolbarItem(placement: .principal) {
-                Picker("Show", selection: $directionFilter) {
-                    ForEach(DirectionFilter.allCases) { filter in
+                Picker("Show", selection: $presenter.directionFilter) {
+                    ForEach(ActivityLogPresenter.DirectionFilter.allCases) { filter in
                         Text(filter.title).tag(filter)
                     }
                 }
@@ -159,7 +197,7 @@ struct ActivityLogView: View {
                 } label: {
                     Label("Clear", systemImage: "trash")
                 }
-                .disabled(model.log.entries.isEmpty)
+                .disabled(snapshot.allEntries.isEmpty)
                 .help("Discard the recorded rows. Counters are unaffected.")
             }
 
@@ -174,28 +212,28 @@ struct ActivityLogView: View {
 
 
     @ViewBuilder
-    private var emptyState: some View {
-        if model.log.entries.isEmpty {
+    private func emptyState(for snapshot: ActivityLogPresenter.Snapshot) -> some View {
+        if snapshot.allEntries.isEmpty {
             ContentUnavailableView(
                 "No Activity",
                 systemImage: "list.bullet.rectangle",
-                description: Text("OSC messages appear here once you connect.")
+                description: Text("OSC messages appear here while this window is open.")
             )
-        } else if filteredEntries.isEmpty {
-            if query.isEmpty {
+        } else if snapshot.filteredEntries.isEmpty {
+            if snapshot.query.isEmpty {
                 ContentUnavailableView(
-                    "No \(directionFilter.title) Messages",
+                    "No \(presenter.directionFilter.title) Messages",
                     systemImage: "line.3.horizontal.decrease",
                     description: Text("Nothing in the log matches this filter.")
                 )
             } else {
-                ContentUnavailableView.search(text: searchText)
+                ContentUnavailableView.search(text: presenter.searchText)
             }
         }
     }
 
 
-    private var statusBar: some View {
+    private func statusBar(for snapshot: ActivityLogPresenter.Snapshot) -> some View {
         HStack(spacing: 16) {
             total(model.log.totalSent, direction: .outbound)
             total(model.log.totalReceived, direction: .inbound)
@@ -205,8 +243,8 @@ struct ActivityLogView: View {
 
             Spacer()
 
-            if isFiltered {
-                Text("\(filteredEntries.count) of \(model.log.entries.count) shown")
+            if snapshot.isFiltered {
+                Text("\(snapshot.filteredEntries.count) of \(snapshot.allEntries.count) shown")
                     .foregroundStyle(.secondary)
             }
 
@@ -235,7 +273,9 @@ struct ActivityLogView: View {
 
 
     @ViewBuilder
-    private var messageInspector: some View {
+    private func messageInspector(for snapshot: ActivityLogPresenter.Snapshot) -> some View {
+        let inspectedEntry = inspectedEntry(in: snapshot.allEntries)
+
         Group {
             if let entry = inspectedEntry {
                 Form {
@@ -303,10 +343,16 @@ struct ActivityLogView: View {
         return text
     }
 
-    private func copy(_ ids: Set<OSCEvent.ID>) {
-        let lines = filteredEntries
+    private func copyableLines(
+        for ids: Set<OSCEvent.ID>, in entries: [OSCEvent]
+    ) -> [String] {
+        entries
             .filter { ids.contains($0.id) }
             .map(\.copyableDescription)
+    }
+
+    private func copy(_ ids: Set<OSCEvent.ID>, in entries: [OSCEvent]) {
+        let lines = copyableLines(for: ids, in: entries)
         guard !lines.isEmpty else { return }
 
 #if os(macOS)

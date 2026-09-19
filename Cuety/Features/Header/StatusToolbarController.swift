@@ -67,7 +67,9 @@ final class StatusToolbarController: NSObject, NSToolbarDelegate {
     func scheduleUpdate(for view: NSView, readout: StatusToolbarReadout) {
         pendingUpdate?.cancel()
         pendingUpdate = Task { @MainActor [weak self, weak view] in
-            guard let self, let view, let window = view.window else { return }
+            guard !Task.isCancelled,
+                  let self, let view, let window = view.window
+            else { return }
             self.install(in: window)
             self.apply(readout)
         }

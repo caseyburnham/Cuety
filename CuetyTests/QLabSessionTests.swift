@@ -13,12 +13,12 @@ struct QLabSessionTests {
     }
 
     @Test("Denied heartbeat revokes authorization even with a thump payload")
-    func deniedHeartbeat() throws {
+    func deniedHeartbeat() async throws {
         let client = QLabClient(preferences: Preferences(), log: ActivityLog())
         var prompted = false
         client.onPasscodeRequired = { _ in prompted = true }
-        #expect(throws: QLabClient.RequestFailure.self) {
-            _ = try client.validateSessionReply(
+        await #expect(throws: QLabClient.RequestFailure.self) {
+            _ = try await client.validateSessionReply(
                 message("/workspace/W/thump", status: "denied", data: "\"thump\""),
                 as: String.self
             )
@@ -31,12 +31,12 @@ struct QLabSessionTests {
     }
 
     @Test("Denied cue lists prompt before attempting to decode the error payload")
-    func deniedCueLists() throws {
+    func deniedCueLists() async throws {
         let client = QLabClient(preferences: Preferences(), log: ActivityLog())
         var prompted = false
         client.onPasscodeRequired = { _ in prompted = true }
-        #expect(throws: QLabClient.RequestFailure.self) {
-            _ = try client.validateSessionReply(
+        await #expect(throws: QLabClient.RequestFailure.self) {
+            _ = try await client.validateSessionReply(
                 message("/workspace/W/cueLists", status: "denied", data: "\"denied\""),
                 as: [Cue].self
             )
@@ -48,13 +48,13 @@ struct QLabSessionTests {
     }
 
     @Test("A second denial does not raise a second prompt")
-    func repeatedDenialsPromptOnce() throws {
+    func repeatedDenialsPromptOnce() async throws {
         let client = QLabClient(preferences: Preferences(), log: ActivityLog())
         var prompts = 0
         client.onPasscodeRequired = { _ in prompts += 1 }
         for _ in 0..<3 {
-            #expect(throws: QLabClient.RequestFailure.self) {
-                _ = try client.validateSessionReply(
+            await #expect(throws: QLabClient.RequestFailure.self) {
+                _ = try await client.validateSessionReply(
                     message("/workspace/W/thump", status: "denied", data: "\"thump\""),
                     as: String.self
                 )
@@ -65,23 +65,37 @@ struct QLabSessionTests {
 
     @Test("Failed setup requests cannot masquerade as successful empty replies",
           arguments: ["/updates", "/listen/playhead", "/workspace/W/cueLists"])
-    func failedSetup(address: String) {
+    func failedSetup(address: String) async {
         let client = QLabClient(preferences: Preferences(), log: ActivityLog())
-        #expect(throws: QLabClient.RequestFailure.self) {
-            _ = try client.validateSessionReply(
+        await #expect(throws: QLabClient.RequestFailure.self) {
+            _ = try await client.validateSessionReply(
                 message(address, status: "error", data: "null"), as: QLabEmptyPayload.self
             )
         }
     }
 
     @Test("An authorized empty cue list remains valid")
-    func emptyCueLists() throws {
+    func emptyCueLists() async throws {
         let client = QLabClient(preferences: Preferences(), log: ActivityLog())
-        let reply = try client.validateSessionReply(
+        let reply = try await client.validateSessionReply(
             message("/workspace/W/cueLists", status: "ok", data: "[]"), as: [Cue].self
         )
         #expect(reply.data?.isEmpty == true)
         #expect(client.status == .offline)
+    }
+
+    @Test("Cancelling a connection releases an event-loss handler cycle")
+    func cancellingConnectionReleasesEventLossHandler() async {
+        var connection: QLabConnection? = QLabConnection(endpoint: QLabServer.localhost().endpoint)
+        weak let weakConnection = connection
+
+        await connection?.setEventsDroppedHandler { [connection] _ in
+            _ = connection
+        }
+        await connection?.cancel()
+        connection = nil
+
+        #expect(weakConnection == nil)
     }
 }
 
@@ -312,7 +326,8 @@ struct QLabDisconnectTests {
         peer.cueLists = Self.populatedShow
         defer { peer.stop() }
         let port = try await peer.start()
-        let client = QLabClient(preferences: try makePreferences(), log: ActivityLog())
+        let log = ActivityLog()
+        let client = QLabClient(preferences: try makePreferences(), log: log)
         defer { client.disconnect() }
         await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
         try #require(client.playheadCue?.uniqueID == "C1")
@@ -611,6 +626,7 @@ struct QLabDisconnectTests {
         defer { peer.stop() }
         let port = try await peer.start()
         let log = ActivityLog()
+        log.addViewer()
         let client = QLabClient(preferences: try makePreferences(), log: log)
         await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
         try #require(client.status == .connected)
@@ -637,6 +653,7 @@ struct QLabDisconnectTests {
         peer.cueLists = Self.populatedShow
         let port = try await peer.start()
         let log = ActivityLog()
+        log.addViewer()
         let client = QLabClient(
             preferences: try makePreferences(requestTimeout: 0.3), log: log
         )
@@ -702,6 +719,7 @@ struct QLabDisconnectTests {
         peer.cueLists = Self.populatedShow
         defer { peer.stop() }
         let log = ActivityLog()
+        log.addViewer()
         let port = try await peer.start()
         let client = QLabClient(preferences: try makePreferences(), log: log)
         defer { client.disconnect() }
@@ -767,13 +785,22 @@ struct QLabDisconnectTests {
         peer.cueLists = Self.showWithDetails(duration: 4.25, notes: "Hold for the door")
         defer { peer.stop() }
         let port = try await peer.start()
-        let client = QLabClient(preferences: try makePreferences(), log: ActivityLog())
+        let log = ActivityLog()
+        log.addViewer()
+        let client = QLabClient(preferences: try makePreferences(), log: log)
         defer { client.disconnect() }
         await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
         try #require(client.status == .connected)
 
         try #require(client.playheadCue?.duration == 4.25)
         try #require(client.playheadCue?.notes == "Hold for the door")
+
+        func cueListRequests() -> Int {
+            log.entries.filter {
+                $0.direction == .outbound && $0.address.hasSuffix("/cueLists")
+            }.count
+        }
+        let snapshotRequests = cueListRequests()
 
         peer.cueLists = Self.showWithDetails(duration: 9.5, notes: "Hold for the slam")
         peer.push(OSCMessage("/update/workspace/W/cue_id/C1"))
@@ -785,6 +812,7 @@ struct QLabDisconnectTests {
 
         #expect(client.playheadCue?.duration == 9.5)
         #expect(client.playheadCue?.notes == "Hold for the slam")
+        #expect(cueListRequests() == snapshotRequests)
     }
 
     @Test("An unrelated cue edit never blanks the pills, even for an instant")
@@ -862,6 +890,7 @@ struct QLabDisconnectTests {
         ]
         defer { peer.stop() }
         let log = ActivityLog()
+        log.addViewer()
         let port = try await peer.start()
         let client = QLabClient(preferences: try makePreferences(), log: log)
         defer { client.disconnect() }
@@ -954,6 +983,7 @@ struct QLabDisconnectTests {
         peer.cueLists = Self.populatedShow
         defer { peer.stop() }
         let log = ActivityLog()
+        log.addViewer()
         let port = try await peer.start()
         let client = QLabClient(preferences: try makePreferences(), log: log)
         defer { client.disconnect() }

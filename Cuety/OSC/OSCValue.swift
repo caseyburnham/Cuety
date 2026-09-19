@@ -65,8 +65,6 @@ nonisolated enum OSCValue: Hashable, Sendable {
         case .impulse: "I"
         }
     }
-
-    static let zeroWidthTags: Set<Character> = ["T", "F", "N", "I"]
 }
 
 
@@ -78,39 +76,12 @@ nonisolated extension OSCValue {
         }
     }
 
-    var doubleValue: Double? {
-        switch self {
-        case .int32(let value): Double(value)
-        case .float32(let value): Double(value)
-        case .int64(let value): Double(value)
-        case .double(let value): value
-        default: nil
-        }
-    }
-
-    var intValue: Int? {
-        switch self {
-        case .int32(let value): Int(value)
-        case .int64(let value): Int(value)
-        case .float32(let value): Int(value)
-        case .double(let value): Int(value)
-        default: nil
-        }
-    }
-
     var boolValue: Bool? {
         switch self {
         case .true: true
         case .false: false
         case .int32(let value): value != 0
         case .int64(let value): value != 0
-        default: nil
-        }
-    }
-
-    var blobValue: Data? {
-        switch self {
-        case .blob(let data): data
         default: nil
         }
     }

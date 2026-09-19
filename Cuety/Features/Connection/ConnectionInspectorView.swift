@@ -120,7 +120,7 @@ struct ConnectionInspectorView: View {
         Section("QLab") {
             LabeledContent("Version", value: client.qlabVersion ?? "Unknown")
             LabeledContent("Cue Lists", value: client.cueLists.count.formatted())
-            LabeledContent("Cues", value: totalCueCount.formatted())
+            LabeledContent("Cues", value: client.totalCueCount.formatted())
             if let watched = watchedCueListName {
                 LabeledContent("Watching", value: watched)
             }
@@ -220,13 +220,6 @@ struct ConnectionInspectorView: View {
         }
     }
 
-
-    private var totalCueCount: Int {
-        func count(_ cues: [Cue]) -> Int {
-            cues.reduce(0) { $0 + 1 + count($1.children) }
-        }
-        return count(client.cueLists)
-    }
 
     private var watchedCueListName: String? {
         guard let id = client.watchedCueListID else { return nil }

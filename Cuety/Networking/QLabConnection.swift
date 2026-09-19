@@ -75,6 +75,7 @@ actor QLabConnection {
         readinessTimeout = nil
         dropReportTask?.cancel()
         dropReportTask = nil
+        onEventsDropped = nil
 
         connection?.stateUpdateHandler = nil
         connection?.viabilityUpdateHandler = nil

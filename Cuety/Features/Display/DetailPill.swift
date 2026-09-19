@@ -2,9 +2,10 @@ import SwiftUI
 
 struct DetailPill: View {
     let kind: DetailPillKind
-    let cue: Cue
 
-    let cueListName: String?
+    /// Prepared by `DetailPill.entries(for:cue:cueListName:)` so the row can
+    /// decide what to show without each pill rebuilding its own content.
+    let content: Content
 
     var size: PillSize = .medium
 
@@ -13,15 +14,13 @@ struct DetailPill: View {
     var performanceMode = false
 
     var body: some View {
-        if let content = Self.content(for: kind, cue: cue, cueListName: cueListName) {
-            if content.isFlexible {
-                ViewThatFits(in: .horizontal) {
-                    capsule(for: content, hugsText: true)
-                    capsule(for: content, hugsText: false)
-                }
-            } else {
+        if content.isFlexible {
+            ViewThatFits(in: .horizontal) {
+                capsule(for: content, hugsText: true)
                 capsule(for: content, hugsText: false)
             }
+        } else {
+            capsule(for: content, hugsText: false)
         }
     }
 
@@ -82,6 +81,24 @@ struct DetailPill: View {
     private static func glass(for content: Content) -> Glass {
         guard let tint = content.tint else { return .regular }
         return Glass.regular.tint(tint.opacity(0.28))
+    }
+
+    /// A pill kind paired with the content it produced for a cue. Only kinds
+    /// with something to say become entries.
+    struct Entry: Identifiable {
+        let kind: DetailPillKind
+        let content: Content
+
+        var id: DetailPillKind { kind }
+    }
+
+    static func entries(
+        for kinds: [DetailPillKind], cue: Cue, cueListName: String?
+    ) -> [Entry] {
+        kinds.compactMap { kind in
+            content(for: kind, cue: cue, cueListName: cueListName)
+                .map { Entry(kind: kind, content: $0) }
+        }
     }
 
     struct Content {
@@ -255,38 +272,50 @@ struct DetailPill: View {
 struct WrappingPillLayout: Layout {
     var spacing: CGFloat
 
+    /// Pills are sized independently of the proposal, so every pass through
+    /// sizing and placement would otherwise re-measure the same subviews.
+    /// Measure once per subview set and memoise the row split for the most
+    /// recently requested width.
+    struct Cache {
+        var sizes: [CGSize]
+        var rows: (width: CGFloat, spacing: CGFloat, value: [[Int]])?
+    }
+
+    func makeCache(subviews: Subviews) -> Cache {
+        Cache(sizes: subviews.map { $0.sizeThatFits(.unspecified) })
+    }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        cache = makeCache(subviews: subviews)
+    }
+
     func sizeThatFits(
-        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+        proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache
     ) -> CGSize {
         let available = proposal.width ?? .infinity
-        let rows = rows(for: subviews, availableWidth: available)
+        let rows = rows(availableWidth: available, cache: &cache)
 
-        let width = rows.map { row in
-            row.reduce(0) { $0 + subviews[$1].sizeThatFits(.unspecified).width }
-                + spacing * CGFloat(max(0, row.count - 1))
-        }.max() ?? 0
+        let width = rows.map { rowWidth($0, in: cache) }.max() ?? 0
 
         let height = rows.reduce(0) { total, row in
-            total + rowHeight(row, in: subviews)
+            total + rowHeight(row, in: cache)
         } + spacing * CGFloat(max(0, rows.count - 1))
 
         return CGSize(width: min(width, available), height: height)
     }
 
     func placeSubviews(
-        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache
     ) {
-        let rows = rows(for: subviews, availableWidth: bounds.width)
+        let rows = rows(availableWidth: bounds.width, cache: &cache)
         var y = bounds.minY
 
         for row in rows {
-            let rowWidth = row.reduce(0) { $0 + subviews[$1].sizeThatFits(.unspecified).width }
-                + spacing * CGFloat(max(0, row.count - 1))
-            let height = rowHeight(row, in: subviews)
-            var x = bounds.minX + (bounds.width - rowWidth) / 2
+            let height = rowHeight(row, in: cache)
+            var x = bounds.minX + (bounds.width - rowWidth(row, in: cache)) / 2
 
             for index in row {
-                let size = subviews[index].sizeThatFits(.unspecified)
+                let size = cache.sizes[index]
                 subviews[index].place(
                     at: CGPoint(x: x, y: y + (height - size.height) / 2),
                     proposal: ProposedViewSize(size)
@@ -298,13 +327,23 @@ struct WrappingPillLayout: Layout {
         }
     }
 
-    private func rows(for subviews: Subviews, availableWidth: CGFloat) -> [[Int]] {
+    private func rows(availableWidth: CGFloat, cache: inout Cache) -> [[Int]] {
+        if let cached = cache.rows, cached.width == availableWidth, cached.spacing == spacing {
+            return cached.value
+        }
+
+        let rows = makeRows(availableWidth: availableWidth, sizes: cache.sizes)
+        cache.rows = (availableWidth, spacing, rows)
+        return rows
+    }
+
+    private func makeRows(availableWidth: CGFloat, sizes: [CGSize]) -> [[Int]] {
         var rows: [[Int]] = []
         var current: [Int] = []
         var x: CGFloat = 0
 
-        for index in subviews.indices {
-            let width = subviews[index].sizeThatFits(.unspecified).width
+        for index in sizes.indices {
+            let width = sizes[index].width
             let needed = current.isEmpty ? width : width + spacing
 
             if !current.isEmpty, x + needed > availableWidth {
@@ -321,8 +360,13 @@ struct WrappingPillLayout: Layout {
         return rows
     }
 
-    private func rowHeight(_ row: [Int], in subviews: Subviews) -> CGFloat {
-        row.map { subviews[$0].sizeThatFits(.unspecified).height }.max() ?? 0
+    private func rowWidth(_ row: [Int], in cache: Cache) -> CGFloat {
+        row.reduce(0) { $0 + cache.sizes[$1].width }
+            + spacing * CGFloat(max(0, row.count - 1))
+    }
+
+    private func rowHeight(_ row: [Int], in cache: Cache) -> CGFloat {
+        row.map { cache.sizes[$0].height }.max() ?? 0
     }
 }
 
@@ -339,58 +383,62 @@ struct DetailPillsRow: View {
 
     @Namespace private var glassNamespace
 
-    private var populated: [DetailPillKind] {
-        kinds.filter { DetailPill.content(for: $0, cue: cue, cueListName: cueListName) != nil }
-    }
-
-    private var inlineKinds: [DetailPillKind] {
-        populated.filter { $0 != .notes }
-    }
-
-    private var noteKind: DetailPillKind? {
-        populated.contains(.notes) ? .notes : nil
-    }
-
     var body: some View {
-        if !populated.isEmpty {
-            pillContainer
+        // Build the content once per update; every pill below is handed the
+        // content that decided it should appear at all.
+        let entries = DetailPill.entries(for: kinds, cue: cue, cueListName: cueListName)
+        if !entries.isEmpty {
+            pillContainer(entries)
         }
     }
 
     @ViewBuilder
-    private var pillContainer: some View {
+    private func pillContainer(_ entries: [DetailPill.Entry]) -> some View {
         if performanceMode {
-            pillStack
+            pillStack(entries)
         } else {
             GlassEffectContainer(spacing: size.glassSpacing) {
-                pillStack
+                pillStack(entries)
             }
-            .motion(Motion.pill, value: populated)
+            .motion(Motion.pill, value: entries.map(\.kind))
         }
     }
 
-    private var pillStack: some View {
-        VStack(spacing: size.spacing) {
-            if !inlineKinds.isEmpty {
+    private func pillStack(_ entries: [DetailPill.Entry]) -> some View {
+        // The notes pill sits on its own row below the rest, so split the
+        // entries in a single pass rather than filtering and searching twice.
+        var inlineEntries: [DetailPill.Entry] = []
+        inlineEntries.reserveCapacity(entries.count)
+        var noteEntry: DetailPill.Entry?
+
+        for entry in entries {
+            if entry.kind == .notes {
+                if noteEntry == nil { noteEntry = entry }
+            } else {
+                inlineEntries.append(entry)
+            }
+        }
+
+        return VStack(spacing: size.spacing) {
+            if !inlineEntries.isEmpty {
                 WrappingPillLayout(spacing: size.spacing) {
-                    ForEach(inlineKinds) { kind in
-                        pill(kind)
+                    ForEach(inlineEntries) { entry in
+                        pill(entry)
                     }
                 }
             }
 
-            if let noteKind {
-                pill(noteKind)
+            if let noteEntry {
+                pill(noteEntry)
             }
         }
     }
 
     @ViewBuilder
-    private func pill(_ kind: DetailPillKind) -> some View {
+    private func pill(_ entry: DetailPill.Entry) -> some View {
         let detailPill = DetailPill(
-            kind: kind,
-            cue: cue,
-            cueListName: cueListName,
+            kind: entry.kind,
+            content: entry.content,
             size: size,
             showsCueTypeLabel: showsCueTypeLabel,
             performanceMode: performanceMode
@@ -400,7 +448,7 @@ struct DetailPillsRow: View {
             detailPill
         } else {
             detailPill
-                .glassEffectID(kind, in: glassNamespace)
+                .glassEffectID(entry.kind, in: glassNamespace)
                 .glassEffectTransition(.matchedGeometry)
         }
     }
