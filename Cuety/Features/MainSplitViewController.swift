@@ -89,7 +89,10 @@ struct MainSplitView<Sidebar: View, Detail: View>: View {
     @ViewBuilder let detail: () -> Detail
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $sidebarVisibility) {
+        NavigationSplitView(
+            columnVisibility: $sidebarVisibility,
+            preferredCompactColumn: $compactColumn
+        ) {
             sidebar()
                 .navigationTitle("Workspaces")
         } detail: {
@@ -97,13 +100,22 @@ struct MainSplitView<Sidebar: View, Detail: View>: View {
         }
         .onChange(of: model.isSidebarVisible) { _, visible in
             sidebarVisibility = visible ? .all : .detailOnly
+            compactColumn = visible ? .sidebar : .detail
         }
         .onChange(of: sidebarVisibility) { _, visibility in
             model.isSidebarVisible = visibility != .detailOnly
         }
+        .onChange(of: compactColumn) { _, column in
+            model.isSidebarVisible = column == .sidebar
+        }
     }
 
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
+
+    /// Once the split view collapses into one column it ignores
+    /// ``sidebarVisibility``, so the column on top is steered separately.
+    /// Without this the sidebar is a dead end in a narrow window.
+    @State private var compactColumn: NavigationSplitViewColumn = .sidebar
 
     init(
         model: AppModel,
@@ -114,6 +126,7 @@ struct MainSplitView<Sidebar: View, Detail: View>: View {
         self.sidebar = sidebar
         self.detail = detail
         _sidebarVisibility = State(initialValue: model.isSidebarVisible ? .all : .detailOnly)
+        _compactColumn = State(initialValue: model.isSidebarVisible ? .sidebar : .detail)
     }
 }
 #endif

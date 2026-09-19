@@ -32,6 +32,10 @@ struct DetailPill: View {
             .layoutPriority(content.isFlexible ? -1 : 0)
             .padding(.horizontal, size.horizontalPadding)
             .padding(.vertical, size.verticalPadding)
+            .frame(
+                width: kind == .cueType && !showsCueTypeLabel ? size.height : nil,
+                height: size.height
+            )
 
         Group {
             if performanceMode {
@@ -61,6 +65,7 @@ struct DetailPill: View {
             Image(systemName: content.systemImage)
                 .rotationEffect(content.glyphRotation)
                 .foregroundStyle(content.glyphTint ?? content.tint ?? .secondary)
+                .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp)))
         }
 
         if content.hidesGlyph {
@@ -400,7 +405,10 @@ struct DetailPillsRow: View {
             GlassEffectContainer(spacing: size.glassSpacing) {
                 pillStack(entries)
             }
-            .motion(Motion.pill, value: entries.map(\.kind))
+            .motion(
+                Motion.pill,
+                value: entries.map { "\($0.kind.rawValue):\($0.content.systemImage)" }
+            )
         }
     }
 

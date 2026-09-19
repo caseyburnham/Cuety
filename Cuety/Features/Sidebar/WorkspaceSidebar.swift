@@ -4,7 +4,15 @@ struct WorkspaceSidebar: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+#if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+#endif
+
     @State private var isConnecting = false
+
+    /// Workspaces the operator has collapsed. A connected workspace shows its
+    /// cue lists by default, so absence from this set means expanded.
+    @State private var collapsedWorkspaces: Set<WorkspaceSelection> = []
 
     private enum Selection: Hashable {
         case workspace(WorkspaceSelection)
@@ -46,19 +54,6 @@ struct WorkspaceSidebar: View {
                 }
             }
 
-            if model.client.status.hasLiveData {
-                Section("Cue Lists") {
-                    ForEach(model.client.cueLists) { list in
-                        cueListRow(list)
-                    }
-                    if model.client.cueLists.isEmpty {
-                        Text("No Cue Lists")
-                            .foregroundStyle(.secondary)
-                            .selectionDisabled()
-                    }
-                }
-            }
-
             if let error = model.browser.browseError {
                 Section("Network Discovery") {
                     Label(error, systemImage: "exclamationmark.triangle")
@@ -80,22 +75,25 @@ struct WorkspaceSidebar: View {
                 }
             }
         } primaryAction: { items in
-            if case .workspace(let selection) = items.first {
-                connect(to: selection)
-            }
+            if let item = items.first { activate(item) }
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
 #if os(iOS)
         .navigationTitle("Workspaces")
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    model.isSidebarVisible = false
-                } label: {
-                    Image(systemName: "rectangle.rightthird.inset.filled")
+            // Only a collapsed split view strands the operator here. At regular
+            // widths the display is already on screen beside the sidebar and the
+            // split view supplies its own toggle.
+            if horizontalSizeClass == .compact {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        model.isSidebarVisible = false
+                    } label: {
+                        Image(systemName: "rectangle.rightthird.inset.filled")
+                    }
+                    .accessibilityLabel("Show Cue Display")
                 }
-                .accessibilityLabel("Show Cue Display")
             }
         }
         .compactToolbarActions()
@@ -117,23 +115,69 @@ struct WorkspaceSidebar: View {
             }
             return model.selection.map(Selection.workspace)
         } set: { selection in
-            switch selection {
-            case .workspace(let workspace):
-                connect(to: workspace)
-            case .cueList(let id):
-                guard id != model.client.watchedCueListID else { return }
-                withAnimation(reduceMotion ? nil : Motion.cueChange) {
-                    model.client.watchedCueListID = id
+            if let selection { activate(selection) }
+        }
+    }
+
+    /// A tap reaches a row through the list's primary action rather than the
+    /// selection binding, so both routes land here. Each branch is idempotent,
+    /// which keeps a platform that calls both harmless.
+    private func activate(_ selection: Selection) {
+        switch selection {
+        case .workspace(let workspace):
+            connect(to: workspace)
+        case .cueList(let id):
+            watch(cueListWithID: id)
+        }
+    }
+
+    private func watch(cueListWithID id: String) {
+        guard id != model.client.watchedCueListID else { return }
+        withAnimation(reduceMotion ? nil : Motion.cueChange) {
+            model.client.watchedCueListID = id
+        }
+        Task { await model.client.refreshPlayheadCueDetails() }
+    }
+
+    /// A workspace only knows its cue lists while Cuety is connected to it, so
+    /// only the live workspace opens; the rest stay plain rows.
+    @ViewBuilder
+    private func workspaceRow(_ workspace: QLabWorkspaceInfo, on server: QLabServer) -> some View {
+        let selection = WorkspaceSelection(serverID: server.id, workspaceID: workspace.uniqueID)
+
+        if model.selection == selection && model.client.status.hasLiveData {
+            DisclosureGroup(isExpanded: isExpanded(selection)) {
+                ForEach(model.client.cueLists) { list in
+                    cueListRow(list)
                 }
-                Task { await model.client.refreshPlayheadCueDetails() }
-            case nil:
-                break
+                if model.client.cueLists.isEmpty {
+                    Text("No Cue Lists")
+                        .foregroundStyle(.secondary)
+                        .selectionDisabled()
+                }
+            } label: {
+                workspaceLabel(workspace, selection: selection)
+            }
+        } else {
+            workspaceLabel(workspace, selection: selection)
+        }
+    }
+
+    private func isExpanded(_ selection: WorkspaceSelection) -> Binding<Bool> {
+        Binding {
+            !collapsedWorkspaces.contains(selection)
+        } set: { expanded in
+            if expanded {
+                collapsedWorkspaces.remove(selection)
+            } else {
+                collapsedWorkspaces.insert(selection)
             }
         }
     }
 
-    private func workspaceRow(_ workspace: QLabWorkspaceInfo, on server: QLabServer) -> some View {
-        let selection = WorkspaceSelection(serverID: server.id, workspaceID: workspace.uniqueID)
+    private func workspaceLabel(
+        _ workspace: QLabWorkspaceInfo, selection: WorkspaceSelection
+    ) -> some View {
         let isCurrent = model.selection == selection
 
         return Label {
@@ -157,7 +201,9 @@ struct WorkspaceSidebar: View {
         }
         .tag(Selection.workspace(selection))
         .help(workspace.displayName)
-        .accessibilityHint("Double-click to connect to this workspace")
+        .accessibilityHint(
+            isCurrent ? "The connected workspace" : "Double-click to connect to this workspace"
+        )
     }
 
     private func connect(to selection: WorkspaceSelection) {

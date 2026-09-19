@@ -124,6 +124,14 @@ enum PillSize: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
         }
     }
 
+    var height: CGFloat {
+        switch self {
+        case .small: 28
+        case .medium: 36
+        case .large: 46
+        }
+    }
+
     var spacing: CGFloat {
         switch self {
         case .small: 8

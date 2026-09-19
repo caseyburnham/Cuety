@@ -44,7 +44,7 @@ actor QLabConnection {
 
 
     func start() -> AsyncStream<Event> {
-        cancel()
+        closeConnection()
 
         let (stream, continuation) = AsyncStream<Event>.makeStream(
             bufferingPolicy: .bufferingNewest(Self.eventBufferCapacity)
@@ -71,11 +71,17 @@ actor QLabConnection {
     }
 
     func cancel() {
+        closeConnection()
+        onEventsDropped = nil
+    }
+
+    /// Tears the socket down without forgetting who asked to hear about
+    /// dropped events, so restarting keeps the owner's handler attached.
+    private func closeConnection() {
         readinessTimeout?.cancel()
         readinessTimeout = nil
         dropReportTask?.cancel()
         dropReportTask = nil
-        onEventsDropped = nil
 
         connection?.stateUpdateHandler = nil
         connection?.viabilityUpdateHandler = nil

@@ -105,6 +105,25 @@ struct ServerIdentityTests {
         #expect(browser.servers.count == before + 1)
     }
 
+#if os(macOS)
+    @Test("The name this Mac advertises over Bonjour is not a second machine")
+    func advertisedComputerNameIsThisMac() throws {
+        // QLab advertises the user-visible computer name ("Casey's MacBook Pro"),
+        // not the DNS host name ("caseys-macbook-pro.local").
+        let computerName = try #require(Host.current().localizedName)
+        let discovered = try #require(QLabServer.bonjour(
+            endpoint: .service(
+                name: computerName,
+                type: QLabBrowser.serviceType,
+                domain: "local.",
+                interface: nil
+            )
+        ))
+
+        #expect(discovered.id == QLabServer.localhost().id)
+    }
+#endif
+
     @Test("A discovered server is identified separately from a typed address")
     func remoteBonjourAndManualAreNotUnified() {
         let manual = QLabServer.manual(host: "192.168.1.10", port: port)

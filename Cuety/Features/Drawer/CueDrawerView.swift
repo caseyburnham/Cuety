@@ -2,7 +2,6 @@ import SwiftUI
 
 struct CueDrawerView: View {
     let availableHeight: CGFloat
-    var onClose: () -> Void = {}
 
     @Environment(AppModel.self) private var model
 
@@ -68,20 +67,6 @@ struct CueDrawerView: View {
             }
         }
         .background(.thinMaterial)
-        .overlay(alignment: .topTrailing) {
-            if !isCollapsed {
-                Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.caption.weight(.bold))
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-            .padding(.trailing, 12)
-            .padding(.top, 8)
-                    .accessibilityLabel("Hide Cue Drawer")
-                }
-            }
         .contentShape(Rectangle())
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Cue list around the playhead")
@@ -118,6 +103,9 @@ struct CueDrawerView: View {
                 model.resizeDrawer(toStep: min(1, maximumStep))
             }
         }
+        #if os(macOS)
+        .pointerStyle(.rowResize)
+        #endif
         .accessibilityElement()
         .accessibilityLabel("Cue drawer")
         .accessibilityHint("Drag up or down to show one more or fewer cues on each side")

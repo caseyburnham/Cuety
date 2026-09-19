@@ -47,8 +47,7 @@ struct MainWindowView: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     if !model.isPresenting {
                         CueDrawerView(
-                            availableHeight: proxy.size.height,
-                            onClose: { model.resizeDrawer(toStep: 0) }
+                            availableHeight: proxy.size.height
                         )
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                     }

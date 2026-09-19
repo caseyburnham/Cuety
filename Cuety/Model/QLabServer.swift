@@ -88,7 +88,18 @@ nonisolated struct QLabServer: Identifiable, Hashable, Sendable {
             "0000:0000:0000:0000:0000:0000:0000:0001",
         ]
 
-        for name in [ProcessInfo.processInfo.hostName] {
+        // Bonjour advertises this Mac under its user-visible computer name
+        // ("Casey's MacBook Pro"), which is not the DNS host name
+        // ("caseys-macbook-pro.local"). Without both spellings the discovered
+        // service looks like a second, separate machine.
+        var names = [ProcessInfo.processInfo.hostName]
+#if os(macOS)
+        if let computerName = Host.current().localizedName {
+            names.append(computerName)
+        }
+#endif
+
+        for name in names {
             let normalized = normalizedHost(name)
             guard !normalized.isEmpty else { continue }
             aliases.insert(normalized)
