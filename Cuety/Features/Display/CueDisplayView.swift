@@ -3,6 +3,7 @@ import SwiftUI
 struct CueDisplayView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var headlineSizingCache = HeadlineSizingCache()
 
@@ -13,7 +14,9 @@ struct CueDisplayView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let cue = client.liveCue {
+            if model.isDataStale {
+                staleDataState
+            } else if let cue = client.liveCue {
                 cueContent(cue)
             } else {
                 emptyState
@@ -28,6 +31,20 @@ struct CueDisplayView: View {
                 ? nil
                 : client.currentPlayheadCueID
         )
+        .transaction { transaction in
+            if reduceMotion {
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
+        }
+    }
+
+    private var staleDataState: some View {
+        ContentUnavailableView {
+            Label("Data May Be Stale", systemImage: "clock.badge.exclamationmark")
+        } description: {
+            Text("Cuety keeps its connection policy while this scene is suspended. Return to the foreground to confirm the current cue from QLab.")
+        }
     }
 
     private var detailPillSize: PillSize {
@@ -61,7 +78,7 @@ struct CueDisplayView: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.5)
-                    .transition(.opacity)
+                    .transition(reduceMotion ? .identity : .opacity)
                     .id(cue.uniqueID)
             }
 
@@ -90,7 +107,7 @@ struct CueDisplayView: View {
                 .monospacedDigit()
                 .foregroundStyle(.primary)
                 .contentTransition(
-                    model.preferences.performanceMode ? .identity : .numericText()
+                    model.preferences.performanceMode || reduceMotion ? .identity : .numericText()
                 )
                 .accessibilityLabel("Cue number \(number)")
         } else if let name = cue.displayName {
@@ -101,7 +118,7 @@ struct CueDisplayView: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(cue.color ?? .primary)
-                    .transition(.opacity)
+                    .transition(reduceMotion ? .identity : .opacity)
 
                 caption("Unnumbered")
                     .foregroundStyle(.tertiary)

@@ -2,6 +2,8 @@ import SwiftUI
 
 struct MainWindowView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
 #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -17,6 +19,9 @@ struct MainWindowView: View {
         .task {
             model.start()
         }
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            model.updateScenePhase(phase)
+        }
         .sheet(item: Bindable(model).passcodePrompt) { prompt in
             PasscodeSheet(prompt: prompt)
         }
@@ -29,6 +34,12 @@ struct MainWindowView: View {
             }
         )
         .background(StatusToolbar())
+        .transaction { transaction in
+            if reduceMotion {
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
+        }
 #if os(iOS)
         .compactToolbarActions(
             showsFloatingDisplay: horizontalSizeClass == .regular,
@@ -49,7 +60,7 @@ struct MainWindowView: View {
                         CueDrawerView(
                             availableHeight: proxy.size.height
                         )
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .transition(reduceMotion ? .identity : .move(edge: .bottom).combined(with: .opacity))
                     }
                 }
         }

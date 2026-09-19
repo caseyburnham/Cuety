@@ -7,6 +7,7 @@ enum WindowID: String {
 }
 
 @main
+@MainActor
 struct CuetyApp: App {
     @State private var model = AppModel()
 

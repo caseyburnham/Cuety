@@ -1,4 +1,5 @@
 import SwiftUI
+import ShowControlCore
 #if os(macOS)
 import AppKit
 typealias PlatformFont = NSFont
@@ -303,7 +304,7 @@ final class Preferences {
         performanceMode = defaults.bool(forKey: Key.performanceMode)
 
         storedDefaultPort = Limits.port.clamping(
-            defaults.object(forKey: Key.defaultPort) as? Int ?? 53000
+            defaults.object(forKey: Key.defaultPort) as? Int ?? ShowControlDefaults.qlabTCPPort
         )
         storedHeartbeatInterval = Limits.heartbeatInterval.clamping(
             defaults.object(forKey: Key.heartbeatInterval) as? TimeInterval ?? 5

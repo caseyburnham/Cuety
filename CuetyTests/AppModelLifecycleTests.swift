@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 
 @testable import Cuety
@@ -173,5 +174,23 @@ struct AppModelLifecycleTests {
         model.setPresenting(false)
 
         #expect(model.isSidebarVisible)
+    }
+
+    @Test("Backgrounding labels retained QLab data stale without disconnecting")
+    func backgroundMarksDataStale() async throws {
+        let model = try makeModel()
+        model.selection = WorkspaceSelection(serverID: "S", workspaceID: "W")
+
+        model.updateScenePhase(.background)
+
+        #expect(model.isDataStale)
+        #expect(model.selection != nil)
+
+        model.updateScenePhase(.active)
+
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(!model.isDataStale)
+        #expect(model.selection != nil)
     }
 }

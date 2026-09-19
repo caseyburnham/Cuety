@@ -18,14 +18,15 @@ final class ToolbarGlyphState {
 
 struct ToolbarGlyph: View {
     let state: ToolbarGlyphState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Image(systemName: state.symbol)
             .imageScale(.large)
             .foregroundStyle(state.tint ?? .primary)
-            .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp)))
-            .symbolEffect(.bounce, options: .nonRepeating, value: state.beat)
-            .symbolEffect(.variableColor.iterative, isActive: state.isWorking)
+            .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace.magic(fallback: .downUp)))
+            .symbolEffect(.bounce, options: .nonRepeating, value: reduceMotion ? 0 : state.beat)
+            .symbolEffect(.variableColor.iterative, isActive: !reduceMotion && state.isWorking)
             .motion(Motion.status, value: state.symbol)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

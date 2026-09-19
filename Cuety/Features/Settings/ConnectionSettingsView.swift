@@ -101,6 +101,10 @@ struct ConnectionSettingsView: View {
 
     private var addedServersSection: some View {
         Section {
+            Button("Add Server", systemImage: "plus") {
+                model.isAddingServer = true
+            }
+
             if addedServers.isEmpty {
                 Text("No servers added by hand.")
                     .font(.callout)

@@ -13,6 +13,8 @@ struct DetailPill: View {
 
     var performanceMode = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         if content.isFlexible {
             ViewThatFits(in: .horizontal) {
@@ -65,7 +67,7 @@ struct DetailPill: View {
             Image(systemName: content.systemImage)
                 .rotationEffect(content.glyphRotation)
                 .foregroundStyle(content.glyphTint ?? content.tint ?? .secondary)
-                .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp)))
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace.magic(fallback: .downUp)))
         }
 
         if content.hidesGlyph {

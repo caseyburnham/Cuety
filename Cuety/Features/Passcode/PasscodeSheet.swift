@@ -4,6 +4,7 @@ struct PasscodeSheet: View {
     let prompt: AppModel.PasscodePrompt
 
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var isSubmitting = false
     @State private var attemptError: String?
@@ -52,7 +53,7 @@ struct PasscodeSheet: View {
             Image(systemName: currentPrompt.wasRejected ? "lock.trianglebadge.exclamationmark" : "lock.circle")
                 .font(.largeTitle)
                 .foregroundStyle(currentPrompt.wasRejected ? .orange : .secondary)
-                .contentTransition(.symbolEffect(.replace))
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(currentPrompt.wasRejected ? "Passcode Not Accepted" : "Passcode Required")

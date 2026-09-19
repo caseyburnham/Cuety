@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import os
+import ShowControlCore
 
 /// QLab advertises Bonjour services as `_qlab._tcp`; `.service` endpoints are resolved by Network.
 
@@ -13,7 +14,7 @@ final class QLabBrowser {
         category: "QLabBrowser.Persistence"
     )
 
-    static let serviceType = "_qlab._tcp"
+    static let serviceType = ShowControlDefaults.qlabBonjourService
 
     private(set) var servers: [QLabServer] = []
 

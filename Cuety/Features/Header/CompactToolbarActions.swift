@@ -33,11 +33,11 @@ struct CompactToolbarActions: ViewModifier {
                     Button {
                         isShowingConnectionInspector = true
                     } label: {
-                        Image(systemName: model.client.status.systemImage)
-                            .foregroundStyle(model.client.status.tint)
+                        Image(systemName: model.isDataStale ? "clock.badge.exclamationmark" : model.client.status.systemImage)
+                            .foregroundStyle(model.isDataStale ? AnyShapeStyle(.orange) : AnyShapeStyle(model.client.status.tint))
                     }
-                    .accessibilityLabel("Connection status")
-                    .accessibilityValue(model.client.status.title)
+                    .accessibilityLabel(model.isDataStale ? "Data may be stale" : "Connection status")
+                    .accessibilityValue(model.isDataStale ? "Return to the foreground to confirm the current cue" : model.client.status.title)
 
                     Button {
                         isShowingActivityLog = true

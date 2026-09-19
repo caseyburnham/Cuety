@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ConnectionInspectorView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var client: QLabClient { model.client }
 
@@ -49,9 +50,9 @@ struct ConnectionInspectorView: View {
                     .foregroundStyle(client.status.tint)
                     .symbolEffect(
                         .variableColor.iterative,
-                        isActive: client.status.isTransitional
+                        isActive: !reduceMotion && client.status.isTransitional
                     )
-                    .contentTransition(.symbolEffect(.replace))
+                    .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(client.status.title)
@@ -60,6 +61,11 @@ struct ConnectionInspectorView: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    if model.isDataStale {
+                        Label("Data may be stale until the next foreground refresh", systemImage: "clock.badge.exclamationmark")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                 }
 
                 Spacer(minLength: 12)
@@ -105,7 +111,7 @@ struct ConnectionInspectorView: View {
                     systemImage: client.usedPasscode ? "lock.fill" : "lock.open"
                 )
                 .foregroundStyle(client.usedPasscode ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp)))
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace.magic(fallback: .downUp)))
                 .motion(Motion.status, value: client.usedPasscode)
             }
             LabeledContent("Access", value: client.accessLevel.title)

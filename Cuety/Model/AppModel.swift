@@ -40,7 +40,15 @@ final class AppModel {
         var id: String { "\(serverID)|\(workspaceID)" }
     }
 
+#if os(macOS)
     var isPresenting = false
+#else
+    /// Presentation mode is a macOS window feature. Keeping this unavailable on
+    /// iPad prevents the iPad UI from ever presenting a misleading entry point.
+    var isPresenting: Bool { false }
+#endif
+
+    private(set) var isDataStale = false
 
     var isSidebarVisible = true
 
@@ -107,6 +115,30 @@ final class AppModel {
             guard let self else { return }
             await self.refresh()
             await self.autoConnectIfPossible()
+        }
+    }
+
+    /// iPad remains connected while inactive or backgrounded. The operating system
+    /// may suspend the process, so retained cue data is explicitly marked stale
+    /// until the next foreground refresh confirms it again.
+    func updateScenePhase(_ phase: ScenePhase) {
+        switch phase {
+        case .active:
+            guard isDataStale else { return }
+            Task { [weak self] in
+                guard let self else { return }
+                await self.refresh()
+                // The stale label stays visible while refresh is in flight. A
+                // failed refresh replaces it with the client’s explicit error
+                // state instead of briefly presenting retained data as current.
+                self.isDataStale = false
+            }
+        case .inactive, .background:
+            if client.status.hasLiveData || selection != nil {
+                isDataStale = true
+            }
+        @unknown default:
+            break
         }
     }
 
@@ -285,6 +317,7 @@ final class AppModel {
         )
 
         if client.status.hasLiveData {
+            isDataStale = false
             preferences.lastWorkspace = selection
         }
     }
@@ -301,6 +334,7 @@ final class AppModel {
 
         guard client.status.hasLiveData else { return }
 
+        isDataStale = false
         preferences.lastWorkspace = target
 
         if remember {
@@ -388,10 +422,13 @@ final class AppModel {
     }
 
     func togglePresentationMode() {
+#if os(macOS)
         setPresenting(!isPresenting)
+#endif
     }
 
     func setPresenting(_ presenting: Bool) {
+#if os(macOS)
         guard presenting != isPresenting else { return }
         withAnimation(Motion.chrome.unlessMotionIsReduced) {
             if presenting {
@@ -403,6 +440,9 @@ final class AppModel {
                 isSidebarVisible = wasSidebarVisibleBeforePresenting
             }
         }
+#else
+        _ = presenting
+#endif
     }
 
     func toggleSidebar() {

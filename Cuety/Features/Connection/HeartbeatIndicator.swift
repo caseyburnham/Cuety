@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HeartbeatIndicator: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var client: QLabClient { model.client }
 
@@ -10,11 +11,11 @@ struct HeartbeatIndicator: View {
     var body: some View {
         Image(systemName: client.heartbeatSymbol)
             .foregroundStyle(client.heartbeatTint)
-            .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp)))
+            .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace.magic(fallback: .downUp)))
             .symbolEffect(
                 .bounce,
                 options: .nonRepeating,
-                value: client.heartbeatCount
+                value: reduceMotion ? 0 : client.heartbeatCount
             )
             .motion(Motion.status, value: isLive)
     }

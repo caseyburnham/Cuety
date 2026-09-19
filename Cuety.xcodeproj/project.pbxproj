@@ -6,6 +6,13 @@
 	objectVersion = 90;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		D5A002000000000000000001 /* ShowControlCore in Frameworks */ = {
+			isa = PBXBuildFile;
+			productRef = D5A001000000000000000001 /* ShowControlCore */;
+		};
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		C935D3A0304E220800A56199 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -38,6 +45,7 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				D5A002000000000000000001 /* ShowControlCore in Frameworks */,
 			);
 		};
 		C935D399304E220800A56199 /* Frameworks */ = {
@@ -81,6 +89,9 @@
 			);
 			fileSystemSynchronizedGroups = (
 				000000000000000000000010 /* Cuety */,
+			);
+			packageProductDependencies = (
+				D5A001000000000000000001 /* ShowControlCore */,
 			);
 			name = Cuety;
 			productName = Cuety;
@@ -136,6 +147,9 @@
 			);
 			mainGroup = 000000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				D5A000000000000000000001 /* ShowControlCore */,
+			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
 			projectDirPath = "";
@@ -180,6 +194,21 @@
 			targetProxy = C935D3A0304E220800A56199 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		D5A000000000000000000001 /* ShowControlCore */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../ShowControlCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		D5A001000000000000000001 /* ShowControlCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D5A000000000000000000001 /* ShowControlCore */;
+			productName = ShowControlCore;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		000000000000000011000000 /* Debug configuration for PBXProject "Cuety" */ = {

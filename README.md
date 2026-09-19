@@ -1,8 +1,8 @@
 # Cuety
 
-A macOS cue display for [QLab](https://qlab.app). Cuety connects to a QLab workspace over
-OSC and shows the playhead's current cue at a size that reads from across a room — for the
-operator watching a monitor at the desk, or a display in the wings.
+A macOS and iPadOS cue display for [QLab](https://qlab.app). Cuety connects to a QLab
+workspace over OSC and shows the playhead's current cue at a size that reads from across a
+room — for the operator watching a monitor at the desk, or a display in the wings.
 
 It is a read-only companion, not a remote control: Cuety watches a show, it does not fire
 cues.
@@ -14,7 +14,8 @@ cues.
 - **Shows the cue that matters.** The current cue number and name at display scale, with
   configurable detail pills beneath it — type, duration, pre- and post-wait, continue
   mode, cue list, armed, flagged, and notes.
-- **Presentation mode** (⇧⌘F) hides all chrome for an unattended display.
+- **Presentation mode** (⇧⌘F) hides all chrome for an unattended Mac display. It is not
+  offered on iPad; iPad keeps its native split-view and operator controls visible.
 - **Keep display awake** is a separate, persisted setting that holds off the screensaver
   for as long as it's on.
 - **Cue drawer** (⌥⌘D) shows the watched cue list around the playhead for context.
@@ -23,10 +24,15 @@ cues.
   wrong.
 - **Passcode-protected workspaces** are supported; passcodes are stored in the Keychain,
   never in preferences.
+- **iPad operator surface.** The sidebar has an explicit **Add Server** action, supports
+  50/50 and narrow Split View layouts, and keeps Bonjour/QLab activity alive as an app
+  policy when backgrounded. If iPadOS suspends the process, retained cue data is labelled
+  stale until Cuety refreshes it in the foreground.
 
 ## Requirements
 
 - macOS 27 or later
+- iPadOS 27 or later (iPad only; no iPhone support is promised)
 - Xcode 27 or later (Swift 6, `MainActor` default isolation)
 - QLab reachable on the local network
 
@@ -36,6 +42,7 @@ Open `Cuety.xcodeproj` and build the `Cuety` scheme, or:
 
 ```sh
 xcodebuild -project Cuety.xcodeproj -scheme Cuety -configuration Debug build
+xcodebuild -project Cuety.xcodeproj -scheme Cuety -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 ```
 
 Tests use the [Swift Testing](https://developer.apple.com/documentation/testing/) framework:
@@ -70,6 +77,7 @@ discovery finding nothing.
 | `Cuety/OSC` | OSC encoding/decoding and SLIP framing |
 | `Cuety/System` | Display sleep blocking |
 | `CuetyTests` | Protocol, session, and model tests |
+| `../SHOW_CONTROL_COMPANION_CONTRACT.md` | Shared Cuety/Viewtiful platform and transport contract |
 | `POLISH_PLAN.md` | Pre-release polish tracking — open work items live here |
 
 ## Licence

@@ -22,36 +22,7 @@ struct WorkspaceSidebar: View {
     var body: some View {
         List(selection: sidebarSelection) {
             ForEach(visibleServers) { server in
-                Section {
-                    ForEach(server.workspaces) { workspace in
-                        workspaceRow(workspace, on: server)
-                    }
-                    if server.workspaces.isEmpty {
-                        serverStatus(server)
-                            .selectionDisabled()
-                            .contextMenu {
-                                removeServerButton(server)
-                            }
-                    }
-                } header: {
-                    HStack(spacing: 6) {
-                        Text(server.name)
-                        if model.refreshingServerIDs.contains(server.id) {
-                            ProgressView()
-                                .controlSize(.small)
-                                .transition(.blurReplace)
-                                .accessibilityLabel("Looking for workspaces on \(server.name)")
-                        }
-                    }
-                    .motion(
-                        Motion.status,
-                        value: model.refreshingServerIDs.contains(server.id)
-                    )
-                    .help(server.address ?? "Discovered on the local network")
-                    .contextMenu {
-                        removeServerButton(server)
-                    }
-                }
+                serverSection(server)
             }
 
             if let error = model.browser.browseError {
@@ -82,6 +53,12 @@ struct WorkspaceSidebar: View {
 #if os(iOS)
         .navigationTitle("Workspaces")
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Add Server", systemImage: "plus") {
+                    model.isAddingServer = true
+                }
+                .accessibilityHint("Add a QLab server by host name or address")
+            }
             // Only a collapsed split view strands the operator here. At regular
             // widths the display is already on screen beside the sidebar and the
             // split view supplies its own toggle.
@@ -98,6 +75,40 @@ struct WorkspaceSidebar: View {
         }
         .compactToolbarActions()
 #endif
+    }
+
+    @ViewBuilder
+    private func serverSection(_ server: QLabServer) -> some View {
+        Section {
+            ForEach(server.workspaces, id: \.uniqueID) { workspace in
+                erasedWorkspaceRow(workspace, on: server)
+            }
+            if server.workspaces.isEmpty {
+                serverStatus(server)
+                    .selectionDisabled()
+                    .contextMenu {
+                        removeServerButton(server)
+                    }
+            }
+        } header: {
+            HStack(spacing: 6) {
+                Text(server.name)
+                if model.refreshingServerIDs.contains(server.id) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .transition(reduceMotion ? .identity : .opacity)
+                        .accessibilityLabel("Looking for workspaces on \(server.name)")
+                }
+            }
+            .motion(
+                Motion.status,
+                value: model.refreshingServerIDs.contains(server.id)
+            )
+            .help(server.address ?? "Discovered on the local network")
+            .contextMenu {
+                removeServerButton(server)
+            }
+        }
     }
 
 #if os(iOS)
@@ -161,6 +172,15 @@ struct WorkspaceSidebar: View {
         } else {
             workspaceLabel(workspace, selection: selection)
         }
+    }
+
+    /// This row contains a platform-dependent DisclosureGroup/List selection tree.
+    /// Erasing only this branch keeps SwiftUI's surrounding Section builder tractable
+    /// on both the macOS and iPad compilers without changing the rendered hierarchy.
+    private func erasedWorkspaceRow(
+        _ workspace: QLabWorkspaceInfo, on server: QLabServer
+    ) -> AnyView {
+        AnyView(workspaceRow(workspace, on: server))
     }
 
     private func isExpanded(_ selection: WorkspaceSelection) -> Binding<Bool> {
