@@ -38,7 +38,14 @@ cues.
 
 ## Building
 
-Open `Cuety.xcodeproj` and build the `Cuety` scheme, or:
+When working on Cuety and Viewtiful at the same time, open the shared
+`../ShowControl.xcworkspace`. Both projects use the local `../ShowControlCore`
+package, and Xcode cannot load that same local package through two separate
+project workspaces simultaneously. Opening `Cuety.xcodeproj` alone is fine
+when Viewtiful is closed.
+
+Open `Cuety.xcodeproj` and build the `Cuety` scheme, or use the shared workspace
+and build its `Cuety` scheme:
 
 ```sh
 xcodebuild -project Cuety.xcodeproj -scheme Cuety -configuration Debug build

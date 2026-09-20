@@ -7,10 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		D5A002000000000000000001 /* ShowControlCore in Frameworks */ = {
-			isa = PBXBuildFile;
-			productRef = D5A001000000000000000001 /* ShowControlCore */;
-		};
+		D5A002000000000000000001 /* ShowControlCore in Frameworks */ = {isa = PBXBuildFile; productRef = D5A001000000000000000001 /* ShowControlCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -90,10 +87,10 @@
 			fileSystemSynchronizedGroups = (
 				000000000000000000000010 /* Cuety */,
 			);
+			name = Cuety;
 			packageProductDependencies = (
 				D5A001000000000000000001 /* ShowControlCore */,
 			);
-			name = Cuety;
 			productName = Cuety;
 			productReference = 000000000000000000000120 /* Cuety.app */;
 			productType = "com.apple.product-type.application";
@@ -148,7 +145,7 @@
 			mainGroup = 000000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				D5A000000000000000000001 /* ShowControlCore */,
+				D5A000000000000000000001 /* XCLocalSwiftPackageReference "../ShowControlCore" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -194,21 +191,6 @@
 			targetProxy = C935D3A0304E220800A56199 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
-
-/* Begin XCLocalSwiftPackageReference section */
-		D5A000000000000000000001 /* ShowControlCore */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../ShowControlCore;
-		};
-/* End XCLocalSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		D5A001000000000000000001 /* ShowControlCore */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = D5A000000000000000000001 /* ShowControlCore */;
-			productName = ShowControlCore;
-		};
-/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		000000000000000011000000 /* Debug configuration for PBXProject "Cuety" */ = {
@@ -525,6 +507,21 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		D5A000000000000000000001 /* XCLocalSwiftPackageReference "../ShowControlCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../ShowControlCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		D5A001000000000000000001 /* ShowControlCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D5A000000000000000000001 /* XCLocalSwiftPackageReference "../ShowControlCore" */;
+			productName = ShowControlCore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 000000000000000000000000 /* Project object */;
 }
