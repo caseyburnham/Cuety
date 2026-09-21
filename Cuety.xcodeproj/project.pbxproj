@@ -330,7 +330,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = "cuety-icon";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = U35SH4DKEV;
+				DEVELOPMENT_TEAM = VK8F63GZT7;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
@@ -361,7 +361,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.acah.Cuety;
+				PRODUCT_BUNDLE_IDENTIFIER = org.arvadacenter.Cuety;
 				PRODUCT_NAME = Cuety;
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
@@ -381,7 +381,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = "cuety-icon";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = U35SH4DKEV;
+				DEVELOPMENT_TEAM = VK8F63GZT7;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
@@ -412,7 +412,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.acah.Cuety;
+				PRODUCT_BUNDLE_IDENTIFIER = org.arvadacenter.Cuety;
 				PRODUCT_NAME = Cuety;
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
