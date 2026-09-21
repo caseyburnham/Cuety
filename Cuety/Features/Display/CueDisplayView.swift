@@ -8,6 +8,7 @@ struct CueDisplayView: View {
     @State private var headlineSizingCache = HeadlineSizingCache()
 
     private static let captionTracking: CGFloat = 1.2
+    private static let canvasTintOpacity: Double = 0.18
 
     private var client: QLabClient { model.client }
     private var typography: Typography { Typography(preferences: model.preferences) }
@@ -23,6 +24,10 @@ struct CueDisplayView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Washing the cue color across the canvas keeps it readable even when
+        // the cue name is hidden. Clear stands in for "no color" so the tint
+        // cross-fades with the cue change instead of popping in and out.
+        .background((canvasTint ?? .clear).opacity(Self.canvasTintOpacity))
         // Performance mode disables the container animation; normal mode
         // retains the animated number transition and display resizing.
         .motion(
@@ -51,6 +56,12 @@ struct CueDisplayView: View {
         horizontalSizeClass == .compact ? .small : model.preferences.pillSize
     }
 
+    /// The live cue's color, or nil when the display is not showing a cue.
+    private var canvasTint: Color? {
+        guard !model.isDataStale else { return nil }
+        return client.liveCue?.color
+    }
+
     private func cueListName(containing cue: Cue) -> String? {
         if let watchedID = client.watchedCueListID,
            let watched = client.cueLists.first(where: { $0.uniqueID == watchedID }),
@@ -74,7 +85,7 @@ struct CueDisplayView: View {
                let name = cue.displayName {
                 Text(name)
                     .font(typography.cueName(size: model.isPresenting ? 40 : 28))
-                    .foregroundStyle(cue.color ?? .secondary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.5)
@@ -117,7 +128,7 @@ struct CueDisplayView: View {
                     .minimumScaleFactor(Typography.cueNumberMinimumScale)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(cue.color ?? .primary)
+                    .foregroundStyle(.primary)
                     .transition(reduceMotion ? .identity : .opacity)
 
                 caption("Unnumbered")

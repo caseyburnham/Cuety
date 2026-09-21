@@ -1,6 +1,7 @@
 import SwiftUI
 
 enum DetailPillKind: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+    case broken
     case cueType
     case duration
     case preWait
@@ -8,21 +9,30 @@ enum DetailPillKind: String, CaseIterable, Codable, Hashable, Sendable, Identifi
     case continueMode
     case cueList
     case armed
+    case loaded
     case flagged
     case notes
 
     var id: String { rawValue }
 
     static let defaultOrder: [DetailPillKind] = [
-        .cueType, .duration, .preWait, .postWait, .continueMode, .cueList, .armed, .flagged, .notes,
+        .broken, .cueType, .duration, .preWait, .postWait, .continueMode,
+        .cueList, .armed, .loaded, .flagged, .notes,
     ]
 
     static let defaultEnabled: Set<DetailPillKind> = [
-        .cueType, .duration, .preWait, .continueMode,
+        .broken, .cueType, .duration, .preWait, .continueMode, .armed, .loaded, .flagged,
     ]
+
+    /// A cue QLab cannot fire is not something an operator should have to
+    /// opt into being told about, so this pill ignores the enabled set.
+    static let alwaysVisible: Set<DetailPillKind> = [.broken]
+
+    var isAlwaysVisible: Bool { Self.alwaysVisible.contains(self) }
 
     var title: String {
         switch self {
+        case .broken: "Broken"
         case .cueType: "Type"
         case .duration: "Duration"
         case .preWait: "Pre-wait"
@@ -30,6 +40,7 @@ enum DetailPillKind: String, CaseIterable, Codable, Hashable, Sendable, Identifi
         case .continueMode: "Continue"
         case .cueList: "Cue List"
         case .armed: "Armed"
+        case .loaded: "Loaded"
         case .flagged: "Flagged"
         case .notes: "Notes"
         }
@@ -37,6 +48,7 @@ enum DetailPillKind: String, CaseIterable, Codable, Hashable, Sendable, Identifi
 
     var systemImage: String {
         switch self {
+        case .broken: "xmark"
         case .cueType: "square.stack.3d.up"
         case .duration: "clock"
         case .preWait: "hourglass.tophalf.filled"
@@ -44,6 +56,7 @@ enum DetailPillKind: String, CaseIterable, Codable, Hashable, Sendable, Identifi
         case .continueMode: "arrow.down"
         case .cueList: "list.bullet"
         case .armed: "power"
+        case .loaded: "arrow.down.to.line.circle"
         case .flagged: "flag.fill"
         case .notes: "ellipsis.bubble"
         }
@@ -67,18 +80,22 @@ enum DetailPillKind: String, CaseIterable, Codable, Hashable, Sendable, Identifi
         case .postWait: "postWait"
         case .continueMode: "continueMode"
         case .notes: "notes"
+        case .broken: "isBroken"
+        case .loaded: "isLoaded"
         }
     }
 
     var settingsDescription: String {
         switch self {
+        case .broken: "Always shown. QLab cannot fire this cue — a missing file, patch, or target."
         case .cueType: "The kind of cue — audio, video, light, group, and so on."
         case .duration: "How long the cue runs, when it has a duration."
         case .preWait: "Delay before the cue acts, when non-zero."
         case .postWait: "Delay before the following cue, when non-zero."
         case .continueMode: "Whether the cue auto-continues or auto-follows."
         case .cueList: "The name of the cue list the cue belongs to."
-        case .armed: "Shown only when the cue is disarmed."
+        case .armed: "Shown only when the cue is disarmed, and will be skipped."
+        case .loaded: "Shown only when QLab has loaded the cue to a standby point."
         case .flagged: "Shown only when the cue is flagged."
         case .notes: "The cue's notes field, when it has any. Always on its own line, below the others."
         }

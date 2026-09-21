@@ -33,7 +33,7 @@ struct DetailPillSettingsView: View {
                 ForEach(inlineOrder) { kind in
                     HStack(spacing: 10) {
                         Toggle(isOn: Binding {
-                            preferences.enabledPills.contains(kind)
+                            preferences.enabledPills.contains(kind) || kind.isAlwaysVisible
                         } set: { isEnabled in
                             if isEnabled {
                                 preferences.enabledPills.insert(kind)
@@ -41,7 +41,7 @@ struct DetailPillSettingsView: View {
                                 preferences.enabledPills.remove(kind)
                             }
 
-                            Task { await client.refreshPlayheadCueDetails() }
+                            Task { await client.refreshPlayheadCueDetails(force: true) }
                         }) {
                             Label {
                                 VStack(alignment: .leading, spacing: 1) {
@@ -55,10 +55,12 @@ struct DetailPillSettingsView: View {
                                     .rotationEffect(kind.glyphRotation)
                                     .foregroundStyle(
                                         preferences.enabledPills.contains(kind)
+                                            || kind.isAlwaysVisible
                                             ? Color.accentColor : .secondary
                                     )
                             }
                         }
+                        .disabled(kind.isAlwaysVisible)
 
                         Spacer(minLength: 10)
 
@@ -79,7 +81,7 @@ struct DetailPillSettingsView: View {
                     } else {
                         preferences.enabledPills.remove(.notes)
                     }
-                    Task { await client.refreshPlayheadCueDetails() }
+                    Task { await client.refreshPlayheadCueDetails(force: true) }
                 }) {
                     Label {
                         VStack(alignment: .leading, spacing: 1) {
@@ -114,7 +116,7 @@ struct DetailPillSettingsView: View {
                     preferences.enabledPills = DetailPillKind.defaultEnabled
                     preferences.pillSize = .default
                     preferences.showsCueTypeLabel = true
-                    Task { await client.refreshPlayheadCueDetails() }
+                    Task { await client.refreshPlayheadCueDetails(force: true) }
                 }
                 .help("Restore the default pills, order, and size")
                 .disabled(

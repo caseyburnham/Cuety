@@ -182,14 +182,32 @@ struct DetailPill: View {
                 isFlexible: true
             )
 
+        case .broken:
+            guard cue.isBroken == true else { return nil }
+            return Content(
+                text: "Broken",
+                systemImage: kind.systemImage,
+                tint: .red,
+                help: "QLab cannot fire this cue — check its file, patch, or target"
+            )
+
         case .armed:
             guard cue.isArmed == false else { return nil }
             return Content(
                 text: "Disarmed",
                 systemImage: kind.systemImage,
                 tint: .red,
-                help: "This cue is disarmed and will not fire",
+                help: "Disarmed",
                 glyphRotation: kind.glyphRotation
+            )
+
+        case .loaded:
+            guard cue.isLoaded == true else { return nil }
+            return Content(
+                text: "Loaded",
+                systemImage: kind.systemImage,
+                tint: .teal,
+                help: "QLab has loaded this cue"
             )
 
         case .flagged:
@@ -198,7 +216,7 @@ struct DetailPill: View {
                 text: "Flagged",
                 systemImage: kind.systemImage,
                 tint: .yellow,
-                help: "This cue is flagged in QLab"
+                help: "This cue is flagged"
             )
 
         case .notes:
@@ -610,6 +628,33 @@ struct DetailPillsRow: View {
     return DetailPillsRow(
         cue: cue, kinds: DetailPillKind.defaultOrder, cueListName: "Effects"
     )
+    .padding(40)
+    .frame(width: 900)
+}
+
+#Preview("States an operator needs before the GO") {
+    func cue(_ id: String, configure: (inout Cue) -> Void) -> Cue {
+        var cue = Cue(uniqueID: id)
+        cue.number = id
+        cue.type = "Audio"
+        configure(&cue)
+        return cue
+    }
+
+    let cues = [
+        cue("1") { $0.isBroken = true },
+        cue("2") { $0.isArmed = false },
+        cue("3") { $0.isLoaded = true },
+        cue("4") { $0.continueMode = .autoFollow; $0.isFlagged = true },
+    ]
+
+    return VStack(spacing: 16) {
+        ForEach(cues) { cue in
+            DetailPillsRow(
+                cue: cue, kinds: DetailPillKind.defaultOrder, cueListName: nil
+            )
+        }
+    }
     .padding(40)
     .frame(width: 900)
 }

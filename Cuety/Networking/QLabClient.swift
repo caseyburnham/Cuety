@@ -225,6 +225,8 @@ final class QLabClient {
         isSubscribedToUpdates = false
         connectedSince = nil
         cueLists = []
+        cuesWithLoadedDetails.removeAll()
+        pendingCueDetailIDs.removeAll()
         invalidateWatchedGraph()
         playheads = [:]
         watchedCueListID = nil
@@ -738,16 +740,28 @@ final class QLabClient {
             }
             let key = QLabReplyParser.correlationKey(for: address)
 
+            // A request still waiting on this key always gets the reply. Both
+            // requests asked QLab the same question, so an in-flight one is
+            // served by whichever answer lands first; the straggler that
+            // follows is then the one with nobody waiting for it. Consuming
+            // the abandoned slot first would instead strand every retry of a
+            // key that has timed out once.
+            // A request still waiting on this key always gets the reply. Both
+            // requests asked QLab the same question, so an in-flight one is
+            // served by whichever answer lands first; the straggler that
+            // follows is then the one with nobody waiting for it. Consuming
+            // the abandoned slot first would instead strand every retry of a
+            // key that has timed out once.
+            if let id = pendingByAddress[key]?.first {
+                complete(requestID: id, with: message)
+                return
+            }
+
             if consumeAbandonedReply(forKey: key) {
                 lateReplyCount += 1
                 logger.debug(
                     "Dropped a late reply for \(key, privacy: .public) after its request timed out"
                 )
-                return
-            }
-
-            if let id = pendingByAddress[key]?.first {
-                complete(requestID: id, with: message)
             }
             return
         }
@@ -795,12 +809,14 @@ final class QLabClient {
     private var pendingCueDetailIDs = Set<String>()
 
     private func schedulePlayheadDetailsRefresh() {
-        guard let cueID = currentPlayheadCueID else { return }
-        pendingCueDetailIDs = [cueID]
+        pendingCueDetailIDs.formUnion(visibleCueIDs())
         scheduleCueDetailsRefresh()
     }
 
     private func scheduleCueDetailsRefresh(for cueID: String) {
+        // An edited cue's details are whatever QLab says next, not what was
+        // fetched before the edit.
+        cuesWithLoadedDetails.remove(cueID)
         pendingCueDetailIDs.insert(cueID)
         scheduleCueDetailsRefresh()
     }
@@ -900,10 +916,18 @@ final class QLabClient {
         )
         var refreshed = reply.data ?? []
 
-        if let cueID = currentPlayheadCueID,
-           let previous = cueLists.firstCue(withID: cueID) {
+        // Carry the details already fetched onto the new tree. Without this
+        // every cue on screen would blank its pills and drawer markers until
+        // its reply came back.
+        var carried = Set<String>()
+        for cueID in cuesWithLoadedDetails {
+            guard let previous = cueLists.firstCue(withID: cueID),
+                  refreshed.firstCue(withID: cueID) != nil
+            else { continue }
             refreshed.applyValues(previous.detailValues, toCueWithID: cueID)
+            carried.insert(cueID)
         }
+        cuesWithLoadedDetails = carried
 
         cueLists = refreshed
         invalidateWatchedGraph()
@@ -1057,17 +1081,137 @@ final class QLabClient {
         return playheadCue
     }
 
-    func refreshPlayheadCueDetails() async {
-        guard let cueID = currentPlayheadCueID else { return }
-        await refreshCueDetails(for: [cueID])
+    /// The cues on screen: the one standing by, plus the drawer rows either
+    /// side of it. Details are fetched for all of them, so an upcoming cue
+    /// says what it will do before the playhead ever reaches it.
+    private func visibleCueIDs() -> Set<String> {
+        guard let cueID = currentPlayheadCueID else { return [] }
+        var ids: Set<String> = [cueID]
+
+        guard preferences.showsDrawer, let graph = watchedGraph else { return ids }
+
+        let radius = preferences.drawerRowCount
+        let neighbourhood = graph.neighbourhood(
+            around: cueID, above: radius, below: radius
+        )
+        for cue in neighbourhood.above { ids.insert(cue.uniqueID) }
+        for cue in neighbourhood.below { ids.insert(cue.uniqueID) }
+        return ids
     }
 
+    /// Cues whose `/valuesForKeys` reply is already folded into `cueLists`.
+    /// Details only change when QLab says so, so a cue is fetched once and
+    /// then left alone until it is edited or the cue lists are rebuilt.
+    private var cuesWithLoadedDetails = Set<String>()
+
+    /// - Parameter force: refetch even cues already fetched, for when the
+    ///   set of keys being asked for has changed.
+    func refreshPlayheadCueDetails(force: Bool = false) async {
+        if force { cuesWithLoadedDetails.removeAll() }
+        await refreshCueDetails(for: visibleCueIDs())
+    }
+
+    private static let maxConcurrentDetailRequests = 4
+
     private func refreshCueDetails(for cueIDs: Set<String>) async {
-        for cueID in cueIDs {
-            guard !Task.isCancelled else { return }
-            await refreshCueDetails(for: cueID)
+        let wanted = Array(cueIDs.subtracting(cuesWithLoadedDetails))
+        guard !wanted.isEmpty, let workspaceID = workspace?.uniqueID else { return }
+        guard let keysString = encodedValueKeys() else { return }
+
+        let session = connection
+        var nextIndex = 0
+
+        // Gathered first and applied in one pass: writing each reply back as
+        // it lands would invalidate every view watching the cue lists once
+        // per cue in the drawer.
+        var fetched: [(cueID: String, values: QLabCueValues)] = []
+
+        await withTaskGroup(of: (String, QLabCueValues)?.self) { group in
+            for _ in 0..<min(Self.maxConcurrentDetailRequests, wanted.count) {
+                let cueID = wanted[nextIndex]
+                nextIndex += 1
+                group.addTask {
+                    await self.fetchCueDetails(
+                        for: cueID, workspaceID: workspaceID, keys: keysString
+                    )
+                }
+            }
+
+            while let result = await group.next() {
+                guard !Task.isCancelled, connection === session else {
+                    group.cancelAll()
+                    fetched.removeAll()
+                    return
+                }
+
+                if let result { fetched.append((result.0, result.1)) }
+
+                guard nextIndex < wanted.count else { continue }
+                let cueID = wanted[nextIndex]
+                nextIndex += 1
+                group.addTask {
+                    await self.fetchCueDetails(
+                        for: cueID, workspaceID: workspaceID, keys: keysString
+                    )
+                }
+            }
+        }
+
+        apply(fetched)
+    }
+
+    private func apply(_ fetched: [(cueID: String, values: QLabCueValues)]) {
+        guard !fetched.isEmpty else { return }
+
+        let watchedGraphBeforeChange = watchedGraphCache?.graph
+        var updated = cueLists
+        var changedIDs: [String] = []
+
+        for (cueID, values) in fetched {
+            cuesWithLoadedDetails.insert(cueID)
+            if updated.applyValues(values, toCueWithID: cueID) {
+                changedIDs.append(cueID)
+            }
+        }
+
+        guard !changedIDs.isEmpty else { return }
+        cueLists = updated
+
+        // Values change, structure does not, so the graph Cuety cached is
+        // still the right place to ask whether a changed cue is on screen.
+        if changedIDs.contains(where: { watchedGraphBeforeChange?.cue(withID: $0) != nil }) {
+            invalidateWatchedGraph()
         }
     }
+
+    private func fetchCueDetails(
+        for cueID: String, workspaceID: String, keys: String
+    ) async -> (String, QLabCueValues)? {
+        do {
+            let reply = try await request(
+                OSCMessage(
+                    "/workspace/\(workspaceID)/cue_id/\(cueID)/valuesForKeys",
+                    [.string(keys)]
+                ),
+                as: QLabCueValues.self
+            )
+            guard let values = reply.data else { return nil }
+            return (cueID, values)
+        } catch {
+            logger.debug("valuesForKeys failed: \(error.operatorDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// What every cue-detail refresh asks for, whatever the pills show. A
+    /// cue's state only ever reaches the display through `/valuesForKeys`,
+    /// so anything Cuety draws unconditionally — in the drawer as much as on
+    /// the display — has to be in here or it stays stale until the cue list
+    /// is refetched.
+    private static let alwaysFetchedKeys = [
+        "number", "name", "type", "colorName", "flagged", "armed",
+        "continueMode", "isBroken", "isLoaded",
+    ]
 
     /// The encoded key list for `/valuesForKeys`, rebuilt only when the
     /// visible pills change rather than on every cue-detail refresh.
@@ -1080,39 +1224,17 @@ final class QLabClient {
             return cachedValueKeys.encoded
         }
 
-        let keys = pills.compactMap(\.qlabKey)
-        guard !keys.isEmpty,
-              let keysJSON = try? JSONEncoder().encode(keys),
+        var keys = Self.alwaysFetchedKeys
+        for key in pills.compactMap(\.qlabKey) where !keys.contains(key) {
+            keys.append(key)
+        }
+
+        guard let keysJSON = try? JSONEncoder().encode(keys),
               let keysString = String(data: keysJSON, encoding: .utf8)
         else { return nil }
 
         cachedValueKeys = (pills, keysString)
         return keysString
-    }
-
-    private func refreshCueDetails(for cueID: String) async {
-        guard let workspaceID = workspace?.uniqueID else { return }
-        guard let keysString = encodedValueKeys() else { return }
-
-        do {
-            let reply = try await request(
-                OSCMessage(
-                    "/workspace/\(workspaceID)/cue_id/\(cueID)/valuesForKeys",
-                    [.string(keysString)]
-                ),
-                as: QLabCueValues.self
-            )
-            guard let values = reply.data else { return }
-            let changed = cueLists.applyValues(values, toCueWithID: cueID)
-            if changed,
-               let watchedCueListID,
-               cueLists.first(where: { $0.uniqueID == watchedCueListID })?
-                   .children.firstCue(withID: cueID) != nil {
-                invalidateWatchedGraph()
-            }
-        } catch {
-            logger.debug("valuesForKeys failed: \(error.operatorDescription, privacy: .public)")
-        }
     }
 
     private static let degradedThumpThreshold = 3

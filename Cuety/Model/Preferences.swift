@@ -212,7 +212,7 @@ final class Preferences {
     }
 
     var visiblePills: [DetailPillKind] {
-        pillOrder.filter(enabledPills.contains)
+        pillOrder.filter { enabledPills.contains($0) || $0.isAlwaysVisible }
     }
 
 
@@ -290,7 +290,9 @@ final class Preferences {
         )
 
         pillOrder = Self.loadPillOrder(from: defaults)
-        enabledPills = Self.loadEnabledPills(from: defaults)
+        enabledPills = Self.loadEnabledPills(
+            from: defaults, known: Self.storedPillOrder(from: defaults)
+        )
         pillSize = defaults.string(forKey: Key.pillSize)
             .flatMap(PillSize.init(rawValue:)) ?? .default
         showsCueTypeLabel = defaults.object(forKey: Key.showsCueTypeLabel) as? Bool ?? true
@@ -323,18 +325,33 @@ final class Preferences {
     }
 
 
-    private static func loadPillOrder(from defaults: UserDefaults) -> [DetailPillKind] {
-        let stored = (defaults.array(forKey: Key.pillOrder) as? [String] ?? [])
+    /// The pills this install has seen, in the order it last saved. A pill
+    /// missing from here is one added since, not one the operator moved.
+    private static func storedPillOrder(from defaults: UserDefaults) -> [DetailPillKind] {
+        (defaults.array(forKey: Key.pillOrder) as? [String] ?? [])
             .compactMap(DetailPillKind.init(rawValue:))
+    }
+
+    private static func loadPillOrder(from defaults: UserDefaults) -> [DetailPillKind] {
+        let stored = storedPillOrder(from: defaults)
         let missing = DetailPillKind.defaultOrder.filter { !stored.contains($0) }
         return stored.isEmpty ? DetailPillKind.defaultOrder : stored + missing
     }
 
-    private static func loadEnabledPills(from defaults: UserDefaults) -> Set<DetailPillKind> {
+    private static func loadEnabledPills(
+        from defaults: UserDefaults, known: [DetailPillKind]
+    ) -> Set<DetailPillKind> {
         guard let stored = defaults.array(forKey: Key.enabledPills) as? [String] else {
             return DetailPillKind.defaultEnabled
         }
-        return Set(stored.compactMap(DetailPillKind.init(rawValue:)))
+
+        var enabled = Set(stored.compactMap(DetailPillKind.init(rawValue:)))
+        // A pill this install has never offered cannot have been switched
+        // off, so it arrives at its default rather than silently absent.
+        for kind in DetailPillKind.defaultEnabled where !known.contains(kind) {
+            enabled.insert(kind)
+        }
+        return enabled
     }
 
     private func persistPillOrder() {

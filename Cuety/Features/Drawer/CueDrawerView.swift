@@ -336,11 +336,21 @@ struct CueRowView: View {
 
     private var trailingIndicators: some View {
         HStack(spacing: 5) {
+            if cue.isBroken == true {
+                Image(systemName: DetailPillKind.broken.systemImage)
+                    .foregroundStyle(.red)
+                    .help("Broken — QLab cannot fire this cue")
+            }
             if cue.isArmed == false {
                 Image(systemName: DetailPillKind.armed.systemImage)
                     .rotationEffect(DetailPillKind.armed.glyphRotation)
                     .foregroundStyle(.red)
-                    .help("Disarmed — this cue will not fire")
+                    .help("Disarmed — QLab will skip this cue")
+            }
+            if cue.isLoaded == true {
+                Image(systemName: DetailPillKind.loaded.systemImage)
+                    .foregroundStyle(.teal)
+                    .help("Loaded to a standby point")
             }
             if cue.isFlagged == true {
                 Image(systemName: DetailPillKind.flagged.systemImage)
@@ -362,7 +372,9 @@ struct CueRowView: View {
         var parts = [role.accessibilityPrefix]
         if let number = cue.displayNumber { parts.append("cue \(number)") }
         if let name = cue.displayName { parts.append(name) }
-        if cue.isArmed == false { parts.append("disarmed") }
+        if cue.isBroken == true { parts.append("broken") }
+        if cue.isArmed == false { parts.append("disarmed, will be skipped") }
+        if cue.isLoaded == true { parts.append("loaded") }
         if cue.isFlagged == true { parts.append("flagged") }
         if let mode = cue.continueMode, mode != .doNotContinue {
             parts.append(mode.title)

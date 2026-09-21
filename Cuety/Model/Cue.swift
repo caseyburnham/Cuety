@@ -40,6 +40,13 @@ nonisolated struct Cue: Hashable, Sendable, Identifiable {
     var postWait: TimeInterval?
     var continueMode: ContinueMode?
 
+    /// QLab cannot fire this cue — a missing file, a lost patch, a target
+    /// that no longer exists.
+    var isBroken: Bool?
+
+    /// QLab has loaded this cue, so it is standing by at its load point.
+    var isLoaded: Bool?
+
     var children: [Cue] = []
 
     var id: String { uniqueID }
@@ -68,9 +75,24 @@ nonisolated struct Cue: Hashable, Sendable, Identifiable {
         switch colorName?.lowercased() {
         case "red": .red
         case "orange": .orange
+        case "yellow": .yellow
         case "green": .green
+        case "cyan": .cyan
         case "blue": .blue
         case "purple": .purple
+        case "magenta": .cueMagenta
+        case "crimson": .cueCrimson
+        case "peach": .cuePeach
+        case "olive": .cueOlive
+        case "forest": .cueForest
+        case "sky blue": .cueSkyBlue
+        case "midnight": .cueMidnight
+        case "indigo": .indigo
+        case "lavender": .cueLavender
+        case "plum": .cuePlum
+        case "berry": .cueBerry
+        case "hot pink": .pink
+        case "gray": .gray
         default: nil
         }
     }
@@ -115,21 +137,35 @@ nonisolated enum ContinueMode: Int, Hashable, Sendable, Codable {
 }
 
 nonisolated struct QLabCueValues: Decodable, Sendable {
+    var number: String?
+    var name: String?
+    var listName: String?
+    var type: String?
+    var colorName: String?
+    var flagged: Bool?
+    var armed: Bool?
     var notes: String?
     var duration: Double?
     var preWait: Double?
     var postWait: Double?
     var continueMode: Int?
+    var isBroken: Bool?
+    var isLoaded: Bool?
 }
 
 nonisolated extension Cue {
+    /// The values only `/valuesForKeys` can supply. Everything else a reply
+    /// can carry also arrives with `/cueLists`, where it is fresher, so this
+    /// deliberately omits those and never overwrites them with older data.
     var detailValues: QLabCueValues {
         QLabCueValues(
             notes: notes,
             duration: duration,
             preWait: preWait,
             postWait: postWait,
-            continueMode: continueMode?.rawValue
+            continueMode: continueMode?.rawValue,
+            isBroken: isBroken,
+            isLoaded: isLoaded
         )
     }
 
@@ -137,6 +173,34 @@ nonisolated extension Cue {
     mutating func apply(_ values: QLabCueValues) -> Bool {
         var changed = false
 
+        if let number = values.number, self.number != number {
+            self.number = number
+            changed = true
+        }
+        if let name = values.name, self.name != name {
+            self.name = name
+            changed = true
+        }
+        if let listName = values.listName, self.listName != listName {
+            self.listName = listName
+            changed = true
+        }
+        if let type = values.type, self.type != type {
+            self.type = type
+            changed = true
+        }
+        if let colorName = values.colorName, self.colorName != colorName {
+            self.colorName = colorName
+            changed = true
+        }
+        if let flagged = values.flagged, self.isFlagged != flagged {
+            self.isFlagged = flagged
+            changed = true
+        }
+        if let armed = values.armed, self.isArmed != armed {
+            self.isArmed = armed
+            changed = true
+        }
         if let notes = values.notes, self.notes != notes {
             self.notes = notes
             changed = true
@@ -156,6 +220,14 @@ nonisolated extension Cue {
         if let mode = values.continueMode.flatMap(ContinueMode.init(rawValue:)),
            self.continueMode != mode {
             self.continueMode = mode
+            changed = true
+        }
+        if let broken = values.isBroken, self.isBroken != broken {
+            self.isBroken = broken
+            changed = true
+        }
+        if let loaded = values.isLoaded, self.isLoaded != loaded {
+            self.isLoaded = loaded
             changed = true
         }
 

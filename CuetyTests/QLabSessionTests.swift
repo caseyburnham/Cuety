@@ -417,6 +417,204 @@ struct QLabDisconnectTests {
         #expect(client.lateReplyCount >= 1)
     }
 
+    @Test("An edit still reaches the display after a details request timed out")
+    func cueDetailsRecoverAfterATimedOutRequest() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = [
+            .init(
+                id: "L1",
+                name: "Main",
+                cues: [.init(id: "C1", number: "1", name: "House to Half", duration: 1)],
+                playheadCueID: "C1"
+            ),
+        ]
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let preferences = try makePreferences(requestTimeout: 1)
+        let client = QLabClient(preferences: preferences, log: ActivityLog())
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.playheadCue?.duration == 1)
+
+        // Strand one details request, and never answer it.
+        peer.withholdRepliesTo = ["valuesForKeys"]
+        peer.push(OSCMessage("/update/workspace/W/cue_id/C1"))
+        try await Task.sleep(for: .seconds(preferences.requestTimeout + 0.3))
+
+        // The next edit arrives while QLab could still answer the stranded
+        // request, so its reply must not be mistaken for that late answer.
+        peer.withholdRepliesTo = []
+        peer.cueLists[0].cues[0].duration = 42
+        peer.push(OSCMessage("/update/workspace/W/cue_id/C1"))
+
+        let deadline = ContinuousClock.now + .seconds(2)
+        while client.playheadCue?.duration != 42, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(client.playheadCue?.duration == 42)
+    }
+
+    @Test("Renaming and renumbering a cue in QLab reaches the display")
+    func cueRenameReachesTheDisplay() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = [
+            .init(
+                id: "L1",
+                name: "Main",
+                cues: [.init(id: "C1", number: "1", name: "House to Half")],
+                playheadCueID: "C1"
+            ),
+        ]
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let client = QLabClient(preferences: try makePreferences(), log: ActivityLog())
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.playheadCue?.displayName == "House to Half")
+
+        peer.cueLists[0].cues[0] = .init(id: "C1", number: "7", name: "Blackout")
+        peer.push(OSCMessage("/update/workspace/W/cue_id/C1"))
+
+        let deadline = ContinuousClock.now + .seconds(2)
+        while client.playheadCue?.displayName != "Blackout", ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(client.playheadCue?.displayName == "Blackout")
+        #expect(client.playheadCue?.displayNumber == "7")
+    }
+
+    @Test("A cue edit is fetched even with every detail pill turned off")
+    func cueEditIsFetchedWithNoPillsVisible() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = [
+            .init(
+                id: "L1",
+                name: "Main",
+                cues: [.init(id: "C1", number: "1", name: "House to Half")],
+                playheadCueID: "C1"
+            ),
+        ]
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let preferences = try makePreferences()
+        preferences.enabledPills = []
+        let client = QLabClient(preferences: preferences, log: ActivityLog())
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.playheadCue?.displayName == "House to Half")
+
+        peer.cueLists[0].cues[0] = .init(id: "C1", number: "1", name: "Blackout")
+        peer.push(OSCMessage("/update/workspace/W/cue_id/C1"))
+
+        let deadline = ContinuousClock.now + .seconds(2)
+        while client.playheadCue?.displayName != "Blackout", ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(client.playheadCue?.displayName == "Blackout")
+    }
+
+    @Test("An upcoming cue knows what it will do before the playhead reaches it")
+    func upcomingCuesCarryTheirDetails() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = [
+            .init(
+                id: "L1",
+                name: "Main",
+                cues: [
+                    .init(id: "C1", number: "1", name: "House", continueMode: 0),
+                    .init(id: "C2", number: "2", name: "Thunder", continueMode: 1),
+                    .init(id: "C3", number: "3", name: "Rain", continueMode: 2, isBroken: true),
+                    .init(id: "C4", number: "4", name: "Wind", isLoaded: true),
+                ],
+                playheadCueID: "C1"
+            ),
+        ]
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let preferences = try makePreferences()
+        preferences.showsDrawer = true
+        preferences.drawerRowCount = 3
+        let client = QLabClient(preferences: preferences, log: ActivityLog())
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.currentPlayheadCueID == "C1")
+
+        let deadline = ContinuousClock.now + .seconds(3)
+        while client.watchedGraph?.cue(withID: "C4")?.isLoaded == nil,
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        // None of these cues has been fired; all of it is read ahead.
+        #expect(client.watchedGraph?.cue(withID: "C2")?.continueMode == .autoContinue)
+        #expect(client.watchedGraph?.cue(withID: "C3")?.continueMode == .autoFollow)
+        #expect(client.watchedGraph?.cue(withID: "C3")?.isBroken == true)
+        #expect(client.watchedGraph?.cue(withID: "C4")?.isLoaded == true)
+        #expect(client.watchedGraph?.cue(withID: "C2")?.isBroken == false)
+    }
+
+    @Test("Details already fetched are not fetched again on every playhead move")
+    func cueDetailsAreFetchedOncePerCue() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = [
+            .init(
+                id: "L1",
+                name: "Main",
+                cues: (1...6).map {
+                    .init(id: "C\($0)", number: "\($0)", name: "Cue \($0)", duration: Double($0))
+                },
+                playheadCueID: "C1"
+            ),
+        ]
+        defer { peer.stop() }
+        let log = ActivityLog()
+        log.addViewer()
+        let port = try await peer.start()
+        let preferences = try makePreferences()
+        preferences.showsDrawer = true
+        preferences.drawerRowCount = 2
+        let client = QLabClient(preferences: preferences, log: log)
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+
+        func detailRequests() -> [String] {
+            log.entries
+                .filter { $0.direction == .outbound && $0.address.hasSuffix("/valuesForKeys") }
+                .map(\.address)
+        }
+
+        // A drawer two rows deep reads five cues ahead from the top of the list.
+        let settled = ContinuousClock.now + .seconds(2)
+        while client.watchedGraph?.cue(withID: "C5")?.duration == nil,
+              ContinuousClock.now < settled {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let afterConnect = detailRequests()
+        try #require(afterConnect.count == 5)
+
+        // C2 is already on screen, so moving onto it asks QLab for nothing.
+        peer.push(OSCMessage("/update/workspace/W/cueList/L1/playbackPosition", [.string("C2")]))
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(detailRequests().count == afterConnect.count)
+
+        // Moving to C4 scrolls C6 into the drawer for the first time.
+        peer.push(OSCMessage("/update/workspace/W/cueList/L1/playbackPosition", [.string("C4")]))
+
+        let moved = ContinuousClock.now + .seconds(2)
+        while client.watchedGraph?.cue(withID: "C6")?.duration == nil,
+              ContinuousClock.now < moved {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let afterMove = detailRequests()
+        #expect(afterMove.count == afterConnect.count + 1)
+        #expect(afterMove.last?.contains("C6") == true)
+        #expect(Set(afterMove).count == afterMove.count)
+    }
+
     @Test("A consumer that stops reading overflows the buffer and is told what it lost")
     func stalledConsumerOverflowIsReported() async throws {
         let peer = try AuthorizationPeer()
@@ -787,7 +985,10 @@ struct QLabDisconnectTests {
         let port = try await peer.start()
         let log = ActivityLog()
         log.addViewer()
-        let client = QLabClient(preferences: try makePreferences(), log: log)
+        let preferences = try makePreferences()
+        // Notes are only fetched while the pill that shows them is on.
+        preferences.enabledPills.insert(.notes)
+        let client = QLabClient(preferences: preferences, log: log)
         defer { client.disconnect() }
         await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
         try #require(client.status == .connected)
@@ -1059,6 +1260,9 @@ private final class AuthorizationPeer {
         let name: String
         var duration: Double?
         var notes: String?
+        var continueMode: Int?
+        var isBroken: Bool?
+        var isLoaded: Bool?
     }
 
     private let listener: NWListener
@@ -1144,7 +1348,8 @@ private final class AuthorizationPeer {
         }
     }
 
-    private func reply(to address: String) -> (status: String, payload: Any)? {
+    private func reply(to message: OSCMessage) -> (status: String, payload: Any)? {
+        let address = message.address
         guard !isMute else { return nil }
 
         if address == "/workspaces" {
@@ -1192,10 +1397,24 @@ private final class AuthorizationPeer {
             if parts[2] == "valuesForKeys" {
                 let cueID = String(parts[1])
                 let cue = cueLists.lazy.flatMap(\.cues).first { $0.id == cueID }
-                var values: [String: Any] = [:]
-                if let duration = cue?.duration { values["duration"] = duration }
-                if let notes = cue?.notes { values["notes"] = notes }
-                return ("ok", values)
+
+                // Like QLab, answer only the keys that were asked for.
+                let requested = (message.arguments.first?.stringValue)
+                    .flatMap { $0.data(using: .utf8) }
+                    .flatMap { try? JSONDecoder().decode([String].self, from: $0) } ?? []
+
+                var available: [String: Any] = [:]
+                if let cue {
+                    available["number"] = cue.number
+                    available["name"] = cue.name
+                    if let duration = cue.duration { available["duration"] = duration }
+                    if let notes = cue.notes { available["notes"] = notes }
+                    if let mode = cue.continueMode { available["continueMode"] = mode }
+                    // QLab answers these for every cue, not just the ones in a state.
+                    available["isBroken"] = cue.isBroken ?? false
+                    available["isLoaded"] = cue.isLoaded ?? false
+                }
+                return ("ok", available.filter { requested.contains($0.key) })
             }
 
             return ("ok", NSNull())
@@ -1207,7 +1426,7 @@ private final class AuthorizationPeer {
             Task { @MainActor in
                 guard let self, error == nil, let data else { return }
                 if case .message(let message) = try? OSCDecoder().decode(data),
-                   let reply = self.reply(to: message.address),
+                   let reply = self.reply(to: message),
                    let json = try? JSONSerialization.data(withJSONObject: [
                        "address": message.address,
                        "status": reply.status,

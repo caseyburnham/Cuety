@@ -470,6 +470,9 @@ final class AppModel {
             preferences.showsDrawer = step > 0
             if step > 0 { preferences.drawerRowCount = step }
         }
+
+        // A taller drawer exposes rows whose details have never been asked for.
+        Task { await client.refreshPlayheadCueDetails() }
     }
 
     func toggleKeepAwake() {
