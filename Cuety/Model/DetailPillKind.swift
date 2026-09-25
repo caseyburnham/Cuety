@@ -16,8 +16,8 @@ enum DetailPillKind: String, CaseIterable, Codable, Hashable, Sendable, Identifi
     var id: String { rawValue }
 
     static let defaultOrder: [DetailPillKind] = [
-        .broken, .cueType, .duration, .preWait, .postWait, .continueMode,
-        .cueList, .armed, .loaded, .flagged, .notes,
+        .broken, .flagged, .loaded, .cueType, .preWait, .duration, .postWait,
+        .continueMode, .cueList, .armed, .notes,
     ]
 
     static let defaultEnabled: Set<DetailPillKind> = [

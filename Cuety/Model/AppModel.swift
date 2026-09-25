@@ -104,6 +104,10 @@ final class AppModel {
 
     private(set) var startupTask: Task<Void, Never>?
 
+    /// The refresh started by returning to the foreground, exposed so a caller
+    /// can wait for the point at which retained data has been confirmed again.
+    private(set) var foregroundRefreshTask: Task<Void, Never>?
+
     func start() {
         guard startupTask == nil else { return }
 
@@ -125,7 +129,7 @@ final class AppModel {
         switch phase {
         case .active:
             guard isDataStale else { return }
-            Task { [weak self] in
+            foregroundRefreshTask = Task { [weak self] in
                 guard let self else { return }
                 await self.refresh()
                 // The stale label stays visible while refresh is in flight. A

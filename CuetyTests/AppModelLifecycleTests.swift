@@ -188,7 +188,7 @@ struct AppModelLifecycleTests {
 
         model.updateScenePhase(.active)
 
-        try await Task.sleep(for: .milliseconds(100))
+        await model.foregroundRefreshTask?.value
 
         #expect(!model.isDataStale)
         #expect(model.selection != nil)
