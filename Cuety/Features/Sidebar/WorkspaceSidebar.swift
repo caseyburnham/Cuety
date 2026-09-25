@@ -73,7 +73,10 @@ struct WorkspaceSidebar: View {
                 }
             }
         }
-        .compactToolbarActions()
+        // At regular widths the cue display beside the sidebar carries the
+        // status controls. The floating display stays for portrait, where
+        // the sidebar slides over and hides the cue display.
+        .compactToolbarActions(showsStatusActions: horizontalSizeClass == .compact)
 #endif
     }
 

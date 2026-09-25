@@ -72,29 +72,11 @@ nonisolated struct Cue: Hashable, Sendable, Identifiable {
     }
 
     var color: Color? {
-        switch colorName?.lowercased() {
-        case "red": .red
-        case "orange": .orange
-        case "yellow": .yellow
-        case "green": .green
-        case "cyan": .cyan
-        case "blue": .blue
-        case "purple": .purple
-        case "magenta": .cueMagenta
-        case "crimson": .cueCrimson
-        case "peach": .cuePeach
-        case "olive": .cueOlive
-        case "forest": .cueForest
-        case "sky blue": .cueSkyBlue
-        case "midnight": .cueMidnight
-        case "indigo": .indigo
-        case "lavender": .cueLavender
-        case "plum": .cuePlum
-        case "berry": .cueBerry
-        case "hot pink": .pink
-        case "gray": .gray
-        default: nil
+        guard let colorName = colorName?.lowercased(),
+              let qlabColor = QLabCueColor(rawValue: colorName) else {
+            return nil
         }
+        return qlabColor.color
     }
 }
 

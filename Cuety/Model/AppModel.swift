@@ -459,6 +459,19 @@ final class AppModel {
         }
     }
 
+    func toggleCueLayout() {
+        setCueLayout(preferences.cueLayout == .list ? .display : .list)
+    }
+
+    func setCueLayout(_ layout: CueLayout) {
+        guard layout != preferences.cueLayout else { return }
+        withAnimation(Motion.chrome.unlessMotionIsReduced) {
+            preferences.cueLayout = layout
+        }
+        // The two layouts show different rows either side of the playhead.
+        Task { await client.refreshPlayheadCueDetails() }
+    }
+
     /// The drawer's height as a step count: zero is collapsed to its handle,
     /// and every step above that is one more row either side of the playhead.
     var drawerStep: Int {

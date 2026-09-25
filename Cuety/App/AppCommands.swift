@@ -15,11 +15,18 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("f", modifiers: [.command, .shift])
 
+            Toggle("Cue List Layout", isOn: Binding(
+                get: { model.preferences.cueLayout == .list },
+                set: { _ in model.toggleCueLayout() }
+            ))
+            .keyboardShortcut("l", modifiers: [.command, .option])
+
             Toggle("Cue Drawer", isOn: Binding(
                 get: { model.preferences.showsDrawer },
                 set: { _ in model.toggleDrawer() }
             ))
             .keyboardShortcut("d", modifiers: [.command, .option])
+            .disabled(model.preferences.cueLayout == .list)
         }
 
         CommandMenu("Connection") {

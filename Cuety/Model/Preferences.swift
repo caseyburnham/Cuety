@@ -84,6 +84,32 @@ enum FontWeightChoice: String, CaseIterable, Codable, Hashable, Sendable, Identi
     }
 }
 
+/// How the detail pane presents the playhead: the big standby display with the
+/// drawer beneath it, or the whole pane given over to the cue list.
+enum CueLayout: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+    case display
+    case list
+
+    var id: String { rawValue }
+
+    /// How many cues the cue list layout shows either side of the standby cue.
+    static let listRowRadius = 2
+
+    var title: String {
+        switch self {
+        case .display: "Display and Drawer"
+        case .list: "Cue List"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .display: "rectangle.bottomhalf.inset.filled"
+        case .list: "list.triangle"
+        }
+    }
+}
+
 enum PillSize: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     case small
     case medium
@@ -144,6 +170,56 @@ enum PillSize: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     var glassSpacing: CGFloat { spacing + 4 }
 }
 
+enum PlayheadAccent: String, Codable, Hashable, Sendable, Identifiable {
+    case systemBlue
+    case standbyCue
+    case red
+    case orange
+    case yellow
+    case green
+    case cyan
+    case blue
+    case purple
+    case magenta
+    case crimson
+    case peach
+    case olive
+    case forest
+    case skyBlue = "sky blue"
+    case midnight
+    case indigo
+    case lavender
+    case plum
+    case berry
+    case hotPink = "hot pink"
+    case gray
+
+    static let allCases: [Self] = [.systemBlue, .standbyCue] + QLabCueColor.allCases.compactMap {
+        Self(rawValue: $0.rawValue)
+    }
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .systemBlue: "System Blue"
+        case .standbyCue: "Standby Cue"
+        default: QLabCueColor(rawValue: rawValue)?.title ?? rawValue
+        }
+    }
+
+    func color(for standbyCue: Cue?) -> Color {
+        switch self {
+        case .systemBlue:
+            .blue
+        case .standbyCue:
+            standbyCue?.color ?? .blue
+        default:
+            QLabCueColor(rawValue: rawValue)?.color ?? .blue
+        }
+    }
+}
+
 @Observable
 final class Preferences {
     enum Limits {
@@ -177,6 +253,14 @@ final class Preferences {
 
     var showsCueName: Bool {
         didSet { defaults.set(showsCueName, forKey: Key.showsCueName) }
+    }
+
+    var playheadAccent: PlayheadAccent {
+        didSet { defaults.set(playheadAccent.rawValue, forKey: Key.playheadAccent) }
+    }
+
+    var cueLayout: CueLayout {
+        didSet { defaults.set(cueLayout.rawValue, forKey: Key.cueLayout) }
     }
 
     var showsDrawer: Bool {
@@ -284,6 +368,10 @@ final class Preferences {
             .flatMap(FontWeightChoice.init(rawValue:)) ?? .bold
 
         showsCueName = defaults.object(forKey: Key.showsCueName) as? Bool ?? true
+        playheadAccent = defaults.string(forKey: Key.playheadAccent)
+            .flatMap(PlayheadAccent.init(rawValue:)) ?? .systemBlue
+        cueLayout = defaults.string(forKey: Key.cueLayout)
+            .flatMap(CueLayout.init(rawValue:)) ?? .display
         showsDrawer = defaults.object(forKey: Key.showsDrawer) as? Bool ?? true
         storedDrawerRowCount = Limits.drawerRows.clamping(
             defaults.object(forKey: Key.drawerRowCount) as? Int ?? 3
@@ -368,6 +456,8 @@ final class Preferences {
         static let usesRoundedSystemFont = "usesRoundedSystemFont"
         static let fontWeight = "fontWeight"
         static let showsCueName = "showsCueName"
+        static let playheadAccent = "playheadAccent"
+        static let cueLayout = "cueLayout"
         static let showsDrawer = "showsDrawer"
         static let drawerRowCount = "drawerRowCount"
         static let pillOrder = "pillOrder"

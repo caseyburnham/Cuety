@@ -8,7 +8,7 @@ struct CueDisplayView: View {
     @State private var headlineSizingCache = HeadlineSizingCache()
 
     private static let captionTracking: CGFloat = 1.2
-    private static let canvasTintOpacity: Double = 0.18
+    static let canvasTintOpacity: Double = 0.18
 
     private var client: QLabClient { model.client }
     private var typography: Typography { Typography(preferences: model.preferences) }
@@ -259,7 +259,7 @@ struct CueDisplayView: View {
 }
 
 @MainActor
-private final class HeadlineSizingCache {
+final class HeadlineSizingCache {
     private struct Inputs: Equatable {
         let cueNumbers: [String]
         let usesRounded: Bool

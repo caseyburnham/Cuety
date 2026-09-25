@@ -48,6 +48,11 @@ nonisolated struct CueGraph: Sendable {
         cuesByID[cueID]
     }
 
+    /// The row a cue sits on: its own, or that of the group it is inside.
+    func rowIndex(of cueID: String) -> Int? {
+        rowIndexByCueID[cueID]
+    }
+
     func containingRow(of cueID: String) -> Cue? {
         guard let index = rowIndexByCueID[cueID],
               rows[index].uniqueID != cueID

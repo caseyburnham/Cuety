@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct DisplaySettingsView: View {
-    static let settingsHeight: CGFloat = 500
+    static let settingsHeight: CGFloat = 560
 
     @Environment(AppModel.self) private var model
 
@@ -23,9 +23,40 @@ struct DisplaySettingsView: View {
             }
 
             Section {
+                Picker("Color", selection: Bindable(preferences).playheadAccent) {
+                    ForEach(PlayheadAccent.allCases) { choice in
+                        Text(choice.title).tag(choice)
+                    }
+                }
+            } header: {
+                Text("Playhead")
+            } footer: {
+                Text("Choose a fixed accent color, or follow the color of the cue currently standing by.")
+            }
+
+            Section {
                 Toggle("Show the cue name", isOn: Bindable(preferences).showsCueName)
             } footer: {
                 Text("The name appears beneath the number. Turning it off gives the number the whole window.")
+            }
+
+            Section {
+                Picker("Layout", selection: Binding(
+                    get: { preferences.cueLayout },
+                    set: { model.setCueLayout($0) }
+                )) {
+                    ForEach(CueLayout.allCases) { layout in
+                        Label(layout.title, systemImage: layout.systemImage).tag(layout)
+                    }
+                }
+            } header: {
+                Text("Layout")
+            } footer: {
+                Text("""
+                Display and Drawer shows the standby cue large with the drawer \
+                beneath it. Cue List gives the whole window to the cue list, \
+                with the standby cue marked by the playhead arrow.
+                """)
             }
 
             Section {
@@ -33,6 +64,7 @@ struct DisplaySettingsView: View {
                     get: { preferences.showsDrawer },
                     set: { _ in model.toggleDrawer() }
                 ))
+                .disabled(preferences.cueLayout == .list)
             } header: {
                 Text("Cue Drawer")
             } footer: {

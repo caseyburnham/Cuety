@@ -16,6 +16,10 @@ enum Motion {
     static let status = Animation.smooth(duration: ShowControlMotion.statusDuration)
 
     static let drawerShift = Animation.spring(response: 0.38, dampingFraction: 0.85)
+
+    /// The cue list layout moving every cue one position on a go. Smooth
+    /// rather than springy, since the standby cue travels a long way.
+    static let listShift = Animation.smooth(duration: 0.45)
 }
 
 extension View {

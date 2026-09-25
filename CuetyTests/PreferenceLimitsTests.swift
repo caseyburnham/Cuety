@@ -69,6 +69,19 @@ struct PreferenceLimitsTests {
         #expect(reloaded.requestTimeout == Preferences.Limits.requestTimeout.upperBound)
     }
 
+    @Test("Playhead accent defaults to system blue and persists")
+    func playheadAccentDefaultsAndPersists() throws {
+        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let preferences = Preferences(defaults: defaults)
+
+        #expect(preferences.playheadAccent == .systemBlue)
+        #expect(PlayheadAccent.allCases.count == 22)
+
+        preferences.playheadAccent = .skyBlue
+        let reloaded = Preferences(defaults: defaults)
+        #expect(reloaded.playheadAccent == .skyBlue)
+    }
+
 
     @Test("An out-of-range stored value is clamped as it is read")
     func loadingClampsStoredValues() throws {

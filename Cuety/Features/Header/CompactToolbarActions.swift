@@ -8,10 +8,13 @@ import SwiftUI
 struct CompactToolbarActions: ViewModifier {
     @Environment(AppModel.self) private var model
 
-    /// The floating display is only worth offering where there is room for it.
-    var showsFloatingDisplay = true
+    /// Refresh, connection status, heartbeat, and settings. A surface that
+    /// shares the screen with another one showing these turns them off so
+    /// they don't appear twice.
+    var showsStatusActions = true
 
-    var showsDisconnect = false
+    /// Only useful where the cue display itself isn't already on screen.
+    var showsFloatingDisplay = true
 
     @State private var isShowingSettings = false
     @State private var isShowingActivityLog = false
@@ -22,31 +25,33 @@ struct CompactToolbarActions: ViewModifier {
         content
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button {
-                        Task { await model.refresh() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .disabled(!model.canRefresh)
-                    .accessibilityLabel("Refresh")
+                    if showsStatusActions {
+                        Button {
+                            Task { await model.refresh() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .disabled(!model.canRefresh)
+                        .accessibilityLabel("Refresh")
 
-                    Button {
-                        isShowingConnectionInspector = true
-                    } label: {
-                        Image(systemName: model.isDataStale ? "clock.badge.exclamationmark" : model.client.status.systemImage)
-                            .foregroundStyle(model.isDataStale ? AnyShapeStyle(.orange) : AnyShapeStyle(model.client.status.tint))
-                    }
-                    .accessibilityLabel(model.isDataStale ? "Data may be stale" : "Connection status")
-                    .accessibilityValue(model.isDataStale ? "Return to the foreground to confirm the current cue" : model.client.status.title)
+                        Button {
+                            isShowingConnectionInspector = true
+                        } label: {
+                            Image(systemName: model.isDataStale ? "clock.badge.exclamationmark" : model.client.status.systemImage)
+                                .foregroundStyle(model.isDataStale ? AnyShapeStyle(.orange) : AnyShapeStyle(model.client.status.tint))
+                        }
+                        .accessibilityLabel(model.isDataStale ? "Data may be stale" : "Connection status")
+                        .accessibilityValue(model.isDataStale ? "Return to the foreground to confirm the current cue" : model.client.status.title)
 
-                    Button {
-                        isShowingActivityLog = true
-                    } label: {
-                        Image(systemName: model.client.heartbeatSymbol)
-                            .foregroundStyle(model.client.heartbeatTint)
+                        Button {
+                            isShowingActivityLog = true
+                        } label: {
+                            Image(systemName: model.client.heartbeatSymbol)
+                                .foregroundStyle(model.client.heartbeatTint)
+                        }
+                        .accessibilityLabel("Heartbeat and activity log")
+                        .accessibilityValue(model.client.heartbeatSummary)
                     }
-                    .accessibilityLabel("Heartbeat and activity log")
-                    .accessibilityValue(model.client.heartbeatSummary)
 
                     if showsFloatingDisplay {
                         Button {
@@ -57,20 +62,13 @@ struct CompactToolbarActions: ViewModifier {
                         .accessibilityLabel("Open floating cue display")
                     }
 
-                    Button {
-                        isShowingSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel("Settings")
-
-                    if showsDisconnect, model.canDisconnect {
-                        Button(role: .destructive) {
-                            model.disconnect()
+                    if showsStatusActions {
+                        Button {
+                            isShowingSettings = true
                         } label: {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                            Image(systemName: "gearshape")
                         }
-                        .accessibilityLabel("Disconnect")
+                        .accessibilityLabel("Settings")
                     }
                 }
             }
@@ -102,12 +100,12 @@ struct CompactToolbarActions: ViewModifier {
 
 extension View {
     func compactToolbarActions(
-        showsFloatingDisplay: Bool = true, showsDisconnect: Bool = false
+        showsStatusActions: Bool = true, showsFloatingDisplay: Bool = true
     ) -> some View {
         modifier(
             CompactToolbarActions(
-                showsFloatingDisplay: showsFloatingDisplay,
-                showsDisconnect: showsDisconnect
+                showsStatusActions: showsStatusActions,
+                showsFloatingDisplay: showsFloatingDisplay
             )
         )
     }

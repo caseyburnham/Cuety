@@ -5,10 +5,6 @@ struct MainWindowView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-#if os(iOS)
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-#endif
-
     var body: some View {
         MainSplitView(model: model) {
             WorkspaceSidebar()
@@ -40,12 +36,7 @@ struct MainWindowView: View {
                 transaction.disablesAnimations = true
             }
         }
-#if os(iOS)
-        .compactToolbarActions(
-            showsFloatingDisplay: horizontalSizeClass == .regular,
-            showsDisconnect: true
-        )
-#else
+#if os(macOS)
         .onExitCommand {
             if model.isPresenting { model.togglePresentationMode() }
         }
@@ -53,17 +44,31 @@ struct MainWindowView: View {
     }
 
     private var detail: some View {
-        GeometryReader { proxy in
-            CueDisplayView()
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if !model.isPresenting {
-                        CueDrawerView(
-                            availableHeight: proxy.size.height
-                        )
-                        .transition(reduceMotion ? .identity : .move(edge: .bottom).combined(with: .opacity))
-                    }
+        Group {
+            switch model.preferences.cueLayout {
+            case .display:
+                GeometryReader { proxy in
+                    CueDisplayView()
+                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                            if !model.isPresenting {
+                                CueDrawerView(
+                                    availableHeight: proxy.size.height
+                                )
+                                .transition(reduceMotion ? .identity : .move(edge: .bottom).combined(with: .opacity))
+                            }
+                        }
                 }
+            case .list:
+                CueListView()
+            }
         }
+        .transition(reduceMotion ? .identity : .opacity)
+#if os(iOS)
+        // Each split view column owns its own navigation bar, so the status
+        // and heartbeat controls must be attached to the detail column to
+        // stay visible on the cue display during a show.
+        .compactToolbarActions(showsFloatingDisplay: false)
+#endif
     }
 }
 

@@ -63,6 +63,13 @@ struct Typography {
         return min(max(size, Self.cueNumberMinimumSize), Self.cueNumberBaseSize)
     }
 
+    func cueNumberWidth(of text: String, size: CGFloat) -> CGFloat {
+        let measured = (text as NSString).size(
+            withAttributes: [.font: measuringFont(size: Self.measuringPointSize)]
+        )
+        return measured.width * size / Self.measuringPointSize
+    }
+
     func widestCueNumber(among candidates: some Sequence<String>) -> String? {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: measuringFont(size: Self.measuringPointSize)

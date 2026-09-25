@@ -304,7 +304,10 @@ struct CueRowView: View {
 
             Spacer(minLength: 0)
 
-            trailingIndicators
+            CueIndicators(
+                cue: cue,
+                size: max(Role.minimumIndicatorSize, role.fontSize * Role.indicatorSizeRatio)
+            )
         }
         .opacity(role.opacity)
         .contentTransition(.identity)
@@ -334,7 +337,33 @@ struct CueRowView: View {
             }
     }
 
-    private var trailingIndicators: some View {
+    private var accessibilityDescription: String {
+        var parts = [role.accessibilityPrefix]
+        if let number = cue.displayNumber { parts.append("cue \(number)") }
+        if let name = cue.displayName { parts.append(name) }
+        parts.append(contentsOf: CueIndicators.accessibilityParts(for: cue))
+        return parts.joined(separator: ", ")
+    }
+}
+
+/// The glyphs a cue row shows for a cue QLab will treat specially.
+struct CueIndicators: View {
+    let cue: Cue
+    let size: CGFloat
+
+    static func accessibilityParts(for cue: Cue) -> [String] {
+        var parts: [String] = []
+        if cue.isBroken == true { parts.append("broken") }
+        if cue.isArmed == false { parts.append("disarmed, will be skipped") }
+        if cue.isLoaded == true { parts.append("loaded") }
+        if cue.isFlagged == true { parts.append("flagged") }
+        if let mode = cue.continueMode, mode != .doNotContinue {
+            parts.append(mode.title)
+        }
+        return parts
+    }
+
+    var body: some View {
         HStack(spacing: 5) {
             if cue.isBroken == true {
                 Image(systemName: DetailPillKind.broken.systemImage)
@@ -363,23 +392,7 @@ struct CueRowView: View {
                     .help(mode.title)
             }
         }
-        .font(.system(size: max(
-            Role.minimumIndicatorSize, role.fontSize * Role.indicatorSizeRatio
-        )))
-    }
-
-    private var accessibilityDescription: String {
-        var parts = [role.accessibilityPrefix]
-        if let number = cue.displayNumber { parts.append("cue \(number)") }
-        if let name = cue.displayName { parts.append(name) }
-        if cue.isBroken == true { parts.append("broken") }
-        if cue.isArmed == false { parts.append("disarmed, will be skipped") }
-        if cue.isLoaded == true { parts.append("loaded") }
-        if cue.isFlagged == true { parts.append("flagged") }
-        if let mode = cue.continueMode, mode != .doNotContinue {
-            parts.append(mode.title)
-        }
-        return parts.joined(separator: ", ")
+        .font(.system(size: size))
     }
 }
 

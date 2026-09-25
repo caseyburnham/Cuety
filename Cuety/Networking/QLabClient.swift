@@ -1088,6 +1088,16 @@ final class QLabClient {
         guard let cueID = currentPlayheadCueID else { return [] }
         var ids: Set<String> = [cueID]
 
+        if preferences.cueLayout == .list {
+            guard let graph = watchedGraph else { return ids }
+            // One more either side for the cue waiting just off each band,
+            // so it arrives with its details already in hand.
+            let radius = CueLayout.listRowRadius + 1
+            for cue in graph.rowsAbove(cueID, count: radius) { ids.insert(cue.uniqueID) }
+            for cue in graph.rowsBelow(cueID, count: radius) { ids.insert(cue.uniqueID) }
+            return ids
+        }
+
         guard preferences.showsDrawer, let graph = watchedGraph else { return ids }
 
         let radius = preferences.drawerRowCount
