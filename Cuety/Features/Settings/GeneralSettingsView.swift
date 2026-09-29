@@ -54,6 +54,6 @@ struct GeneralSettingsView: View {
 
 #Preview {
     GeneralSettingsView()
-        .environment(AppModel())
+        .environment(AppModel.preview)
         .frame(width: SettingsView.width, height: GeneralSettingsView.settingsHeight)
 }

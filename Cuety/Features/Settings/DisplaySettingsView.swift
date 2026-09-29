@@ -110,6 +110,6 @@ struct DisplaySettingsView: View {
 
 #Preview {
     DisplaySettingsView()
-        .environment(AppModel())
+        .environment(AppModel.preview)
         .frame(width: SettingsView.width, height: DisplaySettingsView.settingsHeight)
 }

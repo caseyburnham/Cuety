@@ -7,7 +7,7 @@ import Testing
 @MainActor
 struct PreferenceLimitsTests {
     private func preferences() throws -> Preferences {
-        Preferences(defaults: try #require(UserDefaults(suiteName: UUID().uuidString)))
+        Preferences(defaults: EphemeralDefaults())
     }
 
 
@@ -58,7 +58,7 @@ struct PreferenceLimitsTests {
 
     @Test("The clamped value is the one written to the store")
     func theClampedValueIsPersisted() throws {
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
 
         preferences.drawerRowCount = 99
@@ -71,7 +71,7 @@ struct PreferenceLimitsTests {
 
     @Test("Playhead accent defaults to system blue and persists")
     func playheadAccentDefaultsAndPersists() throws {
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
 
         #expect(preferences.playheadAccent == .systemBlue)
@@ -85,7 +85,7 @@ struct PreferenceLimitsTests {
 
     @Test("An out-of-range stored value is clamped as it is read")
     func loadingClampsStoredValues() throws {
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         defaults.set(99, forKey: "drawerRowCount")
         defaults.set(70_000, forKey: "defaultPort")
         defaults.set(0.0, forKey: "heartbeatInterval")

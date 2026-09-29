@@ -92,6 +92,6 @@ struct DetailPillSettingsView: View {
 
 #Preview {
     DetailPillSettingsView()
-        .environment(AppModel())
+        .environment(AppModel.preview)
         .frame(width: SettingsView.width, height: DetailPillSettingsView.settingsHeight)
 }

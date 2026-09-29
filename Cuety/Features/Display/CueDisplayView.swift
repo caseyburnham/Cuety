@@ -297,6 +297,6 @@ final class HeadlineSizingCache {
 
 #Preview {
     CueDisplayView()
-        .environment(AppModel())
+        .environment(AppModel.preview)
         .frame(width: 900, height: 500)
 }

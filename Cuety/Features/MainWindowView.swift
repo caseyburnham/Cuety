@@ -20,6 +20,7 @@ struct MainWindowView: View {
         .sheet(isPresented: Bindable(model).isAddingServer) {
             AddServerSheet()
         }
+        .credentialErrorAlert(Bindable(model).credentialError, isActive: model.passcodePrompt == nil)
         .background(
             FullScreenPresentation(isPresenting: model.isPresenting) { isFullScreen in
                 model.setPresenting(isFullScreen)
@@ -86,6 +87,6 @@ private struct MainDetailView: View {
 
 #Preview {
     MainWindowView()
-        .environment(AppModel())
+        .environment(AppModel.preview)
         .frame(width: 1000, height: 620)
 }

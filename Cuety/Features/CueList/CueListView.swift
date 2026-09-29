@@ -561,7 +561,7 @@ private struct PlayheadArrowGlyph: View, Animatable {
 
 #Preview {
     CueListView()
-        .environment(AppModel())
+        .environment(AppModel.preview)
         .frame(width: 900, height: 560)
 }
 
@@ -583,7 +583,7 @@ private struct PlayheadArrowGlyph: View, Animatable {
                 .padding()
         }
         .frame(width: 900, height: 560)
-        .environment(AppModel())
+        .environment(AppModel.preview)
 }
 
 

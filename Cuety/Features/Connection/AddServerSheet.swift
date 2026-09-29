@@ -55,5 +55,5 @@ struct AddServerSheet: View {
 
 #Preview {
     AddServerSheet()
-        .environment(AppModel())
+        .environment(AppModel.preview)
 }

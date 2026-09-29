@@ -17,9 +17,12 @@ final class AppModel {
 
     private(set) var storedPasscodeSelections: Set<WorkspaceSelection> = []
 
+    /// A Keychain failure from the connection flow, which the main window
+    /// presents. Actions taken in Settings throw theirs so Settings can show
+    /// them in its own window.
     var credentialError: CredentialError?
 
-    struct CredentialError: Identifiable, Hashable {
+    nonisolated struct CredentialError: Error, Identifiable, Hashable {
         let id = UUID()
         let action: String
         let reason: String
@@ -74,7 +77,13 @@ final class AppModel {
         }
         self.client.onPasscodeRequired = { [weak self] rejected in
             guard let self, let selection = self.selection else { return }
-            if rejected { self.forgetPasscode(for: selection) }
+            if rejected {
+                do throws(CredentialError) {
+                    try self.forgetPasscode(for: selection)
+                } catch {
+                    self.credentialError = error
+                }
+            }
             self.passcodePrompt = PasscodePrompt(
                 serverID: selection.serverID, workspaceID: selection.workspaceID,
                 workspaceName: self.workspaceName(for: selection) ?? "this workspace",
@@ -108,8 +117,11 @@ final class AppModel {
     /// can wait for the point at which retained data has been confirmed again.
     private(set) var foregroundRefreshTask: Task<Void, Never>?
 
+    /// False for the preview model, so the canvas never browses or probes the network.
+    private var startsServices = true
+
     func start() {
-        guard startupTask == nil else { return }
+        guard startsServices, startupTask == nil else { return }
 
         dockBadge.follow { [weak self] in self?.dockBadgeLabel ?? nil }
 
@@ -377,6 +389,9 @@ final class AppModel {
 
         isDataStale = false
         preferences.lastWorkspace = target
+        // Closed before saving, so a save failure is reported by the main
+        // window rather than by a sheet that is going away.
+        passcodePrompt = nil
 
         if remember {
             do {
@@ -391,8 +406,6 @@ final class AppModel {
                 )
             }
         }
-
-        passcodePrompt = nil
     }
 
     func disconnect() {
@@ -404,26 +417,26 @@ final class AppModel {
         selection = nil
     }
 
-    func forgetPasscode(for selection: WorkspaceSelection) {
+    func forgetPasscode(for selection: WorkspaceSelection) throws(CredentialError) {
         do {
             try passcodes.remove(
                 serverID: selection.serverID, workspaceID: selection.workspaceID
             )
             storedPasscodeSelections.remove(selection)
         } catch {
-            credentialError = CredentialError(
+            throw CredentialError(
                 action: "Cuety could not remove that passcode from your Keychain.",
                 reason: error.localizedDescription
             )
         }
     }
 
-    func forgetAllPasscodes() {
+    func forgetAllPasscodes() throws(CredentialError) {
         do {
             try passcodes.removeAll()
             storedPasscodeSelections.removeAll()
         } catch {
-            credentialError = CredentialError(
+            throw CredentialError(
                 action: "Cuety could not clear the saved passcodes from your Keychain.",
                 reason: error.localizedDescription
             )
@@ -545,5 +558,34 @@ final class AppModel {
         withAnimation(Motion.chrome.unlessMotionIsReduced) {
             preferences.showsDrawer = showsDrawer
         }
+        // As with resizing: the rows it reveals may never have been asked for.
+        if showsDrawer {
+            Task { await client.refreshPlayheadCueDetails() }
+        }
     }
+}
+
+extension AppModel {
+    /// A model for `#Preview`s: its own defaults domain, reset each time, no
+    /// Keychain access and no network discovery, so the canvas never touches
+    /// the app's saved settings, credentials or QLab.
+    static var preview: AppModel {
+        let domain = "org.arvadacenter.Cuety.preview"
+        let defaults = UserDefaults(suiteName: domain) ?? .standard
+        defaults.removePersistentDomain(forName: domain)
+        let model = AppModel(
+            preferences: Preferences(defaults: defaults),
+            passcodes: PreviewPasscodeStore()
+        )
+        model.startsServices = false
+        return model
+    }
+}
+
+private nonisolated struct PreviewPasscodeStore: PasscodeStoring {
+    func passcode(serverID: String, workspaceID: String) -> String? { nil }
+    func hasPasscode(serverID: String, workspaceID: String) -> Bool { false }
+    func save(_ passcode: String, serverID: String, workspaceID: String) throws {}
+    func remove(serverID: String, workspaceID: String) throws {}
+    func removeAll() throws {}
 }

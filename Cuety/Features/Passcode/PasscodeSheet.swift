@@ -46,6 +46,9 @@ struct PasscodeSheet: View {
         .frame(width: 360)
         .onAppear { isFieldFocused = true }
         .interactiveDismissDisabled(isSubmitting)
+        // A rejected passcode that cannot be removed is reported here, since
+        // this sheet opens over the main window at the same moment.
+        .credentialErrorAlert(Bindable(model).credentialError, isActive: model.passcodePrompt != nil)
     }
 
     private var header: some View {
@@ -89,13 +92,35 @@ struct PasscodeSheet: View {
     }
 }
 
+extension View {
+    /// Presents a Keychain failure. A presenter that something may cover, such
+    /// as the main window beneath the passcode sheet, passes `isActive` so only
+    /// the surface on top tries to present.
+    func credentialErrorAlert(
+        _ error: Binding<AppModel.CredentialError?>, isActive: Bool = true
+    ) -> some View {
+        alert(
+            "Keychain Problem",
+            isPresented: Binding(
+                get: { isActive && error.wrappedValue != nil },
+                set: { if !$0 { error.wrappedValue = nil } }
+            ),
+            presenting: error.wrappedValue
+        ) { _ in
+            Button("OK") {}
+        } message: { error in
+            Text(error.message)
+        }
+    }
+}
+
 #Preview("Required") {
     PasscodeSheet(
         prompt: .init(
             serverID: "s", workspaceID: "w", workspaceName: "Act One", wasRejected: false
         )
     )
-    .environment(AppModel())
+    .environment(AppModel.preview)
 }
 
 #Preview("Rejected") {
@@ -104,5 +129,5 @@ struct PasscodeSheet: View {
             serverID: "s", workspaceID: "w", workspaceName: "Act One", wasRejected: true
         )
     )
-    .environment(AppModel())
+    .environment(AppModel.preview)
 }

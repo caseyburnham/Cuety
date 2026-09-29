@@ -265,6 +265,6 @@ struct ConnectionInspectorView: View {
 
 #Preview {
     ConnectionInspectorView()
-        .environment(AppModel())
+        .environment(AppModel.preview)
         .frame(width: 460, height: 620)
 }

@@ -530,6 +530,6 @@ struct ActivityLogView: View {
 
 #Preview {
     ActivityLogView()
-        .environment(AppModel())
+        .environment(AppModel.preview)
         .frame(width: 780, height: 460)
 }

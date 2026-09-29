@@ -12,7 +12,7 @@ struct AppModelLifecycleTests {
         lastWorkspace: WorkspaceSelection? = nil,
         requestTimeout: TimeInterval? = nil
     ) throws -> AppModel {
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
         preferences.autoConnect = autoConnect
         preferences.lastWorkspace = lastWorkspace
@@ -125,7 +125,7 @@ struct AppModelLifecycleTests {
     @Test("Closing the selected workspace clears its persisted last workspace")
     func workspaceClosureClearsMatchingLastWorkspace() throws {
         let target = WorkspaceSelection(serverID: "S", workspaceID: "W")
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
         preferences.lastWorkspace = target
         let model = AppModel(preferences: preferences)

@@ -9,7 +9,7 @@ struct StoredPasscodeTests {
     private func makeModel(
         _ store: StubPasscodeStore, withStoredPasscode: Bool = true
     ) async throws -> (model: AppModel, target: WorkspaceSelection) {
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let model = AppModel(
             preferences: Preferences(defaults: defaults), passcodes: store
         )
@@ -39,11 +39,10 @@ struct StoredPasscodeTests {
         let (model, target) = try await makeModel(store)
         try #require(model.storedPasscodeSelections.contains(target))
 
-        model.forgetPasscode(for: target)
+        try model.forgetPasscode(for: target)
 
         #expect(store.stored.isEmpty)
         #expect(!model.storedPasscodeSelections.contains(target))
-        #expect(model.credentialError == nil)
     }
 
     @Test("A Forget that fails says so, and does not pretend the row is gone")
@@ -52,9 +51,9 @@ struct StoredPasscodeTests {
         let (model, target) = try await makeModel(store)
         store.removeError = PasscodeStore.Failure.keychain(errSecAuthFailed)
 
-        model.forgetPasscode(for: target)
-
-        let error = try #require(model.credentialError)
+        let error = try #require(throws: AppModel.CredentialError.self) {
+            try model.forgetPasscode(for: target)
+        }
         #expect(error.message.contains("could not remove"))
         #expect(model.storedPasscodeSelections.contains(target))
         #expect(store.hasPasscode(serverID: target.serverID, workspaceID: target.workspaceID))
@@ -66,11 +65,10 @@ struct StoredPasscodeTests {
         let (model, target) = try await makeModel(store)
         try #require(model.storedPasscodeSelections.contains(target))
 
-        model.forgetAllPasscodes()
+        try model.forgetAllPasscodes()
 
         #expect(store.stored.isEmpty)
         #expect(model.storedPasscodeSelections.isEmpty)
-        #expect(model.credentialError == nil)
     }
 
     @Test("A Forget All that fails says so")
@@ -79,9 +77,9 @@ struct StoredPasscodeTests {
         let (model, target) = try await makeModel(store)
         store.removeAllError = PasscodeStore.Failure.keychain(errSecAuthFailed)
 
-        model.forgetAllPasscodes()
-
-        let error = try #require(model.credentialError)
+        let error = try #require(throws: AppModel.CredentialError.self) {
+            try model.forgetAllPasscodes()
+        }
         #expect(error.message.contains("could not clear"))
         #expect(model.storedPasscodeSelections.contains(target))
     }
@@ -92,11 +90,25 @@ struct StoredPasscodeTests {
         let (model, target) = try await makeModel(store)
         store.removeError = PasscodeStore.Failure.keychain(errSecAuthFailed)
 
-        model.forgetPasscode(for: target)
-
-        let error = try #require(model.credentialError)
+        let error = try #require(throws: AppModel.CredentialError.self) {
+            try model.forgetPasscode(for: target)
+        }
         #expect(error.reason == PasscodeStore.Failure.keychain(errSecAuthFailed).localizedDescription)
         #expect(!error.reason.contains("couldn't be completed"))
+    }
+
+    @Test("A rejected passcode that cannot be removed is reported to the connection flow")
+    func rejectedPasscodeRemovalFailureIsSurfaced() async throws {
+        let store = StubPasscodeStore()
+        let (model, target) = try await makeModel(store)
+        store.removeError = PasscodeStore.Failure.keychain(errSecAuthFailed)
+        model.selection = target
+
+        model.client.onPasscodeRequired?(true)
+
+        let error = try #require(model.credentialError)
+        #expect(error.message.contains("could not remove"))
+        #expect(model.passcodePrompt?.wasRejected == true)
     }
 
     @Test("Rebuilding the set finds credentials for workspaces that become visible")

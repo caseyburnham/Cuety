@@ -140,6 +140,6 @@ private struct SettingsWindowHeight: NSViewRepresentable {
 
 #Preview {
     SettingsView()
-        .environment(AppModel())
+        .environment(AppModel.preview)
         .frame(width: SettingsView.width, height: GeneralSettingsView.settingsHeight)
 }

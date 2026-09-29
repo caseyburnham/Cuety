@@ -10,7 +10,7 @@ struct CueNumberSizingTests {
     private func typography() throws -> Typography {
         Typography(
             preferences: Preferences(
-                defaults: try #require(UserDefaults(suiteName: UUID().uuidString))
+                defaults: EphemeralDefaults()
             )
         )
     }
@@ -46,7 +46,7 @@ struct CueNumberSizingTests {
 
     @Test("The rounded design is measured as the rounded font, not the default")
     func roundedDesignIsMeasured() throws {
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
         preferences.usesRoundedSystemFont = false
         let standard = Typography(preferences: preferences)
@@ -94,7 +94,7 @@ struct CueNumberSizingTests {
 
     private func typography(sizing: CueNumberSizing, customSize: Double = 240) throws -> Typography {
         let preferences = Preferences(
-            defaults: try #require(UserDefaults(suiteName: UUID().uuidString))
+            defaults: EphemeralDefaults()
         )
         preferences.cueNumberSizing = sizing
         preferences.customCueNumberSize = customSize
@@ -131,7 +131,7 @@ struct CueNumberSizingTests {
     @Test("The custom size is kept within its limits")
     func customSizeIsClamped() throws {
         let preferences = Preferences(
-            defaults: try #require(UserDefaults(suiteName: UUID().uuidString))
+            defaults: EphemeralDefaults()
         )
         preferences.customCueNumberSize = 1
         #expect(preferences.customCueNumberSize == Preferences.Limits.cueNumberSize.lowerBound)

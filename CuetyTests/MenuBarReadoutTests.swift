@@ -7,7 +7,7 @@ import Testing
 @MainActor
 struct MenuBarReadoutTests {
     private func makePreferences() throws -> Preferences {
-        Preferences(defaults: try #require(UserDefaults(suiteName: UUID().uuidString)))
+        Preferences(defaults: EphemeralDefaults())
     }
 
     private func makeModel() throws -> AppModel {
@@ -26,7 +26,7 @@ struct MenuBarReadoutTests {
 
     @Test("The chosen readout survives a relaunch")
     func readoutPersists() throws {
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
 
         preferences.showsMenuBarExtra = true
@@ -41,7 +41,7 @@ struct MenuBarReadoutTests {
 
     @Test("An unrecognised stored readout falls back to the default")
     func unknownReadoutFallsBack() throws {
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         defaults.set("semaphore", forKey: "menuBarReadout")
 
         #expect(Preferences(defaults: defaults).menuBarReadout == .default)

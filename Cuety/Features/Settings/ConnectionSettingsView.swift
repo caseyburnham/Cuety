@@ -7,6 +7,9 @@ struct ConnectionSettingsView: View {
 
     @State private var isConfirmingForgetAll = false
 
+    /// Shown in this window, where the person asked to forget the passcode.
+    @State private var keychainError: AppModel.CredentialError?
+
     private var preferences: Preferences { model.preferences }
 
     var body: some View {
@@ -23,17 +26,23 @@ struct ConnectionSettingsView: View {
             isPresented: $isConfirmingForgetAll
         ) {
             Button("Forget All", role: .destructive) {
-                model.forgetAllPasscodes()
+                reportingKeychainErrors { () throws(AppModel.CredentialError) in
+                    try model.forgetAllPasscodes()
+                }
             }
         } message: {
             Text("Cuety will ask for a passcode the next time it connects to a protected workspace.")
         }
-        .alert(item: Bindable(model).credentialError) { error in
-            Alert(
-                title: Text("Keychain Problem"),
-                message: Text(error.message),
-                dismissButton: .default(Text("OK"))
-            )
+        .credentialErrorAlert($keychainError)
+    }
+
+    private func reportingKeychainErrors(
+        _ action: () throws(AppModel.CredentialError) -> Void
+    ) {
+        do {
+            try action()
+        } catch {
+            keychainError = error
         }
     }
 
@@ -157,7 +166,9 @@ struct ConnectionSettingsView: View {
                         Spacer(minLength: 12)
 
                         Button("Forget") {
-                            model.forgetPasscode(for: entry.selection)
+                            reportingKeychainErrors { () throws(AppModel.CredentialError) in
+                                try model.forgetPasscode(for: entry.selection)
+                            }
                         }
                     }
                 }
@@ -200,6 +211,6 @@ struct ConnectionSettingsView: View {
 
 #Preview {
     ConnectionSettingsView()
-        .environment(AppModel())
+        .environment(AppModel.preview)
         .frame(width: SettingsView.width, height: ConnectionSettingsView.settingsHeight)
 }

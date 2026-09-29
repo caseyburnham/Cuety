@@ -460,7 +460,7 @@ struct CueIndicators: View {
 
 #Preview {
     CueDrawerView(availableHeight: 560)
-        .environment(AppModel())
+        .environment(AppModel.preview)
         .frame(width: 900)
 }
 
@@ -500,7 +500,7 @@ struct CueIndicators: View {
         .background(.thinMaterial)
     }
     .frame(width: 900, height: height)
-    .environment(AppModel())
+    .environment(AppModel.preview)
 }
 
 #Preview("Awkward cue numbers") {
@@ -516,5 +516,5 @@ struct CueIndicators: View {
     }
     .padding(20)
     .frame(width: 420)
-    .environment(AppModel())
+    .environment(AppModel.preview)
 }

@@ -107,7 +107,7 @@ struct QLabLiveAuthorizationTests {
         let peer = try AuthorizationPeer()
         defer { peer.stop() }
         let port = try await peer.start()
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
         preferences.heartbeatInterval = 0.05
         let client = QLabClient(preferences: preferences, log: ActivityLog())
@@ -150,7 +150,7 @@ struct QLabLiveAuthorizationTests {
 @MainActor
 struct QLabDisconnectTests {
     private func makePreferences(requestTimeout: TimeInterval = 5) throws -> Preferences {
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
         preferences.requestTimeout = requestTimeout
         return preferences
@@ -666,6 +666,48 @@ struct QLabDisconnectTests {
         #expect(Set(afterMove).count == afterMove.count)
     }
 
+    @Test("Showing the drawer fetches the details of the rows it reveals")
+    func showingDrawerFetchesRevealedDetails() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = [
+            .init(
+                id: "L1",
+                name: "Main",
+                cues: (1...4).map {
+                    .init(id: "C\($0)", number: "\($0)", name: "Cue \($0)", duration: Double($0))
+                },
+                playheadCueID: "C1"
+            ),
+        ]
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let preferences = try makePreferences()
+        preferences.showsDrawer = false
+        preferences.drawerRowCount = 2
+        let model = AppModel(preferences: preferences)
+        defer { model.client.disconnect() }
+        await model.client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+
+        let standby = ContinuousClock.now + .seconds(2)
+        while model.client.watchedGraph?.cue(withID: "C1")?.duration == nil,
+              ContinuousClock.now < standby {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(model.client.watchedGraph?.cue(withID: "C1")?.duration != nil)
+        // With the drawer hidden only the standby cue is on screen.
+        try #require(model.client.watchedGraph?.cue(withID: "C2")?.duration == nil)
+
+        model.setShowsDrawer(true)
+
+        let revealed = ContinuousClock.now + .seconds(2)
+        while model.client.watchedGraph?.cue(withID: "C3")?.duration == nil,
+              ContinuousClock.now < revealed {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(model.client.watchedGraph?.cue(withID: "C2")?.duration == 2)
+        #expect(model.client.watchedGraph?.cue(withID: "C3")?.duration == 3)
+    }
+
     @Test("A consumer that stops reading overflows the buffer and is told what it lost")
     func stalledConsumerOverflowIsReported() async throws {
         let peer = try AuthorizationPeer()
@@ -719,7 +761,7 @@ struct QLabDisconnectTests {
         defer { peer.stop() }
         let port = try await peer.start()
 
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
         preferences.requestTimeout = 0.4
         let model = AppModel(preferences: preferences)
@@ -752,7 +794,7 @@ struct QLabDisconnectTests {
         defer { peer.stop() }
         let port = try await peer.start()
 
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
         preferences.requestTimeout = 2
         let model = AppModel(preferences: preferences)
@@ -784,7 +826,7 @@ struct QLabDisconnectTests {
         let port = try await peer.start()
         defer { peer.stop() }
 
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
         preferences.requestTimeout = 0.3
         let model = AppModel(preferences: preferences)
@@ -821,7 +863,7 @@ struct QLabDisconnectTests {
         let port = try await peer.start()
         defer { peer.stop() }
 
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
         let model = AppModel(preferences: preferences)
         defer { model.disconnect() }
@@ -851,7 +893,7 @@ struct QLabDisconnectTests {
         let port = try await peer.start()
         defer { peer.stop() }
 
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
         let model = AppModel(preferences: preferences)
         defer { model.disconnect() }

@@ -68,7 +68,7 @@ struct ServerIdentityTests {
 
     @Test("Adding this Mac by address returns the entry that already exists")
     func addingLocalhostByAddressDoesNotDuplicate() throws {
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let browser = QLabBrowser(defaults: defaults)
         let before = browser.servers.count
         try #require(browser.server(withID: QLabServer.localhost().id) != nil)
@@ -82,7 +82,7 @@ struct ServerIdentityTests {
 
     @Test("Adding a genuinely new server still adds a row")
     func addingNewServerWorks() throws {
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let browser = QLabBrowser(defaults: defaults)
         let before = browser.servers.count
 
@@ -94,7 +94,7 @@ struct ServerIdentityTests {
 
     @Test("Adding the same server twice adds one row")
     func addingTwiceAddsOnce() throws {
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let browser = QLabBrowser(defaults: defaults)
         let before = browser.servers.count
 
@@ -138,7 +138,7 @@ struct ServerIdentityTests {
 
 
     private func model() throws -> AppModel {
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         return AppModel(preferences: Preferences(defaults: defaults))
     }
 
@@ -160,7 +160,7 @@ struct ServerIdentityTests {
 
     @Test("A removed server stays removed across a relaunch")
     func removalIsPersisted() throws {
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let defaults = EphemeralDefaults()
         let model = AppModel(preferences: Preferences(defaults: defaults))
         let added = model.browser.addManualServer(host: "192.168.1.10", port: port)
         try #require(model.browser.server(withID: added.id) != nil)
