@@ -347,6 +347,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Cuety © 2026 ACAH\nQLab © 2005-2026 Figure 53, LLC.\nAll rights reserved.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Cuety uses your local network to discover and connect to QLab.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -398,6 +399,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Cuety © 2026 ACAH\nQLab © 2005-2026 Figure 53, LLC.\nAll rights reserved.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Cuety uses your local network to discover and connect to QLab.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
