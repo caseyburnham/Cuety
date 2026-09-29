@@ -23,9 +23,9 @@ struct CueMenuBarContent: View {
 
         Toggle("Presentation Mode", isOn: Binding(
             get: { model.isPresenting },
-            set: { _ in
+            set: { presenting in
                 showMainWindow()
-                model.togglePresentationMode()
+                model.setPresenting(presenting)
             }
         ))
 

@@ -7,11 +7,12 @@ import SwiftUI
 /// chooses which of the optional items apply to it.
 struct CompactToolbarActions: ViewModifier {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Refresh, connection status, heartbeat, and settings. A surface that
-    /// shares the screen with another one showing these turns them off so
-    /// they don't appear twice.
-    var showsStatusActions = true
+    var showsRefresh = true
+    var showsConnectionStatus = true
+    var showsHeartbeat = true
+    var showsSettings = true
 
     /// Only useful where the cue display itself isn't already on screen.
     var showsFloatingDisplay = true
@@ -25,7 +26,7 @@ struct CompactToolbarActions: ViewModifier {
         content
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    if showsStatusActions {
+                    if showsRefresh {
                         Button {
                             Task { await model.refresh() }
                         } label: {
@@ -33,7 +34,9 @@ struct CompactToolbarActions: ViewModifier {
                         }
                         .disabled(!model.canRefresh)
                         .accessibilityLabel("Refresh")
+                    }
 
+                    if showsConnectionStatus {
                         Button {
                             isShowingConnectionInspector = true
                         } label: {
@@ -42,12 +45,24 @@ struct CompactToolbarActions: ViewModifier {
                         }
                         .accessibilityLabel(model.isDataStale ? "Data may be stale" : "Connection status")
                         .accessibilityValue(model.isDataStale ? "Return to the foreground to confirm the current cue" : model.client.status.title)
+                    }
 
+                    if showsHeartbeat {
                         Button {
                             isShowingActivityLog = true
                         } label: {
                             Image(systemName: model.client.heartbeatSymbol)
                                 .foregroundStyle(model.client.heartbeatTint)
+                                .contentTransition(
+                                    reduceMotion
+                                        ? .identity
+                                        : .symbolEffect(.replace.magic(fallback: .downUp))
+                                )
+                                .symbolEffect(
+                                    .bounce,
+                                    options: .nonRepeating,
+                                    value: reduceMotion ? 0 : model.client.heartbeatCount
+                                )
                         }
                         .accessibilityLabel("Heartbeat and activity log")
                         .accessibilityValue(model.client.heartbeatSummary)
@@ -62,7 +77,7 @@ struct CompactToolbarActions: ViewModifier {
                         .accessibilityLabel("Open floating cue display")
                     }
 
-                    if showsStatusActions {
+                    if showsSettings {
                         Button {
                             isShowingSettings = true
                         } label: {
@@ -100,11 +115,18 @@ struct CompactToolbarActions: ViewModifier {
 
 extension View {
     func compactToolbarActions(
-        showsStatusActions: Bool = true, showsFloatingDisplay: Bool = true
+        showsRefresh: Bool = true,
+        showsConnectionStatus: Bool = true,
+        showsHeartbeat: Bool = true,
+        showsSettings: Bool = true,
+        showsFloatingDisplay: Bool = true
     ) -> some View {
         modifier(
             CompactToolbarActions(
-                showsStatusActions: showsStatusActions,
+                showsRefresh: showsRefresh,
+                showsConnectionStatus: showsConnectionStatus,
+                showsHeartbeat: showsHeartbeat,
+                showsSettings: showsSettings,
                 showsFloatingDisplay: showsFloatingDisplay
             )
         )

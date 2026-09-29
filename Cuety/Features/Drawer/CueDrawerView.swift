@@ -14,10 +14,6 @@ struct CueDrawerView: View {
     static let handleHeight: CGFloat = 22
     static let estimatedRowHeight: CGFloat = 29
 
-    static func estimatedHeight(atStep step: Int) -> CGFloat {
-        handleHeight + 24 + CGFloat(max(0, step * 2)) * estimatedRowHeight
-    }
-
     static func stepsFitting(_ height: CGFloat) -> Int {
         let available = max(0, height * maxHeightShare - handleHeight - 24)
         return max(
@@ -36,7 +32,7 @@ struct CueDrawerView: View {
     private var isCollapsed: Bool { model.drawerStep == 0 }
 
     var body: some View {
-        if client.status.hasLiveData,
+        if model.hasCurrentCueData,
            let graph = client.watchedGraph,
            let cueID = client.currentPlayheadCueID {
             content(graph: graph, playheadID: cueID)
@@ -108,13 +104,62 @@ struct CueDrawerView: View {
         #endif
         .accessibilityElement()
         .accessibilityLabel("Cue drawer")
-        .accessibilityHint("Drag up or down to show one more or fewer cues on each side")
+        .accessibilityValue(drawerAccessibilityValue)
+        .accessibilityHint("Adjust to show more or fewer cues on each side")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                model.resizeDrawer(toStep: min(maximumStep, model.drawerStep + 1))
+            case .decrement:
+                model.resizeDrawer(toStep: max(0, model.drawerStep - 1))
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    private var drawerAccessibilityValue: String {
+        let step = min(model.drawerStep, maximumStep)
+        switch step {
+        case 0: return "Collapsed"
+        case 1: return "1 cue on each side"
+        default: return "\(step) cues on each side"
+        }
+    }
+
+    /// One width for every row's number, so the numbers line up. It is
+    /// measured from the rows on screen, with a floor that keeps short
+    /// numbers from shifting the names when the playhead moves.
+    private func numberColumnWidth(above: [Cue], below: [Cue]) -> CGFloat {
+        let typography = Typography(preferences: model.preferences)
+        var width = typography.drawerNumberWidth(
+            of: CueRowView.numberPlaceholder,
+            size: CueRowView.Role.largestRowFontSize,
+            weight: .semibold
+        )
+
+        func include(_ cue: Cue, as role: CueRowView.Role) {
+            guard let number = cue.displayNumber else { return }
+            width = max(width, typography.drawerNumberWidth(
+                of: number, size: role.fontSize, weight: role.weight
+            ))
+        }
+
+        for (offset, cue) in above.enumerated() {
+            include(cue, as: .above(distance: above.count - offset))
+        }
+        for (offset, cue) in below.enumerated() {
+            include(cue, as: .below(distance: offset + 1))
+        }
+        return width
     }
 
     @ViewBuilder
     private func rows(
         graph: CueGraph, playheadID: String, above: [Cue], below: [Cue]
     ) -> some View {
+        let numberWidth = numberColumnWidth(above: above, below: below)
+
         let stack = VStack(alignment: .leading, spacing: 2) {
             if graph.isFirst(playheadID) {
                 boundaryRow("Top of cue list", systemImage: "arrow.up.to.line")
@@ -122,7 +167,8 @@ struct CueDrawerView: View {
                 ForEach(above.enumerated(), id: \.element.id) { offset, cue in
                     CueRowView(
                         cue: cue,
-                        role: .above(distance: above.count - offset)
+                        role: .above(distance: above.count - offset),
+                        numberColumnWidth: numberWidth
                     )
                 }
             }
@@ -133,7 +179,11 @@ struct CueDrawerView: View {
                 boundaryRow("End of cue list", systemImage: "arrow.down.to.line")
             } else {
                 ForEach(below.enumerated(), id: \.element.id) { offset, cue in
-                    CueRowView(cue: cue, role: .below(distance: offset + 1))
+                    CueRowView(
+                        cue: cue,
+                        role: .below(distance: offset + 1),
+                        numberColumnWidth: numberWidth
+                    )
                 }
             }
         }
@@ -285,6 +335,13 @@ struct CueRowView: View {
     let cue: Cue
     let role: Role
 
+    /// Shared by the rows beside this one; nil measures only this row.
+    var numberColumnWidth: CGFloat?
+
+    /// The narrowest the number column gets, so a short number does not
+    /// pull the names left.
+    static let numberPlaceholder = "000.0"
+
     @Environment(AppModel.self) private var model
 
     private var typography: Typography { Typography(preferences: model.preferences) }
@@ -323,18 +380,23 @@ struct CueRowView: View {
     }
 
     private var numberColumn: some View {
-        Text(verbatim: "000.0")
-            .font(typography.drawerNumber(size: Role.largestRowFontSize, weight: .semibold))
+        Text(cue.displayNumber ?? "–")
+            .font(typography.drawerNumber(size: role.fontSize, weight: role.weight))
             .monospacedDigit()
-            .hidden()
-            .accessibilityHidden(true)
-            .overlay(alignment: .trailingFirstTextBaseline) {
-                Text(cue.displayNumber ?? "–")
-                    .font(typography.drawerNumber(size: role.fontSize, weight: role.weight))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .fixedSize()
-            }
+            .lineLimit(1)
+            .fixedSize()
+            .frame(minWidth: resolvedNumberColumnWidth, alignment: .trailing)
+    }
+
+    private var resolvedNumberColumnWidth: CGFloat {
+        if let numberColumnWidth { return numberColumnWidth }
+        let placeholder = typography.drawerNumberWidth(
+            of: Self.numberPlaceholder, size: Role.largestRowFontSize, weight: .semibold
+        )
+        let own = cue.displayNumber.map {
+            typography.drawerNumberWidth(of: $0, size: role.fontSize, weight: role.weight)
+        } ?? 0
+        return max(placeholder, own)
     }
 
     private var accessibilityDescription: String {
@@ -378,7 +440,7 @@ struct CueIndicators: View {
             }
             if cue.isLoaded == true {
                 Image(systemName: DetailPillKind.loaded.systemImage)
-                    .foregroundStyle(.teal)
+                    .foregroundStyle(.yellow)
                     .help("Loaded to a standby point")
             }
             if cue.isFlagged == true {

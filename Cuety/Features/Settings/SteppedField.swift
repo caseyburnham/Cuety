@@ -29,21 +29,33 @@ where Value: Strideable & Comparable,
                     .textFieldStyle(.roundedBorder)
                     .monospacedDigit()
                     .multilineTextAlignment(.trailing)
-                    .frame(width: 64)
+                    .frame(width: 92)
 
-                Text(unit ?? "")
+                // An empty Text has no baseline, which pulls the row's label
+                // out of line with the field, so a missing unit is a
+                // placeholder that is never shown.
+                Text(unit ?? "s")
                     .foregroundStyle(.secondary)
                     .frame(width: 8, alignment: .leading)
+                    .opacity(unit == nil ? 0 : 1)
+                    .accessibilityHidden(unit == nil)
 
-                Stepper(title, value: $value, in: range, step: step)
-                    .labelsHidden()
-                    .opacity(showsStepper ? 1 : 0)
-                    .allowsHitTesting(showsStepper)
-                    .accessibilityHidden(!showsStepper)
+                // A hidden stepper still reserves its width, so fields without
+                // one line up with the fields that have one.
+                if showsStepper {
+                    stepper
+                } else {
+                    stepper.hidden()
+                }
             }
         } label: {
             Text(title)
         }
+    }
+
+    private var stepper: some View {
+        Stepper(title, value: $value, in: range, step: step)
+            .labelsHidden()
     }
 }
 

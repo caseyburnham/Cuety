@@ -1,4 +1,5 @@
 import Foundation
+import ShowControlCore
 
 nonisolated enum OSCRedaction {
     static let placeholder = "••••"

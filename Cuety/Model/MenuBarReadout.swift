@@ -22,7 +22,7 @@ enum MenuBarReadout: String, CaseIterable, Codable, Hashable, Sendable, Identifi
         case .cueNumber:
             "The number of the cue standing by, falling back to the connection status when there is no cue to show."
         case .connectionStatus:
-            "A glyph for the state of the QLab session."
+            "An icon for the state of the QLab session."
         case .heartbeat:
             "A heart that beats once for every heartbeat QLab answers."
         }

@@ -1,3 +1,4 @@
+import ShowControlCore
 import SwiftUI
 
 nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
@@ -126,11 +127,6 @@ final class ActivityLog {
 
     @ObservationIgnored private var counters = Counters()
 
-    /// How many views are showing the log. Nothing is retained while this is
-    /// zero: with the window closed there is nobody to read the rows, so the
-    /// cost of building and holding them buys nothing.
-    @ObservationIgnored private var viewerCount = 0
-
     private struct Counters {
         var received = 0
         var sent = 0
@@ -160,6 +156,11 @@ final class ActivityLog {
         return value
     }
 
+    /// Changes only when the retained rows do. Counters advance on every
+    /// message, paused or not, so caches of the rows key on this rather than
+    /// on ``revision``.
+    var entriesVersion: Int { trackedRevision(mutationCount) }
+
     var totalReceived: Int { trackedRevision(counters.received) }
     var totalSent: Int { trackedRevision(counters.sent) }
     var totalMalformed: Int { trackedRevision(counters.malformed) }
@@ -169,26 +170,16 @@ final class ActivityLog {
 
     var isPaused = false
 
-    /// `true` while the log is both attached to a view and not paused. The
-    /// counters advance either way, so the inspector's totals stay honest.
-    var isRetaining: Bool { viewerCount > 0 && !isPaused }
-
     init(capacity: Int = 2000, byteCapacity: Int = 2_000_000) {
         self.capacity = max(0, capacity)
         self.byteCapacity = max(0, byteCapacity)
         storage = Array(repeating: nil, count: max(0, capacity))
     }
 
-    /// Called by a view as it appears and disappears. A log nobody is showing
-    /// records nothing but keeps counting.
-    func addViewer() {
-        viewerCount += 1
-    }
-
-    func removeViewer() {
-        viewerCount = max(0, viewerCount - 1)
-    }
-
+    /// Rows are kept whether or not the Activity Log window is open, so
+    /// opening it after something goes wrong shows what led up to it. Only
+    /// pausing stops rows arriving; the counters advance either way, so the
+    /// inspector's totals stay honest.
     func record(
         direction: OSCEvent.Direction,
         byteCount: Int,
@@ -196,7 +187,7 @@ final class ActivityLog {
     ) {
         updateTotals(direction: direction, byteCount: byteCount)
         scheduleFlush()
-        guard isRetaining, capacity > 0, byteCapacity > 0 else { return }
+        guard !isPaused, capacity > 0, byteCapacity > 0 else { return }
 
         let event = event()
         let eventBytes = retainedByteCount(of: event)

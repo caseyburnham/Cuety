@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import Cuety
+import ShowControlCore
 
 @Suite("Activity log redaction")
 @MainActor
@@ -34,11 +35,10 @@ struct ActivityLogRedactionTests {
     }
 
     @Test("The recorded byte count is the packet's, not the placeholder's")
-    func byteCountDescribesTheWire() {
+    func byteCountDescribesTheWire() throws {
         let message = connectMessage()
-        let wireSize = OSCEncoder().encode(message).count
+        let wireSize = try OSCCodec.encode(message).count
         let log = ActivityLog()
-        log.addViewer()
 
         log.record(OSCEvent(message: message, direction: .outbound, byteCount: wireSize))
 
@@ -47,10 +47,31 @@ struct ActivityLogRedactionTests {
         #expect(log.entries[0].byteCount == wireSize)
     }
 
+    @Test("A bundle's bytes are counted once, however many messages it carries")
+    func bundleBytesAreCountedOnce() throws {
+        let bundle = OSCPacket.bundle(OSCBundle(elements: [
+            .message(OSCMessage("/update/workspace/W/cue_id/A")),
+            .message(OSCMessage("/update/workspace/W/cue_id/B")),
+            .message(OSCMessage("/update/workspace/W/cue_id/C")),
+        ]))
+        let packet = try OSCCodec.encode(bundle)
+        let log = ActivityLog()
+
+        for event in QLabConnection.events(forPacket: packet) {
+            guard case .received(let message, let byteCount) = event else {
+                Issue.record("The bundle should decode")
+                continue
+            }
+            log.record(OSCEvent(message: message, direction: .inbound, byteCount: byteCount))
+        }
+
+        #expect(log.totalReceived == 3)
+        #expect(log.bytesReceived == packet.count)
+    }
+
     @Test("A passcode is absent from every entry the log holds")
     func logHoldsNoPasscode() {
         let log = ActivityLog()
-        log.addViewer()
         log.record(OSCEvent(message: connectMessage(), direction: .outbound, byteCount: 44))
         log.record(OSCEvent(
             message: OSCMessage("/reply/workspace/ABC/connect", [.string(
@@ -101,7 +122,6 @@ struct ActivityLogRedactionTests {
     @Test("Paused logging skips event construction while retaining counters")
     func pausedLoggingSkipsEventConstruction() {
         let log = ActivityLog()
-        log.addViewer()
         log.isPaused = true
         var wasConstructed = false
 
@@ -127,7 +147,6 @@ struct ActivityLogRedactionTests {
         // An entry costs twice its text: once as shown, once lowercased for
         // searching. 34 bytes is room for the last two entries and no more.
         let log = ActivityLog(capacity: 3, byteCapacity: 34)
-        log.addViewer()
 
         for address in ["/one", "/two", "/three", "/four"] {
             log.record(OSCEvent(

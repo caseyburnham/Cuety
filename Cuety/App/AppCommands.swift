@@ -17,13 +17,13 @@ struct AppCommands: Commands {
 
             Toggle("Cue List Layout", isOn: Binding(
                 get: { model.preferences.cueLayout == .list },
-                set: { _ in model.toggleCueLayout() }
+                set: { model.setCueLayout($0 ? .list : .display) }
             ))
             .keyboardShortcut("l", modifiers: [.command, .option])
 
             Toggle("Cue Drawer", isOn: Binding(
                 get: { model.preferences.showsDrawer },
-                set: { _ in model.toggleDrawer() }
+                set: { model.setShowsDrawer($0) }
             ))
             .keyboardShortcut("d", modifiers: [.command, .option])
             .disabled(model.preferences.cueLayout == .list)

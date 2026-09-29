@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ConnectionSettingsView: View {
-    static let settingsHeight: CGFloat = 720
+    static let settingsHeight: CGFloat = 640
 
     @Environment(AppModel.self) private var model
 
@@ -46,8 +46,6 @@ struct ConnectionSettingsView: View {
                 Text(lastWorkspaceDescription)
                     .foregroundStyle(preferences.lastWorkspace == nil ? .tertiary : .secondary)
             }
-        } footer: {
-            Text("When enabled, Cuety looks for the workspace it last connected to at launch and reopens it; choosing a workspace yourself cancels the attempt. Otherwise Cuety connects to nothing until you pick a workspace.")
         }
     }
 
@@ -73,6 +71,7 @@ struct ConnectionSettingsView: View {
                 format: IntegerFormatStyle<Int>.number.grouping(.never),
                 showsStepper: false
             )
+            .help("The starting port when you add a server by hand. QLab uses 53000.")
 
             SteppedField(
                 title: "Heartbeat",
@@ -82,6 +81,7 @@ struct ConnectionSettingsView: View {
                     .precision(.fractionLength(0)),
                 unit: "s"
             )
+            .help("A shorter heartbeat notices a dropped connection sooner, with more traffic.")
 
             SteppedField(
                 title: "Request timeout",
@@ -91,10 +91,9 @@ struct ConnectionSettingsView: View {
                     .precision(.fractionLength(0)),
                 unit: "s"
             )
+            .help("How long Cuety waits for QLab to answer a request.")
         } header: {
             Text("Connection")
-        } footer: {
-            Text("The port is the starting value when you add a server by hand; QLab's default is 53000. The two intervals apply to the current connection — a shorter heartbeat notices a dropped link sooner at the cost of more traffic.")
         }
     }
 
@@ -106,7 +105,7 @@ struct ConnectionSettingsView: View {
             }
 
             if addedServers.isEmpty {
-                Text("No servers added by hand.")
+                Text("No custom servers added.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {
@@ -125,8 +124,6 @@ struct ConnectionSettingsView: View {
             }
         } header: {
             Text("Added Servers")
-        } footer: {
-            Text("Add servers from the sidebar or the Connection menu. This Mac and machines found on your network can't be removed.")
         }
     }
 
@@ -143,11 +140,9 @@ struct ConnectionSettingsView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(savedPasscodes, id: \.selection) { entry in
-                    LabeledContent {
-                        Button("Forget") {
-                            model.forgetPasscode(for: entry.selection)
-                        }
-                    } label: {
+                    // An HStack rather than LabeledContent, which aligns the
+                    // button to the first line of the two-line label.
+                    HStack {
                         Label {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(entry.workspaceName)
@@ -158,6 +153,12 @@ struct ConnectionSettingsView: View {
                         } icon: {
                             Image(systemName: "key.fill")
                         }
+
+                        Spacer(minLength: 12)
+
+                        Button("Forget") {
+                            model.forgetPasscode(for: entry.selection)
+                        }
                     }
                 }
             }
@@ -165,10 +166,11 @@ struct ConnectionSettingsView: View {
             Button("Forget All Passcodes…", role: .destructive) {
                 isConfirmingForgetAll = true
             }
+            .frame(maxWidth: .infinity)
         } header: {
             Text("Saved Passcodes")
         } footer: {
-            Text("Passcodes live in your Keychain, one per workspace. Only workspaces currently on the network can be listed individually.")
+            Text("Passcodes saved in Keychain.")
         }
     }
 

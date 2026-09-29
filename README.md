@@ -60,8 +60,16 @@ xcodebuild -project Cuety.xcodeproj -scheme Cuety test
 
 ### Running it on another Mac
 
-The app is currently signed ad-hoc (no Developer ID, hardened runtime off), so a build
-copied to another machine is blocked by Gatekeeper until its quarantine flag is cleared:
+Check how the build you are distributing is actually signed before copying it anywhere;
+signing follows the project's current team and configuration:
+
+```sh
+codesign -dv --verbose=4 /path/to/Cuety.app
+spctl --assess --type execute --verbose /path/to/Cuety.app
+```
+
+A build that is not Developer ID–signed and notarized is blocked by Gatekeeper on another
+machine until its quarantine flag is cleared:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/Cuety.app
@@ -81,11 +89,12 @@ discovery finding nothing.
 | `Cuety/Features` | One folder per surface — display, drawer, sidebar, settings, logs |
 | `Cuety/Model` | `AppModel`, cue graph, preferences, activity log |
 | `Cuety/Networking` | QLab session, Bonjour browser, Keychain passcode store |
-| `Cuety/OSC` | OSC encoding/decoding and SLIP framing |
-| `Cuety/System` | Display sleep blocking |
+| `Cuety/OSC` | SLIP framing (OSC wire types and codec live in `../ShowControlCore`) |
+| `Cuety/System` | Display sleep blocking, Dock badge, full-screen and pointer hiding |
 | `CuetyTests` | Protocol, session, and model tests |
 | `../SHOW_CONTROL_COMPANION_CONTRACT.md` | Shared Cuety/Viewtiful platform and transport contract |
-| `POLISH_PLAN.md` | Pre-release polish tracking — open work items live here |
+| `BACKLOG.md` | Current open work and release verification |
+| `POLISH_PLAN.md` | Archived 2026-09-27 — historical record of the September polish pass |
 
 ## Licence
 

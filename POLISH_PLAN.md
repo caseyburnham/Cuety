@@ -1,5 +1,10 @@
 # Cuety — Final Polish Plan
 
+> **Archived 2026-09-27.** Kept as dated evidence of the September polish pass only. Its
+> findings, dead-code checklist and release claims are out of date (several symbols it
+> lists are already gone, and its icon, metadata and scheme findings no longer match the
+> project). Current open work lives in [BACKLOG.md](BACKLOG.md).
+
 Tracking document for the pre-release polish pass. Derived from the source audit of
 2026-09-09.
 

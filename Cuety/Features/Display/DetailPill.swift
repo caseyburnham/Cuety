@@ -133,7 +133,7 @@ struct DetailPill: View {
                 tint: colours.pill,
                 glyphTint: colours.glyph,
                 help: cue.isGroup
-                    ? "Group cue — firing it fires the cues inside it"
+                    ? "Group Cue"
                     : "\(type) cue",
                 glyphRotation: glyphRotation(forCueType: type)
             )
@@ -152,7 +152,7 @@ struct DetailPill: View {
                 text: formatDuration(preWait),
                 systemImage: kind.systemImage,
                 tint: .orange,
-                help: "Pre-wait before this cue acts"
+                help: "Pre-wait"
             )
 
         case .postWait:
@@ -161,7 +161,7 @@ struct DetailPill: View {
                 text: formatDuration(postWait),
                 systemImage: kind.systemImage,
                 tint: .orange,
-                help: "Post-wait before the next cue"
+                help: "Post-wait"
             )
 
         case .continueMode:
@@ -188,7 +188,7 @@ struct DetailPill: View {
                 text: "Broken",
                 systemImage: kind.systemImage,
                 tint: .red,
-                help: "QLab cannot fire this cue — check its file, patch, or target"
+                help: "Broken Cue"
             )
 
         case .armed:
@@ -206,7 +206,7 @@ struct DetailPill: View {
             return Content(
                 text: "Loaded",
                 systemImage: kind.systemImage,
-                tint: .teal,
+                tint: .yellow,
                 help: "QLab has loaded this cue"
             )
 
@@ -243,7 +243,7 @@ struct DetailPill: View {
         case "titles", "text": "textformat"
         case "light": "lightbulb"
         case "group": "square.stack.3d.up"
-        case "fade": "slider.horizontal.below.rectangle"
+        case "fade": "beziercurve"
         case "wait": "hourglass"
         case "start", "go": "play.circle"
         case "stop", "hard stop": "stop.circle"
@@ -433,8 +433,7 @@ struct DetailPillsRow: View {
     }
 
     private func pillStack(_ entries: [DetailPill.Entry]) -> some View {
-        // The notes pill sits on its own row below the rest, so split the
-        // entries in a single pass rather than filtering and searching twice.
+        // Notes sit on a row of their own below the other pills.
         var inlineEntries: [DetailPill.Entry] = []
         inlineEntries.reserveCapacity(entries.count)
         var noteEntry: DetailPill.Entry?

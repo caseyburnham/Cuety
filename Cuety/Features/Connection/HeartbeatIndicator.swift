@@ -33,19 +33,16 @@ extension QLabClient {
 
     var heartbeatSummary: String {
         guard status.hasLiveData else { return "Not receiving heartbeats from QLab." }
-        var text = "Receiving heartbeats from QLab."
+        guard heartbeatCount > 0 else { return "Waiting for QLab’s first heartbeat." }
 
-        guard heartbeatCount > 0 else {
-            return text + " Waiting for the first heartbeat from QLab."
-        }
-
-        text += " \(heartbeatCount.formatted()) heartbeats"
-        if let round = lastRoundTrip {
-            text += ", last round trip \((round * 1000).formatted(.number.precision(.fractionLength(1)))) ms"
+        var lines = ["Receiving heartbeats from QLab: \(heartbeatCount.formatted()) so far."]
+        if let roundTrip = lastRoundTrip {
+            let milliseconds = (roundTrip * 1000).formatted(.number.precision(.fractionLength(1)))
+            lines.append("Last heartbeat: \(milliseconds) ms round trip.")
         }
         if missedThumps > 0 {
-            text += ", \(missedThumps) missed"
+            lines.append("Missed in a row: \(missedThumps).")
         }
-        return text + "."
+        return lines.joined(separator: " ")
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import ShowControlCore
 
 nonisolated enum QLabReplyStatus: Hashable, Sendable {
     case ok
@@ -80,12 +81,12 @@ nonisolated enum QLabAccessLevel: Hashable, Sendable {
 
 
 nonisolated enum QLabReplyParser {
-    enum Failure: Error, CustomStringConvertible {
+    nonisolated enum Failure: LocalizedError {
         case notAReply(address: String)
         case missingJSONArgument(address: String)
         case malformedJSON(address: String, underlying: String)
 
-        var description: String {
+        var errorDescription: String? {
             switch self {
             case .notAReply(let address):
                 "Message at \(address) is not a QLab reply."
@@ -121,7 +122,7 @@ nonisolated enum QLabReplyParser {
         } catch {
             throw Failure.malformedJSON(
                 address: message.address,
-                underlying: error.operatorDescription
+                underlying: error.localizedDescription
             )
         }
     }

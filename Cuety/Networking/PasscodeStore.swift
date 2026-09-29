@@ -24,15 +24,15 @@ nonisolated extension PasscodeStoring {
 }
 
 nonisolated struct PasscodeStore: PasscodeStoring {
-    private let logger = Logger(subsystem: "com.ivxx.Cuety", category: "PasscodeStore")
+    private let logger = Logger(subsystem: "org.arvadacenter.Cuety", category: "PasscodeStore")
 
     private static let service = "Cuety QLab Passcodes"
     private static let legacyService = "com.ivxx.Cuety.qlab-passcode"
 
-    enum Failure: Error, CustomStringConvertible {
+    nonisolated enum Failure: LocalizedError {
         case keychain(OSStatus)
 
-        var description: String {
+        var errorDescription: String? {
             switch self {
             case .keychain(let status):
                 let message = SecCopyErrorMessageString(status, nil) as String?

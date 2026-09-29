@@ -2,6 +2,16 @@ import Foundation
 import Testing
 
 @testable import Cuety
+import ShowControlCore
+
+extension SLIPCodec {
+    /// Decodes a whole buffer with a fresh decoder, for tests that do not
+    /// care how the bytes would have arrived.
+    static func decodeAll(_ data: Data, maximumFrameSize: Int = 8 * 1024 * 1024) throws -> [Data] {
+        var decoder = Decoder(maximumFrameSize: maximumFrameSize)
+        return try decoder.decode(data)
+    }
+}
 
 @Suite("SLIP framing")
 struct SLIPCodecTests {
@@ -76,11 +86,11 @@ struct SLIPCodecTests {
     @Test("Round-trips a real OSC packet")
     func roundTripsOSCPacket() throws {
         let message = OSCMessage("/workspace/ABC/thump", [.string("thump")])
-        let packet = OSCEncoder().encode(message)
+        let packet = try OSCCodec.encode(message)
 
         let frames = try SLIPCodec.decodeAll(SLIPCodec.encode(packet))
         let frame = try #require(frames.first)
-        #expect(try OSCDecoder().decode(frame) == .message(message))
+        #expect(try OSCCodec.decode(frame) == .message(message))
     }
 
 
@@ -231,7 +241,7 @@ struct SLIPCodecTests {
             _ = try decoder.decode(Data(repeating: 0x41, count: 32))
         }
         #expect(error == .frameTooLarge(bytesBuffered: 17, limit: 16))
-        #expect(!error.description.isEmpty)
+        #expect(error.localizedDescription.contains("16-byte limit"))
     }
 
     @Test("Resets after the cap trips")

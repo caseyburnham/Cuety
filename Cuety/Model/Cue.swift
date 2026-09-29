@@ -4,9 +4,7 @@ nonisolated struct QLabWorkspaceInfo: Decodable, Hashable, Sendable, Identifiabl
     let uniqueID: String
     let displayName: String
     let port: Int?
-    let udpReplyPort: Int?
     let version: String?
-    let hasPasscode: Bool?
 
     var id: String { uniqueID }
 
@@ -14,9 +12,7 @@ nonisolated struct QLabWorkspaceInfo: Decodable, Hashable, Sendable, Identifiabl
         case uniqueID
         case displayName
         case port
-        case udpReplyPort
         case version
-        case hasPasscode
     }
 }
 
@@ -56,6 +52,14 @@ nonisolated struct Cue: Hashable, Sendable, Identifiable {
     }
 
     var isGroup: Bool { !children.isEmpty || type?.caseInsensitiveCompare("group") == .orderedSame }
+
+    /// A top-level cue cart. `/cueLists` returns carts alongside cue lists,
+    /// but a cart has no playhead, so QLab rejects `playbackPositionID` for it.
+    var isCueCart: Bool {
+        guard let type else { return false }
+        return type.caseInsensitiveCompare("cart") == .orderedSame
+            || type.caseInsensitiveCompare("cue cart") == .orderedSame
+    }
 
     var displayNumber: String? {
         guard let number, !number.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
@@ -136,18 +140,18 @@ nonisolated struct QLabCueValues: Decodable, Sendable {
 }
 
 nonisolated extension Cue {
-    /// The values only `/valuesForKeys` can supply. Everything else a reply
-    /// can carry also arrives with `/cueLists`, where it is fresher, so this
-    /// deliberately omits those and never overwrites them with older data.
-    var detailValues: QLabCueValues {
+    /// The retained `/valuesForKeys` details that `incoming` left empty.
+    /// Identity fields always arrive with `/cueLists`, and any detail that
+    /// reply did supply is fresher, so neither is overwritten with older data.
+    func detailValues(missingFrom incoming: Cue) -> QLabCueValues {
         QLabCueValues(
-            notes: notes,
-            duration: duration,
-            preWait: preWait,
-            postWait: postWait,
-            continueMode: continueMode?.rawValue,
-            isBroken: isBroken,
-            isLoaded: isLoaded
+            notes: incoming.notes == nil ? notes : nil,
+            duration: incoming.duration == nil ? duration : nil,
+            preWait: incoming.preWait == nil ? preWait : nil,
+            postWait: incoming.postWait == nil ? postWait : nil,
+            continueMode: incoming.continueMode == nil ? continueMode?.rawValue : nil,
+            isBroken: incoming.isBroken == nil ? isBroken : nil,
+            isLoaded: incoming.isLoaded == nil ? isLoaded : nil
         )
     }
 
@@ -218,17 +222,62 @@ nonisolated extension Cue {
 }
 
 nonisolated extension Array<Cue> {
+    /// Applies a whole batch of replies in one traversal, rather than one
+    /// search of the tree per cue. Returns the IDs whose values changed.
     @discardableResult
-    mutating func applyValues(_ values: QLabCueValues, toCueWithID cueID: String) -> Bool {
-        for index in indices {
-            if self[index].uniqueID == cueID {
-                return self[index].apply(values)
-            }
-            if self[index].children.applyValues(values, toCueWithID: cueID) {
-                return true
+    mutating func applyValues(_ valuesByID: [String: QLabCueValues]) -> Set<String> {
+        var changed = Set<String>()
+        guard !valuesByID.isEmpty else { return changed }
+
+        func visit(_ cues: inout [Cue]) {
+            for index in cues.indices {
+                if let values = valuesByID[cues[index].uniqueID],
+                   cues[index].apply(values) {
+                    changed.insert(cues[index].uniqueID)
+                }
+                visit(&cues[index].children)
             }
         }
-        return false
+
+        visit(&self)
+        return changed
+    }
+
+    /// Every cue among `ids`, gathered in one traversal.
+    func cues(withIDs ids: Set<String>) -> [String: Cue] {
+        var found: [String: Cue] = [:]
+        guard !ids.isEmpty else { return found }
+
+        func visit(_ cues: [Cue]) {
+            for cue in cues {
+                if ids.contains(cue.uniqueID) { found[cue.uniqueID] = cue }
+                visit(cue.children)
+            }
+        }
+
+        visit(self)
+        return found
+    }
+
+    /// Carries retained details from `previous` onto the matching cues of
+    /// this freshly fetched tree in one traversal, never overwriting a value
+    /// the new reply supplied. Returns the IDs that were still present.
+    mutating func carryDetails(from previous: [String: Cue]) -> Set<String> {
+        var carried = Set<String>()
+        guard !previous.isEmpty else { return carried }
+
+        func visit(_ cues: inout [Cue]) {
+            for index in cues.indices {
+                if let old = previous[cues[index].uniqueID] {
+                    cues[index].apply(old.detailValues(missingFrom: cues[index]))
+                    carried.insert(cues[index].uniqueID)
+                }
+                visit(&cues[index].children)
+            }
+        }
+
+        visit(&self)
+        return carried
     }
 
     func firstCue(withID cueID: String) -> Cue? {

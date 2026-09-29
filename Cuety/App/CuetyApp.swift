@@ -11,6 +11,9 @@ enum WindowID: String {
 struct CuetyApp: App {
     @State private var model = AppModel()
 
+    /// The aggregate phase of every scene, rather than one window's.
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some Scene {
 #if os(macOS)
         Window("Cuety", id: WindowID.main.rawValue) {
@@ -20,6 +23,9 @@ struct CuetyApp: App {
         }
         .defaultSize(width: 900, height: 560)
         .keyboardShortcut("0", modifiers: .command)
+        .onChange(of: scenePhase) { _, phase in
+            model.updateScenePhase(phase)
+        }
         .commands {
             AppCommands(model: model)
         }
@@ -60,7 +66,9 @@ struct CuetyApp: App {
                 .environment(model)
                 .preferredColorScheme(model.preferences.appearance.colorScheme)
         }
-
+        .onChange(of: scenePhase) { _, phase in
+            model.updateScenePhase(phase)
+        }
 #endif
     }
 }

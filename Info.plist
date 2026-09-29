@@ -6,5 +6,9 @@
 	<array>
 		<string>_qlab._tcp</string>
 	</array>
+	<key>NSHumanReadableCopyright</key>
+	<string>Cuety © 2026 ACAH
+QLab © 2005-2026 Figure 53, LLC.
+All rights reserved.</string>
 </dict>
 </plist>

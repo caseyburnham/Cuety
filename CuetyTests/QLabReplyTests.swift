@@ -1,7 +1,9 @@
 import Foundation
+import Security
 import Testing
 
 @testable import Cuety
+import ShowControlCore
 
 @Suite("QLab replies")
 struct QLabReplyTests {
@@ -286,8 +288,8 @@ struct QLabReplyTests {
             return [list]
         }()
 
-        let didMerge = lists.applyValues(values, toCueWithID: "cue-2")
-        #expect(didMerge)
+        let changed = lists.applyValues(["cue-2": values])
+        #expect(changed == ["cue-2"])
 
         let merged = lists.firstCue(withID: "cue-2")
         let updated = try #require(merged)
@@ -303,8 +305,8 @@ struct QLabReplyTests {
         let values = QLabCueValues(
             notes: nil, duration: 1, preWait: nil, postWait: nil, continueMode: nil
         )
-        let didMerge = lists.applyValues(values, toCueWithID: "nope")
-        #expect(!didMerge)
+        let changed = lists.applyValues(["nope": values])
+        #expect(changed.isEmpty)
     }
 
 
@@ -368,6 +370,26 @@ struct QLabReplyTests {
         let error = try #require(throws: QLabReplyParser.Failure.self) {
             _ = try QLabReplyParser.parse(message, as: [QLabWorkspaceInfo].self)
         }
-        #expect(!error.description.isEmpty)
+        #expect(error.localizedDescription.contains("/workspaces"))
+    }
+
+    @Test(
+        "Owned errors describe themselves in operator terms",
+        arguments: [
+            QLabConnection.ConnectFailure.timedOut as any Error,
+            QLabConnection.ConnectFailure.cancelled,
+            QLabConnection.SendFailure.notConnected,
+            QLabClient.RequestFailure.timedOut(address: "/thump"),
+            QLabClient.RequestFailure.passcodeRejected,
+            QLabReplyParser.Failure.notAReply(address: "/x"),
+            PasscodeStore.Failure.keychain(errSecAuthFailed),
+            SLIPFramingError.frameTooLarge(bytesBuffered: 17, limit: 16),
+            OSCDecodingError.invalidUTF8(offset: 4),
+        ]
+    )
+    func ownedErrorsAreLocalized(_ error: any Error) {
+        #expect(error is any LocalizedError)
+        #expect(!error.localizedDescription.contains("couldn’t be completed"))
+        #expect(!error.localizedDescription.contains("couldn't be completed"))
     }
 }

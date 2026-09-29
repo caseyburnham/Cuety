@@ -162,8 +162,8 @@ final class StatusToolbarController: NSObject, NSToolbarDelegate {
         .space,
         .cuetyPerformanceMode,
         .space,
-        .cuetyActivityLog,
         .cuetyConnectionStatus,
+        .cuetyActivityLog,
     ]
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -221,7 +221,7 @@ final class StatusToolbarController: NSObject, NSToolbarDelegate {
                 action: #selector(togglePerformanceMode)
             )
             button.setButtonType(.pushOnPushOff)
-            button.setAccessibilityHelp("Disables expensive pill effects for lower CPU usage")
+            button.setAccessibilityHelp("Reduces display animations and effects")
             if flag { performanceModeButton = button }
             return item
 

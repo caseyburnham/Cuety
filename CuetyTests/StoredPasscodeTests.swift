@@ -19,7 +19,7 @@ struct StoredPasscodeTests {
         server.workspaces = [
             QLabWorkspaceInfo(
                 uniqueID: "W", displayName: "Act One",
-                port: nil, udpReplyPort: nil, version: nil, hasPasscode: nil
+                port: nil, version: nil
             ),
         ]
         model.browser.update(server)
@@ -95,7 +95,7 @@ struct StoredPasscodeTests {
         model.forgetPasscode(for: target)
 
         let error = try #require(model.credentialError)
-        #expect(error.reason == PasscodeStore.Failure.keychain(errSecAuthFailed).description)
+        #expect(error.reason == PasscodeStore.Failure.keychain(errSecAuthFailed).localizedDescription)
         #expect(!error.reason.contains("couldn't be completed"))
     }
 

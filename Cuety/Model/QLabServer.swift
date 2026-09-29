@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import ShowControlCore
 
 nonisolated struct QLabServer: Identifiable, Hashable, Sendable {
     enum Source: Hashable, Sendable {
@@ -20,19 +21,24 @@ nonisolated struct QLabServer: Identifiable, Hashable, Sendable {
         return "\(host):\(port.rawValue)"
     }
 
-    static let defaultPort: UInt16 = 53000
+    static let defaultPort = UInt16(ShowControlDefaults.qlabTCPPort)
 
+    private static func endpointPort(_ port: UInt16) -> NWEndpoint.Port {
+        NWEndpoint.Port(rawValue: port) ?? NWEndpoint.Port(rawValue: defaultPort) ?? .any
+    }
+
+    /// QLab on the machine Cuety itself runs on. Only a Mac can run QLab, so
+    /// the browser lists this automatically on macOS alone.
     static func localhost(port: UInt16 = QLabServer.defaultPort) -> QLabServer {
         QLabServer(
             id: identity(host: "127.0.0.1", port: port),
             name: "This Mac",
             source: .manual,
-            endpoint: .hostPort(
-                host: "127.0.0.1",
-                port: NWEndpoint.Port(rawValue: port) ?? .init(integerLiteral: 53000)
-            )
+            endpoint: .hostPort(host: "127.0.0.1", port: endpointPort(port))
         )
     }
+
+    var isLocalhost: Bool { id == Self.localhost().id }
 
     static func manual(host: String, port: UInt16) -> QLabServer {
         let typed = host.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -40,10 +46,7 @@ nonisolated struct QLabServer: Identifiable, Hashable, Sendable {
             id: identity(host: typed, port: port),
             name: typed,
             source: .manual,
-            endpoint: .hostPort(
-                host: NWEndpoint.Host(typed),
-                port: NWEndpoint.Port(rawValue: port) ?? .init(integerLiteral: 53000)
-            )
+            endpoint: .hostPort(host: NWEndpoint.Host(typed), port: endpointPort(port))
         )
     }
 

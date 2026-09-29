@@ -8,9 +8,9 @@ import ShowControlCore
 @Observable
 @MainActor
 final class QLabBrowser {
-    private let logger = Logger(subsystem: "com.ivxx.Cuety", category: "QLabBrowser")
+    private let logger = Logger(subsystem: "org.arvadacenter.Cuety", category: "QLabBrowser")
     private static let persistenceLogger = Logger(
-        subsystem: "com.ivxx.Cuety",
+        subsystem: "org.arvadacenter.Cuety",
         category: "QLabBrowser.Persistence"
     )
 
@@ -30,7 +30,17 @@ final class QLabBrowser {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        servers = [QLabServer.localhost()] + Self.loadManualServers(from: defaults)
+        servers = Self.automaticServers + Self.loadManualServers(from: defaults)
+    }
+
+    /// Servers listed without being discovered or added. An iPad cannot run
+    /// QLab, so it has no local server to list or probe.
+    private static var automaticServers: [QLabServer] {
+#if os(macOS)
+        [QLabServer.localhost()]
+#else
+        []
+#endif
     }
 
     func start() {
@@ -92,11 +102,11 @@ final class QLabBrowser {
         case .ready:
             browseError = nil
         case .failed(let error):
-            logger.error("Browse failed: \(error.operatorDescription, privacy: .public)")
-            browseError = error.operatorDescription
+            logger.error("Browse failed: \(error.localizedDescription, privacy: .public)")
+            browseError = error.localizedDescription
             stop()
         case .waiting(let error):
-            browseError = error.operatorDescription
+            browseError = error.localizedDescription
         default:
             break
         }

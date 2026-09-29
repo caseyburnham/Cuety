@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import os
+import ShowControlCore
 
 /// `NWConnection` callbacks arrive on its queue; the actor isolates connection state.
 
@@ -14,9 +15,11 @@ actor QLabConnection {
     }
 
     private let endpoint: NWEndpoint
-    private let logger = Logger(subsystem: "com.ivxx.Cuety", category: "QLabConnection")
-    private let encoder = OSCEncoder()
-    private let decoder = OSCDecoder()
+    private let logger = Logger(subsystem: "org.arvadacenter.Cuety", category: "QLabConnection")
+
+    /// QLab replies can carry a whole workspace of JSON, so a packet may use
+    /// the full SLIP frame; the remaining budgets keep the defaults.
+    static let decodingLimits = OSCCodec.Limits(maxPacketBytes: SLIPFramer.maximumFrameSize)
 
     private var connection: NWConnection?
     private var continuation: AsyncStream<Event>.Continuation?
@@ -95,11 +98,11 @@ actor QLabConnection {
     }
 
 
-    enum ConnectFailure: Error, CustomStringConvertible {
+    nonisolated enum ConnectFailure: LocalizedError {
         case timedOut
         case cancelled
 
-        var description: String {
+        var errorDescription: String? {
             switch self {
             case .timedOut: "QLab did not answer. It may have quit or moved."
             case .cancelled: "The connection was closed before it was ready."
@@ -142,7 +145,7 @@ actor QLabConnection {
             throw SendFailure.notConnected
         }
 
-        let packet = encoder.encode(message)
+        let packet = try OSCCodec.encode(message)
 
         try await withCheckedThrowingContinuation { (resume: CheckedContinuation<Void, any Error>) in
             connection.send(
@@ -160,14 +163,14 @@ actor QLabConnection {
         return packet.count
     }
 
-    enum SendFailure: Error, CustomStringConvertible {
+    nonisolated enum SendFailure: LocalizedError {
         case notConnected
         case transport(NWError)
 
-        var description: String {
+        var errorDescription: String? {
             switch self {
             case .notConnected: "Not connected to QLab."
-            case .transport(let error): "Send failed: \(error.operatorDescription)"
+            case .transport(let error): "Send failed: \(error.localizedDescription)"
             }
         }
     }
@@ -203,16 +206,25 @@ actor QLabConnection {
     }
 
     private func handleReceived(_ data: Data) {
-        do {
-            let packet = try decoder.decode(data)
-            for message in packet.flattenedMessages {
-                yield(.received(message, byteCount: data.count))
+        for event in Self.events(forPacket: data) {
+            if case .receiveFailed(let error, _) = event {
+                logger.warning("Dropped malformed OSC packet: \(error.description, privacy: .public)")
             }
-        } catch let error as OSCDecodingError {
-            logger.warning("Dropped malformed OSC packet: \(error.description, privacy: .public)")
-            yield(.receiveFailed(error, byteCount: data.count))
+            yield(event)
+        }
+    }
+
+    /// One event per message a packet carries. A bundle's wire bytes are
+    /// counted once, against its first message, so traffic totals match what
+    /// crossed the network however many messages the bundle held.
+    static func events(forPacket data: Data) -> [Event] {
+        do {
+            let packet = try OSCCodec.decode(data, limits: decodingLimits)
+            return packet.flattenedMessages.enumerated().map { index, message in
+                .received(message, byteCount: index == 0 ? data.count : 0)
+            }
         } catch {
-            logger.warning("Dropped unparseable OSC packet: \(error.operatorDescription, privacy: .public)")
+            return [.receiveFailed(error, byteCount: data.count)]
         }
     }
 
@@ -223,7 +235,7 @@ actor QLabConnection {
             if let connection { receiveNextMessage(on: connection) }
             resolveReadiness(.success(()))
         case .failed(let error):
-            logger.error("Connection failed: \(error.operatorDescription, privacy: .public)")
+            logger.error("Connection failed: \(error.localizedDescription, privacy: .public)")
             resolveReadiness(.failure(error))
         case .cancelled:
             resolveReadiness(.failure(ConnectFailure.cancelled))

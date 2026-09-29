@@ -62,7 +62,7 @@ struct ConnectionInspectorView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     if model.isDataStale {
-                        Label("Data may be stale until the next foreground refresh", systemImage: "clock.badge.exclamationmark")
+                        Label("Data may be stale", systemImage: "clock.badge.exclamationmark")
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
@@ -105,21 +105,40 @@ struct ConnectionInspectorView: View {
                     LabeledContent("Listening Port", value: String(port))
                 }
             }
-            LabeledContent("Passcode") {
-                Label(
-                    client.usedPasscode ? "In use" : "Not required",
-                    systemImage: client.usedPasscode ? "lock.fill" : "lock.open"
-                )
-                .foregroundStyle(client.usedPasscode ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace.magic(fallback: .downUp)))
-                .motion(Motion.status, value: client.usedPasscode)
+            VStack(spacing: 0) {
+                sessionRow("Passcode") {
+                    Label(
+                        client.usedPasscode ? "In use" : "Not required",
+                        systemImage: client.usedPasscode ? "lock.fill" : "lock.open"
+                    )
+                    .foregroundStyle(client.usedPasscode ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                    .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace.magic(fallback: .downUp)))
+                    .motion(Motion.status, value: client.usedPasscode)
+                }
+                .padding(.vertical, 4)
+
+                Divider()
+                    .padding(.vertical, 4)
+
+                sessionRow("Access") {
+                    Text(client.accessLevel.title)
+                }
+                .padding(.vertical, 4)
             }
-            LabeledContent("Access", value: client.accessLevel.title)
-            LabeledContent(
-                "Update Subscription",
-                value: client.isSubscribedToUpdates ? "Active" : "Inactive"
-            )
+            .frame(maxWidth: .infinity)
         }
+    }
+
+    private func sessionRow<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+            Spacer(minLength: 12)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var qlabSection: some View {
@@ -200,10 +219,11 @@ struct ConnectionInspectorView: View {
                         .foregroundStyle(.orange)
                 }
                 .help("""
-                QLab answered these after Cuety had stopped waiting, so they \
-                were discarded rather than mistaken for the answer to a later \
-                request. A rising count means the request timeout is shorter \
-                than this QLab needs.
+                QLab answered these after Cuety had stopped waiting. QLab \
+                replies name only the request, so when a later request asks \
+                the same thing, either answer may be the one Cuety uses; cue \
+                details are asked for again to confirm. A rising count means \
+                the request timeout is shorter than this QLab needs.
                 """)
             }
         }

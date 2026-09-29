@@ -4,10 +4,6 @@ struct WorkspaceSidebar: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-#if os(iOS)
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-#endif
-
     @State private var isConnecting = false
 
     /// Workspaces the operator has collapsed. A connected workspace shows its
@@ -53,30 +49,21 @@ struct WorkspaceSidebar: View {
 #if os(iOS)
         .navigationTitle("Workspaces")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    Task { await model.refresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(!model.canRefresh)
+                .accessibilityLabel("Refresh")
+
                 Button("Add Server", systemImage: "plus") {
                     model.isAddingServer = true
                 }
                 .accessibilityHint("Add a QLab server by host name or address")
             }
-            // Only a collapsed split view strands the operator here. At regular
-            // widths the display is already on screen beside the sidebar and the
-            // split view supplies its own toggle.
-            if horizontalSizeClass == .compact {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        model.isSidebarVisible = false
-                    } label: {
-                        Image(systemName: "rectangle.rightthird.inset.filled")
-                    }
-                    .accessibilityLabel("Show Cue Display")
-                }
-            }
         }
-        // At regular widths the cue display beside the sidebar carries the
-        // status controls. The floating display stays for portrait, where
-        // the sidebar slides over and hides the cue display.
-        .compactToolbarActions(showsStatusActions: horizontalSizeClass == .compact)
 #endif
     }
 
@@ -114,13 +101,7 @@ struct WorkspaceSidebar: View {
         }
     }
 
-#if os(iOS)
-    private var visibleServers: [QLabServer] {
-        model.browser.orderedServers.filter { $0.name != "This Mac" }
-    }
-#else
     private var visibleServers: [QLabServer] { model.browser.orderedServers }
-#endif
 
     private var sidebarSelection: Binding<Selection?> {
         Binding {
@@ -162,7 +143,11 @@ struct WorkspaceSidebar: View {
         if model.selection == selection && model.client.status.hasLiveData {
             DisclosureGroup(isExpanded: isExpanded(selection)) {
                 ForEach(model.client.cueLists) { list in
-                    cueListRow(list)
+                    if list.isCueCart {
+                        cueCartRow(list)
+                    } else {
+                        cueListRow(list)
+                    }
                 }
                 if model.client.cueLists.isEmpty {
                     Text("No Cue Lists")
@@ -220,12 +205,12 @@ struct WorkspaceSidebar: View {
                 }
             }
         } icon: {
-            Image(systemName: "list.bullet.below.rectangle")
+            Image(systemName: "play.display")
         }
         .tag(Selection.workspace(selection))
         .help(workspace.displayName)
         .accessibilityHint(
-            isCurrent ? "The connected workspace" : "Double-click to connect to this workspace"
+            isCurrent ? "The connected workspace" : "Connect to this workspace"
         )
     }
 
@@ -306,11 +291,26 @@ struct WorkspaceSidebar: View {
                     .accessibilityLabel(description)
             }
         } icon: {
-            Image(systemName: "list.triangle")
+            Image(systemName: "text.line.first.and.arrowtriangle.forward")
         }
         .tag(Selection.cueList(list.uniqueID))
         .help(list.displayName ?? "Untitled Cue List")
         .accessibilityHint("Watches this cue list's playhead")
+    }
+
+    /// A cart has no playhead, so there is nothing to stand by and the row
+    /// is shown for completeness but cannot be watched.
+    private func cueCartRow(_ cart: Cue) -> some View {
+        Label {
+            Text(cart.displayName ?? "Untitled Cue Cart")
+                .lineLimit(1)
+        } icon: {
+            Image(systemName: "square.grid.3x3")
+        }
+        .foregroundStyle(.secondary)
+        .selectionDisabled()
+        .help("Cue carts have no playhead to watch")
+        .accessibilityHint("A cue cart. Cue carts have no playhead to watch.")
     }
 
     private func probeWorkspaces(on server: QLabServer) {

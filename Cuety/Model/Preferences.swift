@@ -105,7 +105,7 @@ enum CueLayout: String, CaseIterable, Codable, Hashable, Sendable, Identifiable 
     var systemImage: String {
         switch self {
         case .display: "rectangle.bottomhalf.inset.filled"
-        case .list: "list.triangle"
+        case .list: "text.line.first.and.arrowtriangle.forward"
         }
     }
 }
@@ -170,6 +170,27 @@ enum PillSize: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     var glassSpacing: CGFloat { spacing + 4 }
 }
 
+/// How the standby display sizes the cue number.
+enum CueNumberSizing: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+    /// Sized to fit the widest number in the cue list, so every cue in the
+    /// list is drawn at the same size.
+    case fixed
+    /// A point size the user chooses, shrunk only when it would not fit.
+    case custom
+    /// Each number as large as it can be drawn in the space available.
+    case dynamic
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .fixed: "Fixed"
+        case .custom: "Custom"
+        case .dynamic: "As Large as Possible"
+        }
+    }
+}
+
 enum PlayheadAccent: String, Codable, Hashable, Sendable, Identifiable {
     case systemBlue
     case standbyCue
@@ -227,6 +248,7 @@ final class Preferences {
         static let heartbeatInterval = 1.0...60.0
         static let requestTimeout = 1.0...60.0
         static let drawerRows = 1...10
+        static let cueNumberSize = 24.0...Double(Typography.cueNumberBaseSize)
     }
 
     let defaults: UserDefaults
@@ -236,6 +258,7 @@ final class Preferences {
     private var storedDefaultPort: Int
     private var storedHeartbeatInterval: TimeInterval
     private var storedRequestTimeout: TimeInterval
+    private var storedCustomCueNumberSize: Double
 
 
     var appearance: AppearanceMode {
@@ -248,6 +271,19 @@ final class Preferences {
 
     var fontWeight: FontWeightChoice {
         didSet { defaults.set(fontWeight.rawValue, forKey: Key.fontWeight) }
+    }
+
+    var cueNumberSizing: CueNumberSizing {
+        didSet { defaults.set(cueNumberSizing.rawValue, forKey: Key.cueNumberSizing) }
+    }
+
+    /// The point size used when `cueNumberSizing` is `.custom`.
+    var customCueNumberSize: Double {
+        get { storedCustomCueNumberSize }
+        set {
+            storedCustomCueNumberSize = Limits.cueNumberSize.clamping(newValue)
+            defaults.set(storedCustomCueNumberSize, forKey: Key.customCueNumberSize)
+        }
     }
 
 
@@ -279,10 +315,6 @@ final class Preferences {
     }
 
 
-    var pillOrder: [DetailPillKind] {
-        didSet { persistPillOrder() }
-    }
-
     var enabledPills: Set<DetailPillKind> {
         didSet { persistEnabledPills() }
     }
@@ -296,7 +328,7 @@ final class Preferences {
     }
 
     var visiblePills: [DetailPillKind] {
-        pillOrder.filter { enabledPills.contains($0) || $0.isAlwaysVisible }
+        DetailPillKind.defaultOrder.filter { enabledPills.contains($0) || $0.isAlwaysVisible }
     }
 
 
@@ -363,9 +395,14 @@ final class Preferences {
 
         appearance = defaults.string(forKey: Key.appearance)
             .flatMap(AppearanceMode.init(rawValue:)) ?? .automatic
-        usesRoundedSystemFont = defaults.bool(forKey: Key.usesRoundedSystemFont)
+        usesRoundedSystemFont = defaults.object(forKey: Key.usesRoundedSystemFont) as? Bool ?? true
         fontWeight = defaults.string(forKey: Key.fontWeight)
             .flatMap(FontWeightChoice.init(rawValue:)) ?? .bold
+        cueNumberSizing = defaults.string(forKey: Key.cueNumberSizing)
+            .flatMap(CueNumberSizing.init(rawValue:)) ?? .fixed
+        storedCustomCueNumberSize = Limits.cueNumberSize.clamping(
+            defaults.object(forKey: Key.customCueNumberSize) as? Double ?? 240
+        )
 
         showsCueName = defaults.object(forKey: Key.showsCueName) as? Bool ?? true
         playheadAccent = defaults.string(forKey: Key.playheadAccent)
@@ -377,10 +414,7 @@ final class Preferences {
             defaults.object(forKey: Key.drawerRowCount) as? Int ?? 3
         )
 
-        pillOrder = Self.loadPillOrder(from: defaults)
-        enabledPills = Self.loadEnabledPills(
-            from: defaults, known: Self.storedPillOrder(from: defaults)
-        )
+        enabledPills = Self.loadEnabledPills(from: defaults)
         pillSize = defaults.string(forKey: Key.pillSize)
             .flatMap(PillSize.init(rawValue:)) ?? .default
         showsCueTypeLabel = defaults.object(forKey: Key.showsCueTypeLabel) as? Bool ?? true
@@ -413,37 +447,12 @@ final class Preferences {
     }
 
 
-    /// The pills this install has seen, in the order it last saved. A pill
-    /// missing from here is one added since, not one the operator moved.
-    private static func storedPillOrder(from defaults: UserDefaults) -> [DetailPillKind] {
-        (defaults.array(forKey: Key.pillOrder) as? [String] ?? [])
-            .compactMap(DetailPillKind.init(rawValue:))
-    }
-
-    private static func loadPillOrder(from defaults: UserDefaults) -> [DetailPillKind] {
-        let stored = storedPillOrder(from: defaults)
-        let missing = DetailPillKind.defaultOrder.filter { !stored.contains($0) }
-        return stored.isEmpty ? DetailPillKind.defaultOrder : stored + missing
-    }
-
-    private static func loadEnabledPills(
-        from defaults: UserDefaults, known: [DetailPillKind]
-    ) -> Set<DetailPillKind> {
+    private static func loadEnabledPills(from defaults: UserDefaults) -> Set<DetailPillKind> {
         guard let stored = defaults.array(forKey: Key.enabledPills) as? [String] else {
             return DetailPillKind.defaultEnabled
         }
 
-        var enabled = Set(stored.compactMap(DetailPillKind.init(rawValue:)))
-        // A pill this install has never offered cannot have been switched
-        // off, so it arrives at its default rather than silently absent.
-        for kind in DetailPillKind.defaultEnabled where !known.contains(kind) {
-            enabled.insert(kind)
-        }
-        return enabled
-    }
-
-    private func persistPillOrder() {
-        defaults.set(pillOrder.map(\.rawValue), forKey: Key.pillOrder)
+        return Set(stored.compactMap(DetailPillKind.init(rawValue:)))
     }
 
     private func persistEnabledPills() {
@@ -455,12 +464,13 @@ final class Preferences {
         static let appearance = "appearance"
         static let usesRoundedSystemFont = "usesRoundedSystemFont"
         static let fontWeight = "fontWeight"
+        static let cueNumberSizing = "cueNumberSizing"
+        static let customCueNumberSize = "customCueNumberSize"
         static let showsCueName = "showsCueName"
         static let playheadAccent = "playheadAccent"
         static let cueLayout = "cueLayout"
         static let showsDrawer = "showsDrawer"
         static let drawerRowCount = "drawerRowCount"
-        static let pillOrder = "pillOrder"
         static let enabledPills = "enabledPills"
         static let pillSize = "pillSize"
         static let showsCueTypeLabel = "showsCueTypeLabel"

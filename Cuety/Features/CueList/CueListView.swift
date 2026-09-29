@@ -1,20 +1,16 @@
 import SwiftUI
 
-/// The cue list layout: the standby cue as large as the display draws it,
-/// marked by a fixed playhead arrow, with the cues either side of it centred
-/// above and below. The list turns like a drum on a go: the next cue slides
-/// up and grows into the standby position while the cue just taken slides
-/// up and shrinks into the previous one.
+/// The cue list layout: the standby cue drawn as large as the display draws
+/// it, beside a fixed playhead arrow, with its neighbours above and below.
+/// On a go the rows turn like a drum.
 struct CueListView: View {
     @Environment(AppModel.self) private var model
 
     private var client: QLabClient { model.client }
 
     var body: some View {
-        if !model.isDataStale,
-           client.status.hasLiveData,
-           let graph = client.watchedGraph,
-           let standby = client.liveCue,
+        if let graph = client.watchedGraph,
+           let standby = model.standbyCue,
            let index = graph.rowIndex(of: standby.uniqueID) {
             CueDrum(graph: graph, standby: standby, standbyIndex: index)
         } else {
@@ -41,9 +37,6 @@ private struct CueDrum: View {
     /// change can be animated, and is nil until the drum first appears.
     @State private var displayedOffset: Double?
 
-    /// The pills' own height, for when they wrap past the room reserved.
-    @State private var measuredPillsHeight: CGFloat = 0
-
     /// A jump further than this, such as the operator setting the playhead
     /// by hand, snaps rather than spinning the drum through every cue.
     static let maximumAnimatedJump = 3
@@ -51,6 +44,7 @@ private struct CueDrum: View {
     static let arrowSizeRatio: CGFloat = 0.3
     static let arrowSpacingRatio: CGFloat = 0.06
     static let horizontalPadding: CGFloat = 32
+    static let pillsSpacing: CGFloat = 12
 
     private var typography: Typography { Typography(preferences: model.preferences) }
 
@@ -76,30 +70,26 @@ private struct CueDrum: View {
                     color: model.preferences.playheadAccent.color(for: standby)
                 )
                     .position(x: metrics.arrowX, y: metrics.numberCenterY)
+                    // Keyed to the cue rather than the metrics, so the arrow
+                    // slides with the drum on a go but tracks window resizes
+                    // directly.
+                    .animation(animatesShift ? Motion.listShift : nil, value: standby.uniqueID)
 
                 if !model.isPresenting {
-                    VStack {
-                        Spacer(minLength: 0)
-                        DetailPillsRow(
-                            cue: standby,
-                            kinds: model.preferences.visiblePills,
-                            cueListName: watchedCueListName,
-                            size: pillSize,
-                            showsCueTypeLabel: model.preferences.showsCueTypeLabel,
-                            performanceMode: model.preferences.performanceMode
-                        )
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                            measuredPillsHeight = height
-                        }
-                        // Without a note the pills fill only part of the room
-                        // kept for them, so they sit in its middle rather than
-                        // leaving the whole spare row between them and the name.
-                        .frame(height: pillsHeight)
-                        .animation(animatesShift ? Motion.pill : nil, value: standbyHasNote)
-                    }
+                    // The pills hang from just below the standby name, so a
+                    // note or a wrapped row grows them downward without
+                    // moving the number, name or arrow.
+                    DetailPillsRow(
+                        cue: standby,
+                        kinds: model.preferences.visiblePills,
+                        cueListName: watchedCueListName,
+                        size: pillSize,
+                        showsCueTypeLabel: model.preferences.showsCueTypeLabel,
+                        performanceMode: model.preferences.performanceMode
+                    )
                     .padding(.horizontal, Self.horizontalPadding)
-                    .padding(.bottom, metrics.pillsBottomInset)
-                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .padding(.top, metrics.pillsTop)
+                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
                 }
             }
         }
@@ -127,15 +117,12 @@ private struct CueDrum: View {
 
     /// Room for the pills whether or not the standby cue has a note, so the
     /// number, name and arrow hold still from one cue to the next. Notes sit
-    /// on a row of their own beneath the other pills.
+    /// on a row of their own beneath the other pills. The pills' measured
+    /// height is deliberately not used: feeding it back into the layout moved
+    /// every cue on the drum while the pills were still animating.
     private var pillsHeight: CGFloat {
         let rows: CGFloat = model.preferences.visiblePills.contains(.notes) ? 2 : 1
-        let reserved = pillSize.height * rows + pillSize.spacing * (rows - 1)
-        return max(reserved, measuredPillsHeight)
-    }
-
-    private var standbyHasNote: Bool {
-        !(standby.notes?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        return pillSize.height * rows + pillSize.spacing * (rows - 1)
     }
 
     private var animatesShift: Bool {
@@ -155,44 +142,58 @@ private struct CueDrum: View {
         let nameSize: CGFloat = presenting ? 40 : 28
         let padding = DrumMetrics.contentPadding
 
-        let nameBlock = showsName ? nameSize * 1.25 + DrumLabelLayout.stackedSpacing : 0
-        let pillBlock = presenting ? 0 : pillsHeight + 12
-        let areaHeight = size.height - DrumMetrics.bandHeight * 2
-        let numberHeight = max(0, areaHeight - padding * 2 - nameBlock - pillBlock)
+        let nameBlock = showsName
+            ? typography.lineHeight(size: nameSize) + DrumLabelLayout.stackedSpacing
+            : 0
+        let pillBlock = presenting ? 0 : Self.pillsSpacing + pillsHeight
+        let available = max(0, size.height - DrumMetrics.bandHeight * 2 - padding * 2)
+        let numberHeight = max(0, available - nameBlock - pillBlock)
         let numberWidth = max(0, size.width - Self.horizontalPadding * 2)
 
+        let text = standby.displayNumber ?? "–"
         let reference = headlineSizingCache.referenceNumber(
-            for: standby.displayNumber ?? "–",
+            for: text,
             cueNumbers: graph.cueNumbers,
             typography: typography
         )
         // Fit once for the arrow's size, then again in the width the arrow
         // and a matching margin on the other side leave over.
-        let firstFit = typography.cueNumberPointSize(
-            fitting: reference, in: CGSize(width: numberWidth, height: numberHeight)
+        let firstFit = typography.standbyNumberPointSize(
+            for: text, reference: reference,
+            in: CGSize(width: numberWidth, height: numberHeight)
         )
         let reserved = 2 * firstFit * (Self.arrowSizeRatio + Self.arrowSpacingRatio)
-        let numberSize = typography.cueNumberPointSize(
-            fitting: reference,
+        let numberSize = typography.standbyNumberPointSize(
+            for: text, reference: reference,
             in: CGSize(width: max(0, numberWidth - reserved), height: numberHeight)
         )
 
+        // Fixed sizing keeps the arrow beside the widest number so it holds
+        // still; the other sizings draw each number at its own size, so the
+        // arrow follows the standby number instead.
+        let arrowText = typography.cueNumberSizing == .fixed ? reference : text
         let arrowSize = numberSize * Self.arrowSizeRatio
-        let referenceWidth = typography.cueNumberWidth(of: reference, size: numberSize)
+        let referenceWidth = typography.cueNumberWidth(of: arrowText, size: numberSize)
         let arrowX = max(
             Self.horizontalPadding / 2 + arrowSize / 2,
             size.width / 2 - referenceWidth / 2 - numberSize * Self.arrowSpacingRatio - arrowSize / 2
         )
+
+        // The number, name and pills are centred as one block, so the pills
+        // sit under the name rather than against the cues below.
+        let numberLineHeight = typography.lineHeight(size: numberSize)
+        let blockHeight = numberLineHeight + nameBlock + pillBlock
+        let blockTop = DrumMetrics.bandHeight + padding + max(0, available - blockHeight) / 2
 
         return DrumMetrics(
             size: size,
             standbyNumberSize: numberSize,
             standbyNameSize: nameSize,
             showsStandbyName: showsName,
-            numberCenterY: DrumMetrics.bandHeight + padding + numberHeight / 2,
+            numberCenterY: blockTop + numberLineHeight / 2,
             arrowSize: arrowSize,
             arrowX: arrowX,
-            pillsBottomInset: DrumMetrics.bandHeight + padding
+            pillsTop: blockTop + numberLineHeight + nameBlock + Self.pillsSpacing
         )
     }
 }
@@ -218,7 +219,7 @@ private struct DrumMetrics {
     let numberCenterY: CGFloat
     let arrowSize: CGFloat
     let arrowX: CGFloat
-    let pillsBottomInset: CGFloat
+    let pillsTop: CGFloat
 
     private static func role(at position: Int) -> CueRowView.Role {
         position < 0 ? .above(distance: -position) : .below(distance: position)
@@ -479,11 +480,14 @@ private struct DrumLabelLayout: Layout {
             in: ProposedViewSize(width: inlineRoom + (stackedRoom - inlineRoom) * k, height: nil)
         )
 
-        // Inline, at the row end: the group is centred, so the number sits
-        // left of centre, and the name shares the number's baseline.
+        // Inline, at the row end: the number and name are centred as a
+        // group, so the number sits left of centre, and the name shares the
+        // number's baseline. The indicators hang off the end rather than
+        // joining the group, since they come and go as a cue is fired and
+        // loaded, and would otherwise jolt the whole row sideways.
         let rowName = CGSize(width: name.width * rowNameScale, height: name.height * rowNameScale)
         let rowNumberHeight = number.height * rowNumberScale
-        let groupWidth = rowNumberWidth + Self.inlineSpacing + rowName.width + indicatorRoom
+        let groupWidth = rowNumberWidth + Self.inlineSpacing + rowName.width
         let inlineNumberOffset = rowNumberWidth / 2 - groupWidth / 2
         let inlineNameOffset = CGSize(
             width: rowNumberWidth / 2 + Self.inlineSpacing + rowName.width / 2,
@@ -520,14 +524,37 @@ private struct DrumLabelLayout: Layout {
     }
 }
 
+/// Resolves the accent so the glyph beneath can blend between colors, which
+/// a plain `Color` in `foregroundStyle` does not do on a symbol.
 private struct PlayheadArrow: View {
     let size: CGFloat
     let color: Color
 
+    @Environment(\.self) private var environment
+
+    var body: some View {
+        PlayheadArrowGlyph(size: size, color: color.resolve(in: environment))
+    }
+}
+
+/// Animatable so a change of size or color is redrawn at each in-between
+/// value, rather than snapping while the arrow slides to its new position.
+private struct PlayheadArrowGlyph: View, Animatable {
+    var size: CGFloat
+    var color: Color.Resolved
+
+    var animatableData: AnimatablePair<CGFloat, Color.Resolved.AnimatableData> {
+        get { AnimatablePair(size, color.animatableData) }
+        set {
+            size = newValue.first
+            color.animatableData = newValue.second
+        }
+    }
+
     var body: some View {
         Image(systemName: "arrowtriangle.right.fill")
             .font(.system(size: size))
-            .foregroundStyle(color)
+            .foregroundStyle(Color(color))
             .accessibilityHidden(true)
     }
 }

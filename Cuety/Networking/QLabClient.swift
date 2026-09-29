@@ -1,11 +1,12 @@
 import Foundation
 import Network
 import os
+import ShowControlCore
 
 @Observable
 @MainActor
 final class QLabClient {
-    private let logger = Logger(subsystem: "com.ivxx.Cuety", category: "QLabClient")
+    private let logger = Logger(subsystem: "org.arvadacenter.Cuety", category: "QLabClient")
     private let preferences: Preferences
     private let log: ActivityLog
 
@@ -50,7 +51,6 @@ final class QLabClient {
     private(set) var connectedSince: Date?
     private(set) var usedPasscode = false
     private(set) var accessLevel: QLabAccessLevel = .unspecified
-    private(set) var isSubscribedToUpdates = false
     private(set) var reconnectCount = 0
     private(set) var lastErrorDescription: String?
     private(set) var lastErrorDate: Date?
@@ -140,13 +140,13 @@ final class QLabClient {
             eventTask = Task { [weak self] in
                 for await event in stream {
                     guard let self, self.connection === connection else { return }
-                    await self.handle(event)
+                    self.handle(event)
                 }
             }
             try await performHandshake(workspaceID: workspaceID, passcode: passcode)
         } catch {
             guard self.connection === connection else { return }
-            await handleHandshakeFailure(error)
+            handleHandshakeFailure(error)
         }
     }
 
@@ -182,6 +182,7 @@ final class QLabClient {
         playheadDetailsTask?.cancel()
         playheadDetailsTask = nil
         pendingCueDetailIDs.removeAll()
+        cancelUnconfirmedDetailsRefetch()
         heartbeatTask?.cancel()
         heartbeatTask = nil
         nextThumpWindow = nil
@@ -222,7 +223,6 @@ final class QLabClient {
     }
 
     private func invalidateLiveSessionData() {
-        isSubscribedToUpdates = false
         connectedSince = nil
         cueLists = []
         cuesWithLoadedDetails.removeAll()
@@ -240,6 +240,7 @@ final class QLabClient {
         cueListRefreshTask = nil
         playheadDetailsTask?.cancel()
         playheadDetailsTask = nil
+        cancelUnconfirmedDetailsRefetch()
         overflowRecoveryTask?.cancel()
         overflowRecoveryTask = nil
         failAllPendingRequests(with: RequestFailure.disconnected)
@@ -308,7 +309,9 @@ final class QLabClient {
 
         case .resynchronize:
             logger.info("Resynchronizing after event loss")
-            try? await refreshCueData()
+            // A lost event may have been an edit, so no retained detail can
+            // be trusted until QLab answers for it again.
+            try? await refreshCueData(invalidatingDetails: true)
         }
     }
 
@@ -370,8 +373,6 @@ final class QLabClient {
             OSCMessage("/listen/playhead"),
             as: QLabEmptyPayload.self
         )
-        isSubscribedToUpdates = true
-
         try await refreshCueData()
         guard self.connection === connection else { throw RequestFailure.disconnected }
 
@@ -383,7 +384,7 @@ final class QLabClient {
         logger.info("Connected to workspace \(match.displayName, privacy: .public)")
     }
 
-    private func handleHandshakeFailure(_ error: any Error) async {
+    private func handleHandshakeFailure(_ error: any Error) {
         recordError(error)
 
         switch error {
@@ -395,17 +396,25 @@ final class QLabClient {
             handleWorkspaceClosed()
 
         default:
-            status = .failed(reason: error.operatorDescription)
+            status = .failed(reason: error.localizedDescription)
             scheduleReconnect()
         }
     }
 
     private struct PendingRequest {
         let correlationKey: String
-        let continuation: CheckedContinuation<OSCMessage, any Error>
+        let continuation: CheckedContinuation<ReceivedReply, any Error>
     }
 
-    enum RequestFailure: Error, CustomStringConvertible {
+    /// QLab echoes only the request path, never a request ID. When an earlier
+    /// request on the same path timed out and its answer is still owed, the
+    /// reply that arrives next may be that older answer: `mayBeStale` says so.
+    private struct ReceivedReply {
+        let message: OSCMessage
+        let mayBeStale: Bool
+    }
+
+    nonisolated enum RequestFailure: LocalizedError {
         case disconnected
         case timedOut(address: String)
         case passcodeRequired
@@ -414,7 +423,7 @@ final class QLabClient {
         case handshakeFailed(step: String, detail: String)
         case replyUnreadable(String)
 
-        var description: String {
+        var errorDescription: String? {
             switch self {
             case .disconnected: "Disconnected from QLab."
             case .timedOut(let address): "QLab did not answer \(address) in time."
@@ -441,10 +450,20 @@ final class QLabClient {
         _ message: OSCMessage,
         as payloadType: Payload.Type
     ) async throws -> QLabReply<Payload> {
+        try await requestReportingFreshness(message, as: payloadType).reply
+    }
+
+    /// As `request`, also reporting whether the reply may belong to an
+    /// earlier request on the same path that timed out.
+    private func requestReportingFreshness<Payload: Decodable & Sendable>(
+        _ message: OSCMessage,
+        as payloadType: Payload.Type
+    ) async throws -> (reply: QLabReply<Payload>, mayBeStale: Bool) {
         guard let connection else { throw RequestFailure.disconnected }
-        let replyMessage = try await sendAndAwaitReply(message, over: connection)
+        let received = try await sendAndAwaitReply(message, over: connection)
         guard self.connection === connection else { throw RequestFailure.disconnected }
-        return try await validateSessionReply(replyMessage, as: payloadType)
+        let reply = try await validateSessionReply(received.message, as: payloadType)
+        return (reply, received.mayBeStale)
     }
 
     /// The single path from a raw reply to a validated payload.
@@ -537,7 +556,7 @@ final class QLabClient {
                     try QLabReplyParser.parse(incoming, as: payloadType)
                 }.value
             } catch {
-                throw RequestFailure.replyUnreadable(error.operatorDescription)
+                throw RequestFailure.replyUnreadable(error.localizedDescription)
             }
         }
 
@@ -548,7 +567,7 @@ final class QLabClient {
     private func sendAndAwaitReply(
         _ message: OSCMessage,
         over connection: QLabConnection
-    ) async throws -> OSCMessage {
+    ) async throws -> ReceivedReply {
         let id = UUID()
         // QLab echoes the request path instead of a request ID; normalize that path for correlation.
         let key = QLabReplyParser.correlationKey(for: message.address)
@@ -595,9 +614,9 @@ final class QLabClient {
         }
     }
 
-    private func complete(requestID id: UUID, with message: OSCMessage) {
+    private func complete(requestID id: UUID, with reply: ReceivedReply) {
         guard let request = removePending(id) else { return }
-        request.continuation.resume(returning: message)
+        request.continuation.resume(returning: reply)
     }
 
     private func fail(requestID id: UUID, with error: any Error) {
@@ -641,6 +660,11 @@ final class QLabClient {
         }
     }
 
+    private func hasAbandonedReply(forKey key: String) -> Bool {
+        let now = ContinuousClock.now
+        return abandonedReplyDeadlines[key]?.contains { $0 >= now } ?? false
+    }
+
     private func consumeAbandonedReply(forKey key: String) -> Bool {
         guard var deadlines = abandonedReplyDeadlines[key] else { return false }
 
@@ -675,7 +699,7 @@ final class QLabClient {
         }
     }
 
-    private func handle(_ event: QLabConnection.Event) async {
+    private func handle(_ event: QLabConnection.Event) {
         switch event {
         case .stateChanged(let state):
             handleStateChange(state)
@@ -692,7 +716,7 @@ final class QLabClient {
                 direction: .inbound, byteCount: byteCount,
                 event: OSCEvent(message: message, direction: .inbound, byteCount: byteCount)
             )
-            await route(message)
+            route(message)
 
         case .receiveFailed(let error, let byteCount):
             log.record(
@@ -710,13 +734,13 @@ final class QLabClient {
         switch state {
         case .waiting(let error):
             if status.hasLiveData {
-                status = .degraded(reason: "Waiting for the network: \(error.operatorDescription)")
+                status = .degraded(reason: "Waiting for the network: \(error.localizedDescription)")
             }
 
         case .failed(let error):
             recordError(error)
             if status.hasLiveData {
-                handleSessionLost(reason: error.operatorDescription)
+                handleSessionLost(reason: error.localizedDescription)
             } else {
                 failAllPendingRequests(with: error)
             }
@@ -733,27 +757,24 @@ final class QLabClient {
         }
     }
 
-    private func route(_ message: OSCMessage) async {
+    private func route(_ message: OSCMessage) {
         if QLabReplyParser.isReply(message) {
             guard let address = QLabReplyParser.oscCorrelationAddress(of: message) else {
                 return
             }
             let key = QLabReplyParser.correlationKey(for: address)
 
-            // A request still waiting on this key always gets the reply. Both
-            // requests asked QLab the same question, so an in-flight one is
-            // served by whichever answer lands first; the straggler that
-            // follows is then the one with nobody waiting for it. Consuming
-            // the abandoned slot first would instead strand every retry of a
-            // key that has timed out once.
-            // A request still waiting on this key always gets the reply. Both
-            // requests asked QLab the same question, so an in-flight one is
-            // served by whichever answer lands first; the straggler that
-            // follows is then the one with nobody waiting for it. Consuming
-            // the abandoned slot first would instead strand every retry of a
-            // key that has timed out once.
+            // A request still waiting on this key always gets the reply, and
+            // the straggler that follows is the one with nobody waiting for
+            // it. Consuming the abandoned slot first would instead strand
+            // every retry of a key that has timed out once. Whichever answer
+            // lands first may be the older one, so the reply says when that
+            // is possible and callers that retain values can confirm later.
             if let id = pendingByAddress[key]?.first {
-                complete(requestID: id, with: message)
+                let reply = ReceivedReply(
+                    message: message, mayBeStale: hasAbandonedReply(forKey: key)
+                )
+                complete(requestID: id, with: reply)
                 return
             }
 
@@ -772,7 +793,7 @@ final class QLabClient {
         }
 
         if message.address.hasPrefix("/update/") {
-            await handleUpdate(message)
+            handleUpdate(message)
         }
     }
 
@@ -833,7 +854,7 @@ final class QLabClient {
         }
     }
 
-    private func handleUpdate(_ message: OSCMessage) async {
+    private func handleUpdate(_ message: OSCMessage) {
         let components = message.addressComponents
         guard components.count >= 3,
               components[0] == "update",
@@ -890,7 +911,7 @@ final class QLabClient {
                 return
             } catch {
                 self.logger.warning(
-                    "Debounced cue refresh failed: \(error.operatorDescription, privacy: .public)"
+                    "Debounced cue refresh failed: \(error.localizedDescription, privacy: .public)"
                 )
             }
         }
@@ -898,17 +919,20 @@ final class QLabClient {
 
     private var cueDataGeneration = 0
 
-    func refreshCueData() async throws {
+    /// - Parameter invalidatingDetails: refetch every visible cue's details,
+    ///   for when updates may have been missed. Retained values stay on
+    ///   screen until the new replies land.
+    func refreshCueData(invalidatingDetails: Bool = false) async throws {
         cueDataGeneration += 1
         let generation = cueDataGeneration
 
-        try await refreshCueLists()
+        try await refreshCueLists(invalidatingDetails: invalidatingDetails)
 
         guard generation == cueDataGeneration else { return }
         await refreshPlayheadCueDetails()
     }
 
-    func refreshCueLists() async throws {
+    func refreshCueLists(invalidatingDetails: Bool = false) async throws {
         guard let workspaceID = workspace?.uniqueID else { return }
         let reply = try await request(
             OSCMessage("/workspace/\(workspaceID)/cueLists"),
@@ -918,16 +942,12 @@ final class QLabClient {
 
         // Carry the details already fetched onto the new tree. Without this
         // every cue on screen would blank its pills and drawer markers until
-        // its reply came back.
-        var carried = Set<String>()
-        for cueID in cuesWithLoadedDetails {
-            guard let previous = cueLists.firstCue(withID: cueID),
-                  refreshed.firstCue(withID: cueID) != nil
-            else { continue }
-            refreshed.applyValues(previous.detailValues, toCueWithID: cueID)
-            carried.insert(cueID)
-        }
-        cuesWithLoadedDetails = carried
+        // its reply came back. Carrying a value for display is separate from
+        // trusting it: after lost events the cues are refetched regardless.
+        // One pass over each tree, however many cues have been visited.
+        let previous = cueLists.cues(withIDs: cuesWithLoadedDetails)
+        let carried = refreshed.carryDetails(from: previous)
+        cuesWithLoadedDetails = invalidatingDetails ? [] : carried
 
         cueLists = refreshed
         invalidateWatchedGraph()
@@ -946,10 +966,13 @@ final class QLabClient {
             return
         }
 
+        // Carts have no playhead to watch, so neither a remembered cart nor
+        // a leading one is picked.
+        let watchable = cueLists.filter { !$0.isCueCart }
         let preferred = preferredCueListID
         watchedCueListID = preferred.flatMap { id in
-            cueLists.contains { $0.uniqueID == id } ? id : nil
-        } ?? cueLists.first?.uniqueID
+            watchable.contains { $0.uniqueID == id } ? id : nil
+        } ?? watchable.first?.uniqueID
 
         preferredCueListID = preferred
     }
@@ -959,7 +982,8 @@ final class QLabClient {
     func refreshPlayheads() async {
         guard let workspaceID = workspace?.uniqueID else { return }
         let session = connection
-        let listIDs = cueLists.map(\.uniqueID)
+        // QLab returns an error for a cart's playback position.
+        let listIDs = cueLists.filter { !$0.isCueCart }.map(\.uniqueID)
         var nextIndex = 0
 
         // Results are gathered locally and written back in one go: assigning
@@ -1024,10 +1048,10 @@ final class QLabClient {
             logger.warning(
                 """
                 playbackPositionID failed for \(listID, privacy: .public): \
-                \(error.operatorDescription, privacy: .public)
+                \(error.localizedDescription, privacy: .public)
                 """
             )
-            return (listID, .unknown(reason: error.operatorDescription))
+            return (listID, .unknown(reason: error.localizedDescription))
         }
     }
 
@@ -1044,6 +1068,11 @@ final class QLabClient {
     var watchedPlayhead: PlayheadState? {
         guard let watchedCueListID else { return nil }
         return playheads[watchedCueListID]
+    }
+
+    var isWatchingCueCart: Bool {
+        guard let watchedCueListID else { return false }
+        return cueLists.first { $0.uniqueID == watchedCueListID }?.isCueCart == true
     }
 
     var currentPlayheadCueID: String? {
@@ -1111,7 +1140,8 @@ final class QLabClient {
 
     /// Cues whose `/valuesForKeys` reply is already folded into `cueLists`.
     /// Details only change when QLab says so, so a cue is fetched once and
-    /// then left alone until it is edited or the cue lists are rebuilt.
+    /// then left alone until it is edited, the requested keys change, or
+    /// events are lost. Rebuilt lists keep the set for cues still present.
     private var cuesWithLoadedDetails = Set<String>()
 
     /// - Parameter force: refetch even cues already fetched, for when the
@@ -1134,9 +1164,9 @@ final class QLabClient {
         // Gathered first and applied in one pass: writing each reply back as
         // it lands would invalidate every view watching the cue lists once
         // per cue in the drawer.
-        var fetched: [(cueID: String, values: QLabCueValues)] = []
+        var fetched: [FetchedCueDetails] = []
 
-        await withTaskGroup(of: (String, QLabCueValues)?.self) { group in
+        await withTaskGroup(of: FetchedCueDetails?.self) { group in
             for _ in 0..<min(Self.maxConcurrentDetailRequests, wanted.count) {
                 let cueID = wanted[nextIndex]
                 nextIndex += 1
@@ -1154,7 +1184,7 @@ final class QLabClient {
                     return
                 }
 
-                if let result { fetched.append((result.0, result.1)) }
+                if let result { fetched.append(result) }
 
                 guard nextIndex < wanted.count else { continue }
                 let cueID = wanted[nextIndex]
@@ -1170,19 +1200,32 @@ final class QLabClient {
         apply(fetched)
     }
 
-    private func apply(_ fetched: [(cueID: String, values: QLabCueValues)]) {
+    private struct FetchedCueDetails {
+        let cueID: String
+        let values: QLabCueValues
+        /// False when the reply may have answered an earlier, timed-out
+        /// request for the same cue, so it is shown but asked for again.
+        let isConfirmed: Bool
+    }
+
+    private func apply(_ fetched: [FetchedCueDetails]) {
         guard !fetched.isEmpty else { return }
 
         let watchedGraphBeforeChange = watchedGraphCache?.graph
         var updated = cueLists
-        var changedIDs: [String] = []
 
-        for (cueID, values) in fetched {
-            cuesWithLoadedDetails.insert(cueID)
-            if updated.applyValues(values, toCueWithID: cueID) {
-                changedIDs.append(cueID)
+        var valuesByID: [String: QLabCueValues] = [:]
+        var unconfirmed = Set<String>()
+        for result in fetched {
+            valuesByID[result.cueID] = result.values
+            if result.isConfirmed {
+                cuesWithLoadedDetails.insert(result.cueID)
+            } else {
+                unconfirmed.insert(result.cueID)
             }
         }
+        scheduleUnconfirmedDetailsRefetch(unconfirmed)
+        let changedIDs = updated.applyValues(valuesByID)
 
         guard !changedIDs.isEmpty else { return }
         cueLists = updated
@@ -1196,9 +1239,9 @@ final class QLabClient {
 
     private func fetchCueDetails(
         for cueID: String, workspaceID: String, keys: String
-    ) async -> (String, QLabCueValues)? {
+    ) async -> FetchedCueDetails? {
         do {
-            let reply = try await request(
+            let (reply, mayBeStale) = try await requestReportingFreshness(
                 OSCMessage(
                     "/workspace/\(workspaceID)/cue_id/\(cueID)/valuesForKeys",
                     [.string(keys)]
@@ -1206,11 +1249,39 @@ final class QLabClient {
                 as: QLabCueValues.self
             )
             guard let values = reply.data else { return nil }
-            return (cueID, values)
+            return FetchedCueDetails(cueID: cueID, values: values, isConfirmed: !mayBeStale)
         } catch {
-            logger.debug("valuesForKeys failed: \(error.operatorDescription, privacy: .public)")
+            logger.debug("valuesForKeys failed: \(error.localizedDescription, privacy: .public)")
             return nil
         }
+    }
+
+    private var unconfirmedDetailIDs = Set<String>()
+    private var unconfirmedDetailsTask: Task<Void, Never>?
+
+    /// Asks again once every answer still owed to a timed-out request has
+    /// either arrived or expired, so the retry cannot be ambiguous for the
+    /// same reason. One retry is pending at a time.
+    private func scheduleUnconfirmedDetailsRefetch(_ cueIDs: Set<String>) {
+        guard !cueIDs.isEmpty else { return }
+        unconfirmedDetailIDs.formUnion(cueIDs)
+        guard unconfirmedDetailsTask == nil else { return }
+
+        unconfirmedDetailsTask = Task { [weak self] in
+            guard let timeout = self?.preferences.requestTimeout else { return }
+            try? await Task.sleep(for: .seconds(timeout))
+            guard !Task.isCancelled, let self else { return }
+            self.unconfirmedDetailsTask = nil
+            self.pendingCueDetailIDs.formUnion(self.unconfirmedDetailIDs)
+            self.unconfirmedDetailIDs.removeAll()
+            self.scheduleCueDetailsRefresh()
+        }
+    }
+
+    private func cancelUnconfirmedDetailsRefetch() {
+        unconfirmedDetailsTask?.cancel()
+        unconfirmedDetailsTask = nil
+        unconfirmedDetailIDs.removeAll()
     }
 
     /// What every cue-detail refresh asks for, whatever the pills show. A
@@ -1354,7 +1425,7 @@ final class QLabClient {
     }
 
     private func recordError(_ error: any Error) {
-        lastErrorDescription = error.operatorDescription
+        lastErrorDescription = error.localizedDescription
         lastErrorDate = Date()
     }
 

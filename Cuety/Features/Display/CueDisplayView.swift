@@ -17,7 +17,7 @@ struct CueDisplayView: View {
         VStack(spacing: 0) {
             if model.isDataStale {
                 staleDataState
-            } else if let cue = client.liveCue {
+            } else if let cue = model.standbyCue {
                 cueContent(cue)
             } else {
                 emptyState
@@ -48,7 +48,9 @@ struct CueDisplayView: View {
         ContentUnavailableView {
             Label("Data May Be Stale", systemImage: "clock.badge.exclamationmark")
         } description: {
-            Text("Cuety keeps its connection policy while this scene is suspended. Return to the foreground to confirm the current cue from QLab.")
+            Text(model.foregroundRefreshTask == nil
+                 ? "Return to Cuety to confirm the current cue."
+                 : "Refreshing cue data from QLab…")
         }
     }
 
@@ -58,8 +60,7 @@ struct CueDisplayView: View {
 
     /// The live cue's color, or nil when the display is not showing a cue.
     private var canvasTint: Color? {
-        guard !model.isDataStale else { return nil }
-        return client.liveCue?.color
+        model.standbyCue?.color
     }
 
     private func cueListName(containing cue: Cue) -> String? {
@@ -148,7 +149,9 @@ struct CueDisplayView: View {
         return GeometryReader { geometry in
             Text(text)
                 .font(typography.cueNumber(
-                    size: typography.cueNumberPointSize(fitting: reference, in: geometry.size)
+                    size: typography.standbyNumberPointSize(
+                        for: text, reference: reference, in: geometry.size
+                    )
                 ))
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
@@ -205,21 +208,27 @@ struct CueDisplayView: View {
             }
         } else if client.watchedCueListID == nil {
             ContentUnavailableView {
-                Label("No Cue List Selected", systemImage: "list.triangle")
+                Label("No Cue List Selected", systemImage: "text.line.first.and.arrowtriangle.forward")
             } description: {
-                Text("Choose a cue list in the sidebar to follow its playhead.")
+                Text("Choose a cue list in the sidebar.")
+            }
+        } else if client.isWatchingCueCart {
+            ContentUnavailableView {
+                Label("Cue Cart", systemImage: "square.grid.3x3")
+            } description: {
+                Text("Cue carts have no playhead. Choose a cue list in the sidebar.")
             }
         } else if case .unknown(let reason) = client.watchedPlayhead {
             ContentUnavailableView {
                 Label("Playhead Unknown", systemImage: "questionmark.circle")
             } description: {
-                Text("Cuety could not read the playhead of this cue list. \(reason)")
+                Text("Could not read the playhead of this cue list. \(reason)")
             }
         } else if client.watchedPlayhead == nil {
             ContentUnavailableView {
                 Label("Waiting for QLab", systemImage: "progress.indicator")
             } description: {
-                Text("Cuety has not heard back about this cue list's playhead yet.")
+                Text("Playhead details not received yet.")
             }
         } else {
             ContentUnavailableView {

@@ -43,12 +43,20 @@ struct SettingsView: View {
                 ConnectionSettingsView()
             }
         }
+#if os(macOS)
         .frame(
             minWidth: Self.width,
             maxWidth: Self.width,
             minHeight: Pane.shortest,
             maxHeight: .infinity
         )
+#else
+        .frame(
+            maxWidth: .infinity,
+            minHeight: Pane.shortest,
+            maxHeight: .infinity
+        )
+#endif
 #if os(macOS)
         .background(
             SettingsWindowHeight(

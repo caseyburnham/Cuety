@@ -122,28 +122,65 @@ final class AppModel {
         }
     }
 
-    /// iPad remains connected while inactive or backgrounded. The operating system
-    /// may suspend the process, so retained cue data is explicitly marked stale
-    /// until the next foreground refresh confirms it again.
+    /// Counts trips to the background, so a foreground refresh that finishes
+    /// after the app has left again does not clear the newer stale label.
+    private var backgroundGeneration = 0
+
+    /// Fed the app's aggregate scene phase, so one of several iPad scenes
+    /// going to the background does not mark data another still shows.
+    ///
+    /// A backgrounded iPad app may be suspended while it stays connected, so
+    /// retained cue data is marked stale until QLab confirms it again.
+    /// Inactive is transient — Control Center, the app switcher, a Mac window
+    /// losing focus — and the process keeps running, so it changes nothing.
     func updateScenePhase(_ phase: ScenePhase) {
         switch phase {
         case .active:
             guard isDataStale else { return }
+            let generation = backgroundGeneration
             foregroundRefreshTask = Task { [weak self] in
                 guard let self else { return }
-                await self.refresh()
-                // The stale label stays visible while refresh is in flight. A
-                // failed refresh replaces it with the client’s explicit error
-                // state instead of briefly presenting retained data as current.
+                await self.confirmRetainedData()
+                // The stale label stays visible while the refresh is in
+                // flight. A failed refresh replaces it with the client's
+                // explicit error state instead of presenting retained data
+                // as current.
+                guard generation == self.backgroundGeneration else { return }
                 self.isDataStale = false
+                self.foregroundRefreshTask = nil
             }
-        case .inactive, .background:
+        case .background:
+            backgroundGeneration += 1
+            foregroundRefreshTask = nil
             if client.status.hasLiveData || selection != nil {
                 isDataStale = true
             }
+        case .inactive:
+            break
         @unknown default:
             break
         }
+    }
+
+    /// A session that survived the background only needs its cue data asked
+    /// for again. Anything else gets the full refresh, which rediscovers
+    /// servers and reconnects the selected workspace.
+    private func confirmRetainedData() async {
+        if client.status.hasLiveData {
+            do {
+                try await client.refreshCueData(invalidatingDetails: true)
+                return
+            } catch {
+                // The session did not survive; fall through to a full refresh.
+            }
+        }
+        await refresh()
+    }
+
+    /// Whether cue data may be presented as current. Every cue surface — the
+    /// display, drawer, cue list, menu bar and Dock — applies this one rule.
+    var hasCurrentCueData: Bool {
+        client.status.hasLiveData && !isDataStale
     }
 
     func refresh() async {
@@ -254,7 +291,7 @@ final class AppModel {
             return
         } catch {
             server.workspaces = []
-            server.lastError = error.operatorDescription
+            server.lastError = error.localizedDescription
         }
         server.hasBeenProbed = true
 
@@ -297,7 +334,7 @@ final class AppModel {
     var canRefresh: Bool { !client.status.isTransitional }
 
     func canRemove(_ server: QLabServer) -> Bool {
-        server.source == .manual && server.id != QLabServer.localhost().id
+        server.source == .manual && !server.isLocalhost
     }
 
     func removeServer(withID id: String) {
@@ -350,7 +387,7 @@ final class AppModel {
             } catch {
                 credentialError = CredentialError(
                     action: "Cuety connected, but could not save the passcode to your Keychain.",
-                    reason: error.operatorDescription
+                    reason: error.localizedDescription
                 )
             }
         }
@@ -376,7 +413,7 @@ final class AppModel {
         } catch {
             credentialError = CredentialError(
                 action: "Cuety could not remove that passcode from your Keychain.",
-                reason: error.operatorDescription
+                reason: error.localizedDescription
             )
         }
     }
@@ -388,7 +425,7 @@ final class AppModel {
         } catch {
             credentialError = CredentialError(
                 action: "Cuety could not clear the saved passcodes from your Keychain.",
-                reason: error.operatorDescription
+                reason: error.localizedDescription
             )
         }
     }
@@ -417,7 +454,7 @@ final class AppModel {
     }
 
     var standbyCue: Cue? {
-        client.liveCue
+        hasCurrentCueData ? client.playheadCue : nil
     }
 
     var dockBadgeLabel: String? {
@@ -454,9 +491,7 @@ final class AppModel {
     }
 
     func toggleDrawer() {
-        withAnimation(Motion.chrome.unlessMotionIsReduced) {
-            preferences.showsDrawer.toggle()
-        }
+        setShowsDrawer(!preferences.showsDrawer)
     }
 
     func toggleCueLayout() {
@@ -493,11 +528,22 @@ final class AppModel {
     }
 
     func toggleKeepAwake() {
-        preferences.keepsDisplayAwake.toggle()
-        displaySleepBlocker.setEnabled(preferences.keepsDisplayAwake)
+        setKeepsDisplayAwake(!preferences.keepsDisplayAwake)
+    }
+
+    func setKeepsDisplayAwake(_ keepsAwake: Bool) {
+        preferences.keepsDisplayAwake = keepsAwake
+        displaySleepBlocker.setEnabled(keepsAwake)
     }
 
     func togglePerformanceMode() {
         preferences.performanceMode.toggle()
+    }
+
+    func setShowsDrawer(_ showsDrawer: Bool) {
+        guard showsDrawer != preferences.showsDrawer else { return }
+        withAnimation(Motion.chrome.unlessMotionIsReduced) {
+            preferences.showsDrawer = showsDrawer
+        }
     }
 }

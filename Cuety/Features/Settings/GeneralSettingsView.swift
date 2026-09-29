@@ -22,15 +22,16 @@ struct GeneralSettingsView: View {
             Section {
                 Toggle("Keep the display awake", isOn: Binding(
                     get: { model.preferences.keepsDisplayAwake },
-                    set: { _ in model.toggleKeepAwake() }
+                    set: { model.setKeepsDisplayAwake($0) }
                 ))
 
                 Toggle("Performance mode", isOn: Bindable(preferences).performanceMode)
             } footer: {
-                Text("Disables visual effects.")
+                Text("Performance mode reduces display animations and effects.")
             }
 
-            Section {
+#if os(macOS)
+            Section("Menu Bar") {
                 Toggle("Show Cuety in the menu bar", isOn: Bindable(preferences).showsMenuBarExtra)
 
                 Picker("Show", selection: Bindable(preferences).menuBarReadout) {
@@ -40,23 +41,12 @@ struct GeneralSettingsView: View {
                 }
                 .disabled(!preferences.showsMenuBarExtra)
                 .help(preferences.menuBarReadout.detail)
-            } header: {
-                Text("Menu Bar")
-            } footer: {
-                Text("""
-                Display the standby cue number, connection status, or heartbeat in the menu bar.
-                """)
             }
 
-            Section {
+            Section("Dock") {
                 Toggle("Badge the Dock icon with the cue number", isOn: Bindable(preferences).showsDockBadge)
-            } header: {
-                Text("Dock")
-            } footer: {
-                Text("""
-                Display the standby cue number in a Dock icon badge.
-                """)
             }
+#endif
         }
         .formStyle(.grouped)
     }

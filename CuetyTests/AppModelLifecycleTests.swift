@@ -193,4 +193,43 @@ struct AppModelLifecycleTests {
         #expect(!model.isDataStale)
         #expect(model.selection != nil)
     }
+
+    @Test("A transient inactive phase leaves retained data current")
+    func inactiveDoesNotMarkDataStale() throws {
+        let model = try makeModel()
+        model.selection = WorkspaceSelection(serverID: "S", workspaceID: "W")
+
+        model.updateScenePhase(.inactive)
+        model.updateScenePhase(.active)
+
+        #expect(!model.isDataStale)
+        #expect(model.foregroundRefreshTask == nil)
+    }
+
+    @Test("Leaving again during the foreground refresh keeps the data stale")
+    func supersededForegroundRefreshKeepsStale() async throws {
+        let model = try makeModel()
+        model.selection = WorkspaceSelection(serverID: "S", workspaceID: "W")
+
+        model.updateScenePhase(.background)
+        model.updateScenePhase(.active)
+        let refresh = try #require(model.foregroundRefreshTask)
+        model.updateScenePhase(.background)
+
+        await refresh.value
+
+        #expect(model.isDataStale)
+    }
+
+    @Test("Stale data hides the standby cue from every surface")
+    func staleDataHidesTheStandbyCue() throws {
+        let model = try makeModel()
+        model.selection = WorkspaceSelection(serverID: "S", workspaceID: "W")
+
+        model.updateScenePhase(.background)
+
+        #expect(!model.hasCurrentCueData)
+        #expect(model.standbyCue == nil)
+        #expect(model.dockBadgeLabel == nil)
+    }
 }

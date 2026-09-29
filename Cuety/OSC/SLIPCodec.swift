@@ -92,9 +92,13 @@ nonisolated enum SLIPCodec {
 }
 
 
-nonisolated extension SLIPCodec {
-    static func decodeAll(_ data: Data, maximumFrameSize: Int = 8 * 1024 * 1024) throws -> [Data] {
-        var decoder = Decoder(maximumFrameSize: maximumFrameSize)
-        return try decoder.decode(data)
+nonisolated enum SLIPFramingError: LocalizedError, Hashable, Sendable {
+    case frameTooLarge(bytesBuffered: Int, limit: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .frameTooLarge(let buffered, let limit):
+            "SLIP frame exceeded the \(limit)-byte limit (\(buffered) bytes buffered without a frame delimiter)."
+        }
     }
 }

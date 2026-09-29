@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct DisplaySettingsView: View {
-    static let settingsHeight: CGFloat = 560
+    static let settingsHeight: CGFloat = 650
 
     @Environment(AppModel.self) private var model
 
@@ -23,6 +23,36 @@ struct DisplaySettingsView: View {
             }
 
             Section {
+                Picker("Size", selection: Bindable(preferences).cueNumberSizing) {
+                    ForEach(CueNumberSizing.allCases) { sizing in
+                        Text(sizing.title).tag(sizing)
+                    }
+                }
+
+                // Always shown, so the pane keeps its height when the sizing
+                // changes; it only applies to custom sizing.
+                SteppedField(
+                    title: "Custom size",
+                    value: Bindable(preferences).customCueNumberSize,
+                    range: Preferences.Limits.cueNumberSize,
+                    step: 10,
+                    format: FloatingPointFormatStyle<Double>.number
+                        .precision(.fractionLength(0))
+                        .grouping(.never)
+                )
+                .disabled(preferences.cueNumberSizing != .custom)
+            } header: {
+                Text("Cue Number Size")
+            } footer: {
+                Text("""
+                Fixed draws every cue in the list at the same size, fitted to the \
+                widest number. Custom uses the point size you choose, shrinking \
+                only when a number would not fit. As Large as Possible fills the \
+                display with each number.
+                """)
+            }
+
+            Section {
                 Picker("Color", selection: Bindable(preferences).playheadAccent) {
                     ForEach(PlayheadAccent.allCases) { choice in
                         Text(choice.title).tag(choice)
@@ -32,12 +62,6 @@ struct DisplaySettingsView: View {
                 Text("Playhead")
             } footer: {
                 Text("Choose a fixed accent color, or follow the color of the cue currently standing by.")
-            }
-
-            Section {
-                Toggle("Show the cue name", isOn: Bindable(preferences).showsCueName)
-            } footer: {
-                Text("The name appears beneath the number. Turning it off gives the number the whole window.")
             }
 
             Section {
@@ -58,26 +82,6 @@ struct DisplaySettingsView: View {
                 with the standby cue marked by the playhead arrow.
                 """)
             }
-
-            Section {
-                Toggle("Show the drawer", isOn: Binding(
-                    get: { preferences.showsDrawer },
-                    set: { _ in model.toggleDrawer() }
-                ))
-                .disabled(preferences.cueLayout == .list)
-            } header: {
-                Text("Cue Drawer")
-            } footer: {
-                Text("""
-                The drawer shows the watched cue list either side of the playhead. \
-                Drag its handle up or down to set how many rows it shows; the \
-                height snaps to a row either side at a time, and dragging it \
-                all the way down collapses the drawer to its handle. \
-                A group counts as one row; the cues inside it are not listed. \
-                Near either end of the list, rows one side has run out of are \
-                shown on the other instead, so the drawer keeps its size.
-                """)
-            }
         }
         .formStyle(.grouped)
     }
@@ -85,7 +89,13 @@ struct DisplaySettingsView: View {
     private var sample: some View {
         let typography = Typography(preferences: preferences)
 
-        return LabeledContent("Preview") {
+        // An HStack rather than LabeledContent, which lines the label up with
+        // the large number's baseline instead of its center.
+        return HStack {
+            Text("Preview")
+
+            Spacer(minLength: 12)
+
             Text(verbatim: "127.5")
                 .font(typography.drawerNumber(
                     size: 40, weight: typography.cueNumberWeight
@@ -93,7 +103,6 @@ struct DisplaySettingsView: View {
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
-                .frame(maxWidth: .infinity, alignment: .trailing)
                 .accessibilityLabel("Sample cue number at the selected weight")
         }
     }

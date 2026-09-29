@@ -2,7 +2,6 @@ import SwiftUI
 
 struct MainWindowView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -14,9 +13,6 @@ struct MainWindowView: View {
         .ignoresSafeArea()
         .task {
             model.start()
-        }
-        .onChange(of: scenePhase, initial: true) { _, phase in
-            model.updateScenePhase(phase)
         }
         .sheet(item: Bindable(model).passcodePrompt) { prompt in
             PasscodeSheet(prompt: prompt)
@@ -44,6 +40,28 @@ struct MainWindowView: View {
     }
 
     private var detail: some View {
+        MainDetailView()
+#if os(iOS)
+            // Each split view column owns its own navigation bar, so the status
+            // and heartbeat controls must be attached to the detail column to
+            // stay visible on the cue display during a show.
+            .compactToolbarActions(
+                showsRefresh: false,
+                showsSettings: true,
+                showsFloatingDisplay: false
+            )
+#endif
+    }
+}
+
+/// The detail column's content. The layout switch lives in its own body
+/// because the macOS split view hosts the detail once, when it is made; read
+/// anywhere else, the layout would be frozen at whatever it was at launch.
+private struct MainDetailView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
         Group {
             switch model.preferences.cueLayout {
             case .display:
@@ -63,12 +81,6 @@ struct MainWindowView: View {
             }
         }
         .transition(reduceMotion ? .identity : .opacity)
-#if os(iOS)
-        // Each split view column owns its own navigation bar, so the status
-        // and heartbeat controls must be attached to the detail column to
-        // stay visible on the cue display during a show.
-        .compactToolbarActions(showsFloatingDisplay: false)
-#endif
     }
 }
 

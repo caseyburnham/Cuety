@@ -56,7 +56,7 @@ enum DetailPillKind: String, CaseIterable, Codable, Hashable, Sendable, Identifi
         case .continueMode: "arrow.down"
         case .cueList: "list.bullet"
         case .armed: "power"
-        case .loaded: "arrow.down.to.line.circle"
+        case .loaded: "circle"
         case .flagged: "flag.fill"
         case .notes: "ellipsis.bubble"
         }
