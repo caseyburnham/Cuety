@@ -7,7 +7,7 @@ import ShowControlCore
 extension SLIPCodec {
     /// Decodes a whole buffer with a fresh decoder, for tests that do not
     /// care how the bytes would have arrived.
-    static func decodeAll(_ data: Data, maximumFrameSize: Int = 8 * 1024 * 1024) throws -> [Data] {
+    static func decodeAll(_ data: Data, maximumFrameSize: Int = SLIPCodec.maximumFrameSize) throws -> [Data] {
         var decoder = Decoder(maximumFrameSize: maximumFrameSize)
         return try decoder.decode(data)
     }
@@ -16,7 +16,6 @@ extension SLIPCodec {
 @Suite("SLIP framing")
 struct SLIPCodecTests {
 
-
     @Test("Uses the RFC 1055 constants")
     func constants() {
         #expect(SLIPCodec.end == 0o300)
@@ -24,7 +23,6 @@ struct SLIPCodecTests {
         #expect(SLIPCodec.escEnd == 0o334)
         #expect(SLIPCodec.escEsc == 0o335)
     }
-
 
     @Test("Wraps payloads in the double-END form QLab documents")
     func encodesWithDoubleEnd() {
@@ -56,7 +54,6 @@ struct SLIPCodecTests {
             SLIPCodec.end, SLIPCodec.escEnd, SLIPCodec.escEsc, SLIPCodec.end,
         ]))
     }
-
 
     static let escapingPayloads: [Data] = {
         let allByteValues = Data(Array(UInt8.min...UInt8.max))
@@ -93,7 +90,6 @@ struct SLIPCodecTests {
         #expect(try OSCCodec.decode(frame) == .message(message))
     }
 
-
     @Test("Discards zero-length frames")
     func discardsEmptyFrames() throws {
         let frames = try SLIPCodec.decodeAll(Data([
@@ -128,7 +124,6 @@ struct SLIPCodecTests {
         #expect(frames == [Data([0x01]), Data([0x02]), Data([0x03])])
     }
 
-
     @Test("Withholds a frame until its delimiter arrives")
     func withholdsIncompleteFrame() throws {
         var decoder = SLIPCodec.Decoder()
@@ -136,11 +131,11 @@ struct SLIPCodecTests {
 
         let early = try decoder.decode(framed.dropLast())
         #expect(early.isEmpty)
-        #expect(decoder.bufferedByteCount == 3)
+        #expect(decoder.buffer.count == 3)
 
         let completed = try decoder.decode([SLIPCodec.end])
         #expect(completed == [Data([0x41, 0x42, 0x43])])
-        #expect(decoder.bufferedByteCount == 0)
+        #expect(decoder.buffer.count == 0)
     }
 
     @Test("Carries a dangling ESC across a read boundary")
@@ -192,7 +187,6 @@ struct SLIPCodecTests {
         }
     }
 
-
     @Test("Treats an invalid escape sequence as a literal byte")
     func lenientOnInvalidEscape() throws {
         let frames = try SLIPCodec.decodeAll(Data([
@@ -210,7 +204,6 @@ struct SLIPCodecTests {
         #expect(frames.count == 2)
         #expect(frames.last == Data([0x99]))
     }
-
 
     @Test("Throws once an undelimited frame exceeds the cap")
     func enforcesFrameSizeCap() {
@@ -249,23 +242,22 @@ struct SLIPCodecTests {
         var decoder = SLIPCodec.Decoder(maximumFrameSize: 16)
         _ = try? decoder.decode(Data(repeating: 0x41, count: 32))
 
-        #expect(decoder.bufferedByteCount == 0)
+        #expect(decoder.buffer.count == 0)
         #expect(!decoder.hasDanglingEscape)
 
         let frames = try decoder.decode(SLIPCodec.encode(Data([0x01])))
         #expect(frames == [Data([0x01])])
     }
 
-
     @Test("Reset discards partial state")
     func resetDiscardsPartialState() throws {
         var decoder = SLIPCodec.Decoder()
         _ = try decoder.decode([0x41, 0x42, SLIPCodec.esc])
-        #expect(decoder.bufferedByteCount == 2)
+        #expect(decoder.buffer.count == 2)
         #expect(decoder.hasDanglingEscape)
 
         decoder.reset()
-        #expect(decoder.bufferedByteCount == 0)
+        #expect(decoder.buffer.count == 0)
         #expect(!decoder.hasDanglingEscape)
     }
 }

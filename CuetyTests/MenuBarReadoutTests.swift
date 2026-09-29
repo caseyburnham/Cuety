@@ -14,7 +14,6 @@ struct MenuBarReadoutTests {
         AppModel(preferences: try makePreferences())
     }
 
-
     @Test("Neither readout is on until it is asked for")
     func readoutsAreOffByDefault() throws {
         let preferences = try makePreferences()
@@ -47,7 +46,6 @@ struct MenuBarReadoutTests {
         #expect(Preferences(defaults: defaults).menuBarReadout == .default)
     }
 
-
     @Test("An unasked-for badge is no badge")
     func badgeIsAbsentUntilEnabled() throws {
         let model = try makeModel()
@@ -65,7 +63,6 @@ struct MenuBarReadoutTests {
         #expect(model.standbyCue == nil)
         #expect(model.dockBadgeLabel == nil)
     }
-
 
     @Test(
         "Every readout is named, described, and stably spelled",

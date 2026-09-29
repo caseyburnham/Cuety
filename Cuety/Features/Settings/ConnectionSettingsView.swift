@@ -46,7 +46,6 @@ struct ConnectionSettingsView: View {
         }
     }
 
-
     private var autoConnectSection: some View {
         Section {
             Toggle("Reconnect at launch", isOn: Bindable(preferences).autoConnect)
@@ -69,7 +68,6 @@ struct ConnectionSettingsView: View {
         }
         return "\(workspace.displayName) — \(server.name)"
     }
-
 
     private var connectionSection: some View {
         Section {
@@ -106,7 +104,6 @@ struct ConnectionSettingsView: View {
         }
     }
 
-
     private var addedServersSection: some View {
         Section {
             Button("Add Server", systemImage: "plus") {
@@ -139,7 +136,6 @@ struct ConnectionSettingsView: View {
     private var addedServers: [QLabServer] {
         model.browser.servers.filter(model.canRemove)
     }
-
 
     private var passcodeSection: some View {
         Section {

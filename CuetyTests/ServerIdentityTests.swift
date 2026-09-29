@@ -136,7 +136,6 @@ struct ServerIdentityTests {
         #expect(discovered?.id != manual.id)
     }
 
-
     private func model() throws -> AppModel {
         let defaults = EphemeralDefaults()
         return AppModel(preferences: Preferences(defaults: defaults))

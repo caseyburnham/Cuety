@@ -2,17 +2,14 @@ import Foundation
 import Network
 
 /// Custom `NWProtocolFramer` for SLIP-framed OSC; Network drives it on the connection queue.
-
 nonisolated final class SLIPFramer: NWProtocolFramerImplementation {
     static let label = "SLIP"
 
     static let definition = NWProtocolFramer.Definition(implementation: SLIPFramer.self)
 
-    static let maximumFrameSize = 8 * 1024 * 1024
-
     private static let readChunkSize = 64 * 1024
 
-    private var decoder = SLIPCodec.Decoder(maximumFrameSize: SLIPFramer.maximumFrameSize)
+    private var decoder = SLIPCodec.Decoder()
 
     init(framer: NWProtocolFramer.Instance) {}
 
@@ -28,7 +25,6 @@ nonisolated final class SLIPFramer: NWProtocolFramerImplementation {
         decoder.reset()
     }
 
-
     func handleInput(framer: NWProtocolFramer.Instance) -> Int {
         while true {
             var completedFrames: [Data] = []
@@ -40,11 +36,10 @@ nonisolated final class SLIPFramer: NWProtocolFramerImplementation {
                 maximumLength: Self.readChunkSize
             ) { buffer, _ in
                 guard let buffer, !buffer.isEmpty else { return 0 }
-                do {
+                do throws(SLIPFramingError) {
                     completedFrames = try decoder.decode(buffer.bindMemory(to: UInt8.self))
-                } catch let error as SLIPFramingError {
-                    oversizeFailure = error
                 } catch {
+                    oversizeFailure = error
                 }
                 consumed = buffer.count
                 return consumed
@@ -68,7 +63,6 @@ nonisolated final class SLIPFramer: NWProtocolFramerImplementation {
             }
         }
     }
-
 
     func handleOutput(
         framer: NWProtocolFramer.Instance,
@@ -97,7 +91,6 @@ nonisolated final class SLIPFramer: NWProtocolFramerImplementation {
         framer.writeOutput(data: SLIPCodec.encode(payload))
     }
 }
-
 
 nonisolated extension NWParameters {
     static func qlabTCP() -> NWParameters {

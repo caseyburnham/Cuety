@@ -1,8 +1,10 @@
 import Foundation
 
 /// SLIP (RFC 1055) framing for OSC 1.1 over TCP; decoding retains partial-read state.
-
 nonisolated enum SLIPCodec {
+    /// QLab replies can carry a whole workspace of JSON in one frame.
+    static let maximumFrameSize = 8 * 1024 * 1024
+
     static let end: UInt8 = 0xC0
     static let esc: UInt8 = 0xDB
     static let escEnd: UInt8 = 0xDC
@@ -31,56 +33,53 @@ nonisolated enum SLIPCodec {
     struct Decoder {
         let maximumFrameSize: Int
 
-        private var accumulator = Data()
-        private var danglingESC = false
+        /// The frame read so far, still waiting for its closing delimiter.
+        private(set) var buffer = Data()
+        private(set) var hasDanglingEscape = false
 
-        init(maximumFrameSize: Int = 8 * 1024 * 1024) {
+        init(maximumFrameSize: Int = SLIPCodec.maximumFrameSize) {
             self.maximumFrameSize = maximumFrameSize
         }
 
-        var bufferedByteCount: Int { accumulator.count }
-
-        var hasDanglingEscape: Bool { danglingESC }
-
         mutating func reset() {
-            accumulator.removeAll(keepingCapacity: false)
-            danglingESC = false
+            buffer.removeAll(keepingCapacity: false)
+            hasDanglingEscape = false
         }
 
-        mutating func decode(_ bytes: some Collection<UInt8>) throws -> [Data] {
+        mutating func decode(_ bytes: some Collection<UInt8>) throws(SLIPFramingError) -> [Data] {
             var frames: [Data] = []
 
             for byte in bytes {
-                if danglingESC {
-                    danglingESC = false
+                if hasDanglingEscape {
+                    hasDanglingEscape = false
                     switch byte {
                     case SLIPCodec.escEnd:
-                        accumulator.append(SLIPCodec.end)
+                        buffer.append(SLIPCodec.end)
                     case SLIPCodec.escEsc:
-                        accumulator.append(SLIPCodec.esc)
+                        buffer.append(SLIPCodec.esc)
                     default:
-                        accumulator.append(byte)
+                        buffer.append(byte)
                     }
                 } else {
                     switch byte {
                     case SLIPCodec.end:
-                        if !accumulator.isEmpty {
-                            frames.append(accumulator)
-                            accumulator.removeAll(keepingCapacity: true)
+                        if !buffer.isEmpty {
+                            frames.append(buffer)
+                            buffer.removeAll(keepingCapacity: true)
                         }
                         continue
                     case SLIPCodec.esc:
-                        danglingESC = true
+                        hasDanglingEscape = true
                         continue
                     default:
-                        accumulator.append(byte)
+                        buffer.append(byte)
                     }
                 }
 
-                if accumulator.count > maximumFrameSize {
-                    let buffered = accumulator.count
+                if buffer.count > maximumFrameSize {
+                    let buffered = buffer.count
                     reset()
-                    throw SLIPFramingError.frameTooLarge(
+                    throw .frameTooLarge(
                         bytesBuffered: buffered, limit: maximumFrameSize
                     )
                 }
@@ -90,7 +89,6 @@ nonisolated enum SLIPCodec {
         }
     }
 }
-
 
 nonisolated enum SLIPFramingError: LocalizedError, Hashable, Sendable {
     case frameTooLarge(bytesBuffered: Int, limit: Int)

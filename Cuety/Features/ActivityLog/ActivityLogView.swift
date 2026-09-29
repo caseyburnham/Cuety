@@ -278,7 +278,6 @@ struct ActivityLogView: View {
         }
     }
 
-
     private var directionPicker: some View {
         Picker("Show", selection: $presenter.directionFilter) {
             ForEach(ActivityLogPresenter.DirectionFilter.allCases) { filter in
@@ -375,7 +374,6 @@ struct ActivityLogView: View {
         }
     }
 
-
     private func statusBar(for snapshot: ActivityLogPresenter.Snapshot) -> some View {
         HStack(spacing: 16) {
             total(model.log.totalSent, direction: .outbound)
@@ -419,7 +417,6 @@ struct ActivityLogView: View {
         .help("\(direction.label) this session")
         .accessibilityLabel("\(count) \(direction.label.lowercased())")
     }
-
 
     @ViewBuilder
     private func messageInspector(for snapshot: ActivityLogPresenter.Snapshot) -> some View {

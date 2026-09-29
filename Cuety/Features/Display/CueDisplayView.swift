@@ -72,7 +72,6 @@ struct CueDisplayView: View {
         return client.cueLists.cueList(containing: cue.uniqueID)?.displayName
     }
 
-
     @ViewBuilder
     private func cueContent(_ cue: Cue) -> some View {
         VStack(spacing: model.isPresenting ? 12 : 8) {
@@ -85,7 +84,7 @@ struct CueDisplayView: View {
             if model.preferences.showsCueName, cue.displayNumber != nil,
                let name = cue.displayName {
                 Text(name)
-                    .font(typography.cueName(size: model.isPresenting ? 40 : 28))
+                    .font(typography.font(size: model.isPresenting ? 40 : 28))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
@@ -187,7 +186,6 @@ struct CueDisplayView: View {
             .tracking(Self.captionTracking)
     }
 
-
     @ViewBuilder
     private var emptyState: some View {
         if !client.status.hasLiveData {
@@ -248,7 +246,7 @@ struct CueDisplayView: View {
 
             VStack(spacing: 10) {
                 Text(client.status.title)
-                    .font(typography.cueName(size: 48))
+                    .font(typography.font(size: 48))
                     .lineLimit(2)
                     .minimumScaleFactor(0.4)
 

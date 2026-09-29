@@ -116,7 +116,6 @@ struct CueGraphTests {
         #expect(graph.rowsBelow("3", count: 5).map(\.uniqueID) == ["4"])
     }
 
-
     private func longList() -> Cue {
         cue("list", "Main", children: (1...6).map { cue("\($0)", "Cue \($0)") })
     }
@@ -201,7 +200,6 @@ struct CueGraphTests {
         #expect(neighbourhood.above.isEmpty)
         #expect(neighbourhood.below.isEmpty)
     }
-
 
     @Test("Every cue's number is collected, including nested ones")
     func cueNumbersIncludeNestedCues() {

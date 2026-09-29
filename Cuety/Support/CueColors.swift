@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The twenty named cue colors offered by QLab 5.2 and later.
-nonisolated enum QLabCueColor: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+nonisolated enum QLabCueColor: String, CaseIterable, Hashable, Sendable, Identifiable {
     case red
     case orange
     case yellow

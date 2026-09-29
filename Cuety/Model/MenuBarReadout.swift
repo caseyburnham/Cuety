@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum MenuBarReadout: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+enum MenuBarReadout: String, CaseIterable, Hashable, Sendable, Identifiable {
     case cueNumber
     case connectionStatus
     case heartbeat

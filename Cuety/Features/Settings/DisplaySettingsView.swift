@@ -97,7 +97,7 @@ struct DisplaySettingsView: View {
             Spacer(minLength: 12)
 
             Text(verbatim: "127.5")
-                .font(typography.drawerNumber(
+                .font(typography.font(
                     size: 40, weight: typography.cueNumberWeight
                 ))
                 .monospacedDigit()

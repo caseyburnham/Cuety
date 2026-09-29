@@ -68,6 +68,6 @@ struct CueMenuBarContent: View {
     private func showMainWindow() {
         NSApp.activate()
         openWindow(id: WindowID.main.rawValue)
-    } 
+    }
 }
 #endif

@@ -12,7 +12,6 @@ struct QLabReplyTests {
         OSCMessage("/reply" + address, [.string(json)])
     }
 
-
     @Test("Decodes an ok reply with a string payload")
     func decodesStringPayload() throws {
         let message = replyMessage(
@@ -27,7 +26,6 @@ struct QLabReplyTests {
         #expect(reply.address == "/workspace/ABC/connect")
         #expect(reply.data == "ok")
     }
-
 
     @Test(
         "Strips the workspace prefix when building a correlation key",
@@ -58,7 +56,6 @@ struct QLabReplyTests {
                 != QLabReplyParser.correlationKey(for: "/cue_id/OTHER/playbackPositionId")
         )
     }
-
 
     @Test(
         "Reads the access level from a connect reply",
@@ -130,7 +127,6 @@ struct QLabReplyTests {
         #expect(!reply.status.isSuccess)
     }
 
-
     @Test("Decodes the /workspaces payload")
     func decodesWorkspaces() throws {
         let json = """
@@ -160,7 +156,6 @@ struct QLabReplyTests {
         #expect(workspace.port == nil)
         #expect(workspace.version == nil)
     }
-
 
     private static let cueListsJSON = """
     {"address":"/workspace/ABC/cueLists","status":"ok","data":[
@@ -263,7 +258,6 @@ struct QLabReplyTests {
         #expect(cue.displayNumber == nil)
     }
 
-
     @Test("Decodes and merges valuesForKeys into a nested cue")
     func mergesValuesForKeys() throws {
         let json = """
@@ -309,7 +303,6 @@ struct QLabReplyTests {
         #expect(changed.isEmpty)
     }
 
-
     @Test("Correlates on the echoed address field")
     func correlatesOnEchoedAddress() {
         let message = replyMessage(
@@ -331,7 +324,6 @@ struct QLabReplyTests {
         #expect(!QLabReplyParser.isReply(OSCMessage("/update/workspace/ABC")))
         #expect(!QLabReplyParser.isReply(OSCMessage("/workspace/ABC/thump")))
     }
-
 
     @Test("Rejects a non-reply message")
     func rejectsNonReply() {

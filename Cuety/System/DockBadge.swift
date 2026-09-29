@@ -17,7 +17,7 @@ final class DockBadge {
             }
         }
     }
- 
+
 }
 #else
 @MainActor

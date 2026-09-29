@@ -4,9 +4,7 @@ import os
 import ShowControlCore
 
 /// `NWConnection` callbacks arrive on its queue; the actor isolates connection state.
-
 actor QLabConnection {
-
     enum Event: Sendable {
         case stateChanged(NWConnection.State)
         case pathChanged(isViable: Bool)
@@ -15,11 +13,11 @@ actor QLabConnection {
     }
 
     private let endpoint: NWEndpoint
-    private let logger = Logger(subsystem: "org.arvadacenter.Cuety", category: "QLabConnection")
+    private let logger = Logger(category: "QLabConnection")
 
     /// QLab replies can carry a whole workspace of JSON, so a packet may use
     /// the full SLIP frame; the remaining budgets keep the defaults.
-    static let decodingLimits = OSCCodec.Limits(maxPacketBytes: SLIPFramer.maximumFrameSize)
+    static let decodingLimits = OSCCodec.Limits(maxPacketBytes: SLIPCodec.maximumFrameSize)
 
     private var connection: NWConnection?
     private var continuation: AsyncStream<Event>.Continuation?
@@ -28,7 +26,7 @@ actor QLabConnection {
     private var readinessWaiters: [CheckedContinuation<Void, any Error>] = []
     private var readinessTimeout: Task<Void, Never>?
 
-    private let queue = DispatchQueue(label: "com.ivxx.Cuety.connection")
+    private let queue = DispatchQueue(label: "org.arvadacenter.Cuety.connection")
 
     // Keep buffering bounded; the client resynchronizes when events are dropped.
     static let eventBufferCapacity = 512
@@ -44,7 +42,6 @@ actor QLabConnection {
     func setEventsDroppedHandler(_ handler: (@Sendable (Int) async -> Void)?) {
         onEventsDropped = handler
     }
-
 
     func start() -> AsyncStream<Event> {
         closeConnection()
@@ -97,7 +94,6 @@ actor QLabConnection {
         continuation = nil
     }
 
-
     nonisolated enum ConnectFailure: LocalizedError {
         case timedOut
         case cancelled
@@ -138,7 +134,6 @@ actor QLabConnection {
         for waiter in waiters { waiter.resume(with: result) }
     }
 
-
     @discardableResult
     func send(_ message: OSCMessage) async throws -> Int {
         guard let connection, connection.state == .ready else {
@@ -174,7 +169,6 @@ actor QLabConnection {
             }
         }
     }
-
 
     private func receiveNextMessage(on connection: NWConnection) {
         connection.receiveMessage { [weak self] content, _, isComplete, error in
@@ -227,7 +221,6 @@ actor QLabConnection {
             return [.receiveFailed(error, byteCount: data.count)]
         }
     }
-
 
     private func handleStateChange(_ state: NWConnection.State) {
         switch state {

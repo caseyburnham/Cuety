@@ -397,7 +397,7 @@ private struct DrumLabel: View {
                     .foregroundStyle(rowNameStyle)
                     .opacity(1 - stacking)
             }
-            .font(typography.cueName(size: nameSize))
+            .font(typography.font(size: nameSize))
             .lineLimit(1)
             .truncationMode(.tail)
             .opacity(nameOpacity)
@@ -585,5 +585,3 @@ private struct PlayheadArrowGlyph: View, Animatable {
         .frame(width: 900, height: 560)
         .environment(AppModel.preview)
 }
-
-

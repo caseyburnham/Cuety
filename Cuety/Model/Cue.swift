@@ -7,13 +7,6 @@ nonisolated struct QLabWorkspaceInfo: Decodable, Hashable, Sendable, Identifiabl
     let version: String?
 
     var id: String { uniqueID }
-
-    private enum CodingKeys: String, CodingKey {
-        case uniqueID
-        case displayName
-        case port
-        case version
-    }
 }
 
 nonisolated struct Cue: Hashable, Sendable, Identifiable {
@@ -100,7 +93,7 @@ nonisolated enum PlayheadState: Hashable, Sendable {
     }
 }
 
-nonisolated enum ContinueMode: Int, Hashable, Sendable, Codable {
+nonisolated enum ContinueMode: Int, Hashable, Sendable {
     case doNotContinue = 0
     case autoContinue = 1
     case autoFollow = 2
@@ -292,7 +285,6 @@ nonisolated extension Array<Cue> {
         first { $0.children.firstCue(withID: cueID) != nil }
     }
 }
-
 
 nonisolated extension Cue: Decodable {
     private enum CodingKeys: String, CodingKey {

@@ -6,7 +6,7 @@ import ShowControlCore
 @Observable
 @MainActor
 final class QLabClient {
-    private let logger = Logger(subsystem: "org.arvadacenter.Cuety", category: "QLabClient")
+    private let logger = Logger(category: "QLabClient")
     private let preferences: Preferences
     private let log: ActivityLog
 
@@ -1105,11 +1105,6 @@ final class QLabClient {
         return watchedGraph?.cue(withID: cueID) ?? cueLists.firstCue(withID: cueID)
     }
 
-    var liveCue: Cue? {
-        guard status.hasLiveData else { return nil }
-        return playheadCue
-    }
-
     /// The cues on screen: the one standing by, plus the drawer rows either
     /// side of it. Details are fetched for all of them, so an upcoming cue
     /// says what it will do before the playhead ever reaches it.
@@ -1430,4 +1425,3 @@ final class QLabClient {
     }
 
 }
-

@@ -4,15 +4,11 @@ import os
 import ShowControlCore
 
 /// QLab advertises Bonjour services as `_qlab._tcp`; `.service` endpoints are resolved by Network.
-
 @Observable
 @MainActor
 final class QLabBrowser {
-    private let logger = Logger(subsystem: "org.arvadacenter.Cuety", category: "QLabBrowser")
-    private static let persistenceLogger = Logger(
-        subsystem: "org.arvadacenter.Cuety",
-        category: "QLabBrowser.Persistence"
-    )
+    private let logger = Logger(category: "QLabBrowser")
+    private static let persistenceLogger = Logger(category: "QLabBrowser.Persistence")
 
     static let serviceType = ShowControlDefaults.qlabBonjourService
 
@@ -24,7 +20,7 @@ final class QLabBrowser {
 
     private var browser: NWBrowser?
     private let pathMonitor = NWPathMonitor()
-    private let pathMonitorQueue = DispatchQueue(label: "com.ivxx.Cuety.browserPathMonitor")
+    private let pathMonitorQueue = DispatchQueue(label: "org.arvadacenter.Cuety.browserPathMonitor")
     private var lastPathStatus: NWPath.Status?
     private let defaults: UserDefaults
 

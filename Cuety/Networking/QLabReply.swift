@@ -79,7 +79,6 @@ nonisolated enum QLabAccessLevel: Hashable, Sendable {
     }
 }
 
-
 nonisolated enum QLabReplyParser {
     nonisolated enum Failure: LocalizedError {
         case notAReply(address: String)

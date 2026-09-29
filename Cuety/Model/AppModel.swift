@@ -503,14 +503,6 @@ final class AppModel {
         isSidebarVisible.toggle()
     }
 
-    func toggleDrawer() {
-        setShowsDrawer(!preferences.showsDrawer)
-    }
-
-    func toggleCueLayout() {
-        setCueLayout(preferences.cueLayout == .list ? .display : .list)
-    }
-
     func setCueLayout(_ layout: CueLayout) {
         guard layout != preferences.cueLayout else { return }
         withAnimation(Motion.chrome.unlessMotionIsReduced) {

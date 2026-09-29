@@ -40,15 +40,8 @@ struct Typography {
         font(size: size, weight: cueNumberWeight)
     }
 
-    func cueName(size: CGFloat, weight: Font.Weight = .medium) -> Font {
-        font(size: size, weight: weight)
-    }
-
-    func drawerNumber(size: CGFloat, weight: Font.Weight) -> Font {
-        font(size: size, weight: weight)
-    }
-
-    private func font(size: CGFloat, weight: Font.Weight) -> Font {
+    /// The system font in the chosen design. Names default to medium weight.
+    func font(size: CGFloat, weight: Font.Weight = .medium) -> Font {
         .system(size: size, weight: weight, design: design)
     }
 
@@ -118,7 +111,7 @@ struct Typography {
         return widest
     }
 
-    /// The width `text` takes as a drawer number: `drawerNumber(size:weight:)`
+    /// The width `text` takes as a drawer number: `font(size:weight:)`
     /// with `.monospacedDigit()`, rounded up to whole points.
     func drawerNumberWidth(of text: String, size: CGFloat, weight: Font.Weight) -> CGFloat {
         let font = measuringFont(size: size, weight: Self.platformWeight(for: weight))

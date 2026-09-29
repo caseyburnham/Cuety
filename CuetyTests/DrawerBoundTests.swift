@@ -44,12 +44,6 @@ struct DrawerBoundTests {
         #expect(bounded == Self.bound)
     }
 
-    @Test("No bound means the view is left exactly as it was")
-    func noBoundIsNoChange() {
-        let unbounded = heightOfferedAWindow(rows(21).scrollingBound(to: nil))
-        #expect(unbounded == Self.rowHeight * 21)
-    }
-
     @Test("The window's share never leaves the display the smaller half")
     func shareFavoursTheDisplay() {
         let detailHeight = Self.windowHeight

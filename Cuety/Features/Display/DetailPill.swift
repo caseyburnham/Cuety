@@ -440,7 +440,7 @@ struct DetailPillsRow: View {
 
         for entry in entries {
             if entry.kind == .notes {
-                if noteEntry == nil { noteEntry = entry }
+                noteEntry = entry
             } else {
                 inlineEntries.append(entry)
             }
@@ -480,7 +480,6 @@ struct DetailPillsRow: View {
         }
     }
 }
-
 
 #Preview("Action cue") {
     var cue = Cue(uniqueID: "c")

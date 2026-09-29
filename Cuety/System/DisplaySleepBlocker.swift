@@ -9,7 +9,7 @@ import UIKit
 /// while Cuety is in the foreground.
 @MainActor
 final class DisplaySleepBlocker {
-    private let logger = Logger(subsystem: "org.arvadacenter.Cuety", category: "KeepAwake")
+    private let logger = Logger(category: "KeepAwake")
 
 #if os(macOS)
     private var token: NSObjectProtocol?

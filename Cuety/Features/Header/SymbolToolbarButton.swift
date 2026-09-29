@@ -61,7 +61,6 @@ final class SymbolToolbarButton: NSButton {
         fatalError("SymbolToolbarButton is built in code, never from a nib")
     }
 
-
     func setSymbol(_ symbol: String) {
         glyphState.symbol = symbol
     }
@@ -105,7 +104,6 @@ final class SymbolToolbarButton: NSButton {
         glyphState.isWorking = working
     }
 
-
     private static func glyphSize(fitting symbols: [String]) -> NSSize {
         let sizer = NSImageView()
         sizer.symbolConfiguration = symbolConfiguration
@@ -128,6 +126,6 @@ final class SymbolToolbarButton: NSButton {
         let placeholder = NSImage(size: size, flipped: false) { _ in true }
         placeholder.isTemplate = true
         return placeholder
-    } 
+    }
 }
 #endif

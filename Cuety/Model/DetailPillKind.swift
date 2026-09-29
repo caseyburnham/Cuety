@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum DetailPillKind: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+enum DetailPillKind: String, CaseIterable, Hashable, Sendable, Identifiable {
     case broken
     case cueType
     case duration
@@ -26,9 +26,7 @@ enum DetailPillKind: String, CaseIterable, Codable, Hashable, Sendable, Identifi
 
     /// A cue QLab cannot fire is not something an operator should have to
     /// opt into being told about, so this pill ignores the enabled set.
-    static let alwaysVisible: Set<DetailPillKind> = [.broken]
-
-    var isAlwaysVisible: Bool { Self.alwaysVisible.contains(self) }
+    var isAlwaysVisible: Bool { self == .broken }
 
     var title: String {
         switch self {

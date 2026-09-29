@@ -25,11 +25,11 @@ struct StatusToolbarActions {
 }
 
 private extension NSToolbarItem.Identifier {
-    static let cuetyRefresh = Self("com.ivxx.Cuety.toolbar.refresh")
-    static let cuetyKeepAwake = Self("com.ivxx.Cuety.toolbar.keepAwake")
-    static let cuetyPerformanceMode = Self("com.ivxx.Cuety.toolbar.performanceMode")
-    static let cuetyActivityLog = Self("com.ivxx.Cuety.toolbar.activityLog")
-    static let cuetyConnectionStatus = Self("com.ivxx.Cuety.toolbar.connectionStatus")
+    static let cuetyRefresh = Self("org.arvadacenter.Cuety.toolbar.refresh")
+    static let cuetyKeepAwake = Self("org.arvadacenter.Cuety.toolbar.keepAwake")
+    static let cuetyPerformanceMode = Self("org.arvadacenter.Cuety.toolbar.performanceMode")
+    static let cuetyActivityLog = Self("org.arvadacenter.Cuety.toolbar.activityLog")
+    static let cuetyConnectionStatus = Self("org.arvadacenter.Cuety.toolbar.connectionStatus")
 }
 
 @MainActor
@@ -48,7 +48,7 @@ final class StatusToolbarController: NSObject, NSToolbarDelegate {
     private weak var statusButton: SymbolToolbarButton?
 
     override init() {
-        toolbar = NSToolbar(identifier: "com.ivxx.Cuety.toolbar")
+        toolbar = NSToolbar(identifier: "org.arvadacenter.Cuety.toolbar")
         super.init()
 
         toolbar.delegate = self

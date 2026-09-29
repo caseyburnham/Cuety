@@ -82,10 +82,8 @@ struct FullScreenPresentation: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { NSView() }
 
     func updateNSView(_ view: NSView, context: Context) {
-        let isPresenting = isPresenting
         let coordinator = context.coordinator
         coordinator.onFullScreenChange = onFullScreenChange
-
         coordinator.scheduleApply(isPresenting: isPresenting, to: view)
     }
 }

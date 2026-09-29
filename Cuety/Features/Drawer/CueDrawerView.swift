@@ -230,19 +230,14 @@ struct CueDrawerView: View {
 }
 
 extension View {
-    @ViewBuilder
-    func scrollingBound(to maxHeight: CGFloat?) -> some View {
-        if let maxHeight {
-            BoundedHeightLayout(maxHeight: maxHeight) {
-                ViewThatFits(in: .vertical) {
-                    self
+    func scrollingBound(to maxHeight: CGFloat) -> some View {
+        BoundedHeightLayout(maxHeight: maxHeight) {
+            ViewThatFits(in: .vertical) {
+                self
 
-                    ScrollView(.vertical) { self }
-                        .defaultScrollAnchor(.center)
-                }
+                ScrollView(.vertical) { self }
+                    .defaultScrollAnchor(.center)
             }
-        } else {
-            self
         }
     }
 }
@@ -352,7 +347,7 @@ struct CueRowView: View {
                 .foregroundStyle(cue.displayNumber == nil ? .tertiary : .primary)
 
             Text(cue.displayName ?? "Untitled")
-                .font(typography.cueName(
+                .font(typography.font(
                     size: role.fontSize * Role.nameSizeRatio, weight: role.weight
                 ))
                 .lineLimit(1)
@@ -381,7 +376,7 @@ struct CueRowView: View {
 
     private var numberColumn: some View {
         Text(cue.displayNumber ?? "–")
-            .font(typography.drawerNumber(size: role.fontSize, weight: role.weight))
+            .font(typography.font(size: role.fontSize, weight: role.weight))
             .monospacedDigit()
             .lineLimit(1)
             .fixedSize()

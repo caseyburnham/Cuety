@@ -63,7 +63,6 @@ nonisolated struct QLabServer: Identifiable, Hashable, Sendable {
         )
     }
 
-
     static func identity(host: String, port: UInt16) -> String {
         let normalized = normalizedHost(host)
         return "\(isThisMac(normalized) ? "localhost" : normalized):\(port)"

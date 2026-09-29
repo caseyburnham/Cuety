@@ -1,8 +1,8 @@
 #if os(macOS)
 import AppKit
 
-/// Restores the window's original mouse-move setting when presentation mode ends.
-
+/// Hides the pointer while presenting, bringing it back as soon as the mouse
+/// moves, and restores the window's mouse-move setting when presentation ends.
 @MainActor
 final class PointerHider {
     private static let idleDelay = Duration.seconds(3)
@@ -56,6 +56,6 @@ final class PointerHider {
             guard !Task.isCancelled else { return }
             NSCursor.setHiddenUntilMouseMoves(true)
         }
-    } 
+    }
 }
 #endif

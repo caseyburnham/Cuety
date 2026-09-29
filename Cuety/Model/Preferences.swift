@@ -8,7 +8,7 @@ import UIKit
 typealias PlatformFont = UIFont
 #endif
 
-enum AppearanceMode: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+enum AppearanceMode: String, CaseIterable, Hashable, Sendable, Identifiable {
     case automatic
     case light
     case dark
@@ -40,7 +40,7 @@ enum AppearanceMode: String, CaseIterable, Codable, Hashable, Sendable, Identifi
     }
 }
 
-enum FontWeightChoice: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+enum FontWeightChoice: String, CaseIterable, Hashable, Sendable, Identifiable {
     case regular
     case medium
     case semibold
@@ -86,7 +86,7 @@ enum FontWeightChoice: String, CaseIterable, Codable, Hashable, Sendable, Identi
 
 /// How the detail pane presents the playhead: the big standby display with the
 /// drawer beneath it, or the whole pane given over to the cue list.
-enum CueLayout: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+enum CueLayout: String, CaseIterable, Hashable, Sendable, Identifiable {
     case display
     case list
 
@@ -110,7 +110,7 @@ enum CueLayout: String, CaseIterable, Codable, Hashable, Sendable, Identifiable 
     }
 }
 
-enum PillSize: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+enum PillSize: String, CaseIterable, Hashable, Sendable, Identifiable {
     case small
     case medium
     case large
@@ -171,7 +171,7 @@ enum PillSize: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
 }
 
 /// How the standby display sizes the cue number.
-enum CueNumberSizing: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+enum CueNumberSizing: String, CaseIterable, Hashable, Sendable, Identifiable {
     /// Sized to fit the widest number in the cue list, so every cue in the
     /// list is drawn at the same size.
     case fixed
@@ -191,7 +191,7 @@ enum CueNumberSizing: String, CaseIterable, Codable, Hashable, Sendable, Identif
     }
 }
 
-enum PlayheadAccent: String, Codable, Hashable, Sendable, Identifiable {
+enum PlayheadAccent: String, Hashable, Sendable, Identifiable {
     case systemBlue
     case standbyCue
     case red
@@ -253,13 +253,11 @@ final class Preferences {
 
     let defaults: UserDefaults
 
-
     private var storedDrawerRowCount: Int
     private var storedDefaultPort: Int
     private var storedHeartbeatInterval: TimeInterval
     private var storedRequestTimeout: TimeInterval
     private var storedCustomCueNumberSize: Double
-
 
     var appearance: AppearanceMode {
         didSet { defaults.set(appearance.rawValue, forKey: Key.appearance) }
@@ -285,7 +283,6 @@ final class Preferences {
             defaults.set(storedCustomCueNumberSize, forKey: Key.customCueNumberSize)
         }
     }
-
 
     var showsCueName: Bool {
         didSet { defaults.set(showsCueName, forKey: Key.showsCueName) }
@@ -314,7 +311,6 @@ final class Preferences {
         }
     }
 
-
     var enabledPills: Set<DetailPillKind> {
         didSet { persistEnabledPills() }
     }
@@ -331,7 +327,6 @@ final class Preferences {
         DetailPillKind.defaultOrder.filter { enabledPills.contains($0) || $0.isAlwaysVisible }
     }
 
-
     var showsMenuBarExtra: Bool {
         didSet { defaults.set(showsMenuBarExtra, forKey: Key.showsMenuBarExtra) }
     }
@@ -344,7 +339,6 @@ final class Preferences {
         didSet { defaults.set(showsDockBadge, forKey: Key.showsDockBadge) }
     }
 
-
     var keepsDisplayAwake: Bool {
         didSet { defaults.set(keepsDisplayAwake, forKey: Key.keepsDisplayAwake) }
     }
@@ -352,7 +346,6 @@ final class Preferences {
     var performanceMode: Bool {
         didSet { defaults.set(performanceMode, forKey: Key.performanceMode) }
     }
-
 
     var defaultPort: Int {
         get { storedDefaultPort }
@@ -388,7 +381,6 @@ final class Preferences {
             defaults.set(lastWorkspace?.workspaceID, forKey: Key.lastWorkspaceID)
         }
     }
-
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -446,7 +438,6 @@ final class Preferences {
         }
     }
 
-
     private static func loadEnabledPills(from defaults: UserDefaults) -> Set<DetailPillKind> {
         guard let stored = defaults.array(forKey: Key.enabledPills) as? [String] else {
             return DetailPillKind.defaultEnabled
@@ -458,7 +449,6 @@ final class Preferences {
     private func persistEnabledPills() {
         defaults.set(enabledPills.map(\.rawValue), forKey: Key.enabledPills)
     }
-
 
     private enum Key {
         static let appearance = "appearance"

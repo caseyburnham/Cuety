@@ -37,7 +37,7 @@ final class MainSplitViewController: NSSplitViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        splitView.autosaveName = "com.ivxx.Cuety.mainSplitView"
+        splitView.autosaveName = "org.arvadacenter.Cuety.mainSplitView"
     }
 
     var isSidebarVisible: Bool { !sidebarItem.isCollapsed }

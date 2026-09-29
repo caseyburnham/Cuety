@@ -105,8 +105,6 @@ private struct SettingsWindowHeight: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { NSView() }
 
     func updateNSView(_ view: NSView, context: Context) {
-        let height = height
-        let isAnimated = isAnimated
         context.coordinator.scheduleUpdate(
             for: view,
             height: height,

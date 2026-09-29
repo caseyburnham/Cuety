@@ -24,8 +24,6 @@ engineering audit of 2026-09-26 is implemented except where noted here.
 
 ## Cleanup still to decide
 
-- `cuety-icon-2.icon`: archive only after confirming it is not in the target's resources
-  (the group is filesystem-synchronized, so a missing project reference proves nothing).
 - iOS no-op platform wrappers in `DockBadge.swift` and `FullScreenPresentation.swift`
   (optional; not a performance item).
 - Pointer hiding is duplicated with Viewtiful; a candidate for optional platform support,

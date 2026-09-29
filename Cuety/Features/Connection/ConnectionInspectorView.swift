@@ -41,7 +41,6 @@ struct ConnectionInspectorView: View {
         }
     }
 
-
     private var statusSection: some View {
         Section {
             HStack(spacing: 12) {
@@ -245,7 +244,6 @@ struct ConnectionInspectorView: View {
             }
         }
     }
-
 
     private var watchedCueListName: String? {
         guard let id = client.watchedCueListID else { return nil }

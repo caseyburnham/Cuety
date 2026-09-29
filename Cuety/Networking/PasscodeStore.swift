@@ -24,7 +24,7 @@ nonisolated extension PasscodeStoring {
 }
 
 nonisolated struct PasscodeStore: PasscodeStoring {
-    private let logger = Logger(subsystem: "org.arvadacenter.Cuety", category: "PasscodeStore")
+    private let logger = Logger(category: "PasscodeStore")
 
     private static let service = "Cuety QLab Passcodes"
     private static let legacyService = "com.ivxx.Cuety.qlab-passcode"
@@ -54,7 +54,6 @@ nonisolated struct PasscodeStore: PasscodeStoring {
             kSecAttrAccount as String: account(serverID: serverID, workspaceID: workspaceID),
         ]
     }
-
 
     func passcode(serverID: String, workspaceID: String) -> String? {
         for service in [Self.service, Self.legacyService] {
@@ -140,7 +139,6 @@ nonisolated struct PasscodeStore: PasscodeStoring {
 
         return found
     }
-
 
     func save(_ passcode: String, serverID: String, workspaceID: String) throws {
         guard !passcode.isEmpty else {

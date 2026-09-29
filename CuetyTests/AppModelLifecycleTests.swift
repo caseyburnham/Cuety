@@ -138,7 +138,6 @@ struct AppModelLifecycleTests {
         #expect(Preferences(defaults: defaults).lastWorkspace == nil)
     }
 
-
     @Test("Leaving presentation mode restores the sidebar it collapsed")
     func presentationRestoresTheSidebar() throws {
         let model = try makeModel()

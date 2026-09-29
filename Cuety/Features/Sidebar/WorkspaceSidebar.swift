@@ -17,7 +17,7 @@ struct WorkspaceSidebar: View {
 
     var body: some View {
         List(selection: sidebarSelection) {
-            ForEach(visibleServers) { server in
+            ForEach(model.browser.orderedServers) { server in
                 serverSection(server)
             }
 
@@ -100,8 +100,6 @@ struct WorkspaceSidebar: View {
             }
         }
     }
-
-    private var visibleServers: [QLabServer] { model.browser.orderedServers }
 
     private var sidebarSelection: Binding<Selection?> {
         Binding {

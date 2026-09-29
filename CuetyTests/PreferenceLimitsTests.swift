@@ -10,7 +10,6 @@ struct PreferenceLimitsTests {
         Preferences(defaults: EphemeralDefaults())
     }
 
-
     @Test("A value above the maximum is held to it, and settles")
     func assignmentClampsHigh() throws {
         let preferences = try preferences()
@@ -82,7 +81,6 @@ struct PreferenceLimitsTests {
         #expect(reloaded.playheadAccent == .skyBlue)
     }
 
-
     @Test("An out-of-range stored value is clamped as it is read")
     func loadingClampsStoredValues() throws {
         let defaults = EphemeralDefaults()
@@ -108,7 +106,6 @@ struct PreferenceLimitsTests {
         #expect(preferences.heartbeatInterval == 5)
         #expect(preferences.requestTimeout == 5)
     }
-
 
     @Test("Changing a clamped preference still notifies observers")
     func clampedPropertiesRemainObservable() async throws {
