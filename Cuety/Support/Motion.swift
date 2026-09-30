@@ -1,5 +1,4 @@
 import SwiftUI
-import ShowControlCore
 #if os(macOS)
 import AppKit
 #else
@@ -7,13 +6,13 @@ import UIKit
 #endif
 
 enum Motion {
-    static let cueChange = Animation.spring(response: ShowControlMotion.cueChangeResponse, dampingFraction: 0.82)
+    static let cueChange = Animation.spring(response: 0.34, dampingFraction: 0.82)
 
     static let pill = Animation.spring(response: 0.42, dampingFraction: 0.78)
 
-    static let chrome = Animation.spring(response: ShowControlMotion.chromeResponse, dampingFraction: 0.86)
+    static let chrome = Animation.spring(response: 0.50, dampingFraction: 0.86)
 
-    static let status = Animation.smooth(duration: ShowControlMotion.statusDuration)
+    static let status = Animation.smooth(duration: 0.45)
 
     static let drawerShift = Animation.spring(response: 0.38, dampingFraction: 0.85)
 

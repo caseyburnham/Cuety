@@ -94,7 +94,7 @@ discovery finding nothing.
 | `CuetyTests` | Protocol, session, and model tests |
 | `../SHOW_CONTROL_COMPANION_CONTRACT.md` | Shared Cuety/Viewtiful platform and transport contract |
 | `BACKLOG.md` | Current open work and release verification |
-| `POLISH_PLAN.md` | Archived 2026-09-27 — historical record of the September polish pass |
+| `Archive/POLISH_PLAN.md` | Historical record of the September 2026 polish pass; not current guidance |
 
 ## Licence
 

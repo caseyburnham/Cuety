@@ -1,6 +1,6 @@
 # Cuety — Backlog
 
-Current open work. The September polish pass is archived in `POLISH_PLAN.md`; the
+Current open work. The September polish pass is archived in `Archive/POLISH_PLAN.md`; the
 engineering audit of 2026-09-26 is implemented except where noted here.
 
 ## Needs measurement before any change
