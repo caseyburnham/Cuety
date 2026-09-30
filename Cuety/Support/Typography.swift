@@ -25,7 +25,7 @@ struct Typography {
         self.cueNumberWeight = preferences.fontWeight.weight
         self.cueNumberSizing = preferences.cueNumberSizing
         self.customCueNumberSize = CGFloat(preferences.customCueNumberSize)
-        self.measuringWeight = preferences.fontWeight.platformWeight
+        self.measuringWeight = Self.platformWeight(for: preferences.fontWeight.weight)
     }
 
     private var design: Font.Design {

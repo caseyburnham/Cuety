@@ -110,6 +110,7 @@ struct CompactToolbarActions: ViewModifier {
         content()
             .environment(model)
             .preferredColorScheme(model.preferences.appearance.colorScheme)
+            .reducingMotionWhenRequested()
     }
 }
 

@@ -426,33 +426,19 @@ struct ActivityLogView: View {
             if let entry = inspectedEntry {
                 Form {
                     Section {
-                        VStack(spacing: 0) {
-                            inspectorRow("Direction") {
-                                Label(entry.direction.label, systemImage: entry.direction.systemImage)
-                                    .foregroundStyle(entry.direction.tint)
-                            }
-
-                            Divider()
-                                .padding(.vertical, Self.inspectorRowSpacing)
-
-                            inspectorRow("Time") {
-                                Text(entry.timestamp, format: .dateTime
-                                    .hour().minute().second().secondFraction(.fractional(3)))
-                                    .monospacedDigit()
-                            }
-
-                            Divider()
-                                .padding(.vertical, Self.inspectorRowSpacing)
-
-                            inspectorRow("Size") {
-                                Text("\(entry.byteCount.formatted()) bytes")
-                                    .monospacedDigit()
-                            }
+                        LabeledContent("Direction") {
+                            Label(entry.direction.label, systemImage: entry.direction.systemImage)
+                                .foregroundStyle(entry.direction.tint)
                         }
-                        .frame(maxWidth: .infinity)
-#if os(iOS)
-                        .padding(.vertical, 4)
-#endif
+                        LabeledContent("Time") {
+                            Text(entry.timestamp, format: .dateTime
+                                .hour().minute().second().secondFraction(.fractional(3)))
+                                .monospacedDigit()
+                        }
+                        LabeledContent("Size") {
+                            Text("\(entry.byteCount.formatted()) bytes")
+                                .monospacedDigit()
+                        }
                     }
 
                     Section("Address") {
@@ -483,25 +469,6 @@ struct ActivityLogView: View {
             }
         }
         .inspectorColumnWidth(min: 260, ideal: 340, max: 640)
-    }
-
-    /// iOS rows are taller and touch-sized, so the stacked rows need more room.
-#if os(iOS)
-    private static let inspectorRowSpacing: CGFloat = 11
-#else
-    private static let inspectorRowSpacing: CGFloat = 6
-#endif
-
-    private func inspectorRow<Content: View>(
-        _ title: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(title)
-            Spacer(minLength: 12)
-            content()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func copyableLines(

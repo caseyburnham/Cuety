@@ -76,9 +76,11 @@ struct PreferenceLimitsTests {
         #expect(preferences.playheadAccent == .systemBlue)
         #expect(PlayheadAccent.allCases.count == 22)
 
-        preferences.playheadAccent = .skyBlue
+        preferences.playheadAccent = .cue(.skyBlue)
+        // Stored under QLab's name for the color, as before accents wrapped it.
+        #expect(defaults.string(forKey: "playheadAccent") == "sky blue")
         let reloaded = Preferences(defaults: defaults)
-        #expect(reloaded.playheadAccent == .skyBlue)
+        #expect(reloaded.playheadAccent == .cue(.skyBlue))
     }
 
     @Test("An out-of-range stored value is clamped as it is read")

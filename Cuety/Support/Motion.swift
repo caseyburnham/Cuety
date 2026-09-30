@@ -23,8 +23,29 @@ enum Motion {
 }
 
 extension View {
+    /// Cuety's Reduce Motion policy for a whole presentation: with the setting
+    /// on, no change inside it animates, whatever started the animation.
+    /// Presentations do not inherit it, so each window, sheet and popover
+    /// root applies it once.
+    func reducingMotionWhenRequested() -> some View {
+        modifier(ReducedMotionTransactions())
+    }
+
     func motion<V: Equatable>(_ animation: Animation, value: V) -> some View {
         modifier(ReducibleMotion(animation: animation, value: value))
+    }
+}
+
+private struct ReducedMotionTransactions: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.transaction { transaction in
+            if reduceMotion {
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
+        }
     }
 }
 

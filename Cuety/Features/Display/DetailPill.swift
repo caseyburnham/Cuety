@@ -141,7 +141,7 @@ struct DetailPill: View {
         case .duration:
             guard let duration = cue.duration, duration > 0 else { return nil }
             return Content(
-                text: formatDuration(duration),
+                text: duration.cueDurationText,
                 systemImage: kind.systemImage,
                 help: "Duration"
             )
@@ -149,7 +149,7 @@ struct DetailPill: View {
         case .preWait:
             guard let preWait = cue.preWait, preWait > 0 else { return nil }
             return Content(
-                text: formatDuration(preWait),
+                text: preWait.cueDurationText,
                 systemImage: kind.systemImage,
                 tint: .orange,
                 help: "Pre-wait"
@@ -158,20 +158,22 @@ struct DetailPill: View {
         case .postWait:
             guard let postWait = cue.postWait, postWait > 0 else { return nil }
             return Content(
-                text: formatDuration(postWait),
+                text: postWait.cueDurationText,
                 systemImage: kind.systemImage,
                 tint: .orange,
                 help: "Post-wait"
             )
 
-        case .continueMode:
-            guard let mode = cue.continueMode, mode != .doNotContinue else { return nil }
-            return Content(
-                text: mode.title,
-                systemImage: mode.systemImage,
-                tint: .blue,
-                help: "This cue continues automatically"
-            )
+        case .broken, .armed, .loaded, .flagged, .continueMode:
+            return CueState.state(kind, of: cue).map { state in
+                Content(
+                    text: state.title,
+                    systemImage: state.systemImage,
+                    tint: state.tint,
+                    help: state.help,
+                    glyphRotation: state.rotation
+                )
+            }
 
         case .cueList:
             guard let cueListName, !cueListName.isEmpty else { return nil }
@@ -180,43 +182,6 @@ struct DetailPill: View {
                 systemImage: kind.systemImage,
                 help: "Cue list",
                 isFlexible: true
-            )
-
-        case .broken:
-            guard cue.isBroken == true else { return nil }
-            return Content(
-                text: "Broken",
-                systemImage: kind.systemImage,
-                tint: .red,
-                help: "Broken Cue"
-            )
-
-        case .armed:
-            guard cue.isArmed == false else { return nil }
-            return Content(
-                text: "Disarmed",
-                systemImage: kind.systemImage,
-                tint: .red,
-                help: "Disarmed",
-                glyphRotation: kind.glyphRotation
-            )
-
-        case .loaded:
-            guard cue.isLoaded == true else { return nil }
-            return Content(
-                text: "Loaded",
-                systemImage: kind.systemImage,
-                tint: .yellow,
-                help: "QLab has loaded this cue"
-            )
-
-        case .flagged:
-            guard cue.isFlagged == true else { return nil }
-            return Content(
-                text: "Flagged",
-                systemImage: kind.systemImage,
-                tint: .yellow,
-                help: "This cue is flagged"
             )
 
         case .notes:
@@ -282,15 +247,6 @@ struct DetailPill: View {
 
     static func glyphRotation(forCueType type: String) -> Angle {
         type.lowercased() == "disarm" ? .degrees(180) : .zero
-    }
-
-    static func formatDuration(_ interval: TimeInterval) -> String {
-        if interval < 60 {
-            return interval.formatted(.number.precision(.fractionLength(interval < 10 ? 1 : 0))) + "s"
-        }
-        let minutes = Int(interval) / 60
-        let seconds = Int(interval) % 60
-        return String(format: "%d:%02d", minutes, seconds)
     }
 }
 

@@ -82,7 +82,7 @@ private struct CueDrum: View {
                     DetailPillsRow(
                         cue: standby,
                         kinds: model.preferences.visiblePills,
-                        cueListName: watchedCueListName,
+                        cueListName: model.client.watchedCueList?.displayName,
                         size: pillSize,
                         showsCueTypeLabel: model.preferences.showsCueTypeLabel,
                         performanceMode: model.preferences.performanceMode
@@ -127,10 +127,6 @@ private struct CueDrum: View {
 
     private var animatesShift: Bool {
         !model.preferences.performanceMode && !reduceMotion
-    }
-
-    private var watchedCueListName: String? {
-        model.client.cueLists.first { $0.uniqueID == model.client.watchedCueListID }?.displayName
     }
 
     /// Lays the standby position out the way the display does: the number

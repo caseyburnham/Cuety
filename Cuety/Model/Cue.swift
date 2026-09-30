@@ -148,67 +148,32 @@ nonisolated extension Cue {
         )
     }
 
+    /// Takes every value `values` supplies, leaving the rest alone.
+    /// - Returns: Whether anything changed.
     @discardableResult
     mutating func apply(_ values: QLabCueValues) -> Bool {
         var changed = false
 
-        if let number = values.number, self.number != number {
-            self.number = number
+        func take<Value: Equatable>(_ value: Value?, for keyPath: WritableKeyPath<Cue, Value?>) {
+            guard let value, self[keyPath: keyPath] != value else { return }
+            self[keyPath: keyPath] = value
             changed = true
         }
-        if let name = values.name, self.name != name {
-            self.name = name
-            changed = true
-        }
-        if let listName = values.listName, self.listName != listName {
-            self.listName = listName
-            changed = true
-        }
-        if let type = values.type, self.type != type {
-            self.type = type
-            changed = true
-        }
-        if let colorName = values.colorName, self.colorName != colorName {
-            self.colorName = colorName
-            changed = true
-        }
-        if let flagged = values.flagged, self.isFlagged != flagged {
-            self.isFlagged = flagged
-            changed = true
-        }
-        if let armed = values.armed, self.isArmed != armed {
-            self.isArmed = armed
-            changed = true
-        }
-        if let notes = values.notes, self.notes != notes {
-            self.notes = notes
-            changed = true
-        }
-        if let duration = values.duration, self.duration != duration {
-            self.duration = duration
-            changed = true
-        }
-        if let preWait = values.preWait, self.preWait != preWait {
-            self.preWait = preWait
-            changed = true
-        }
-        if let postWait = values.postWait, self.postWait != postWait {
-            self.postWait = postWait
-            changed = true
-        }
-        if let mode = values.continueMode.flatMap(ContinueMode.init(rawValue:)),
-           self.continueMode != mode {
-            self.continueMode = mode
-            changed = true
-        }
-        if let broken = values.isBroken, self.isBroken != broken {
-            self.isBroken = broken
-            changed = true
-        }
-        if let loaded = values.isLoaded, self.isLoaded != loaded {
-            self.isLoaded = loaded
-            changed = true
-        }
+
+        take(values.number, for: \.number)
+        take(values.name, for: \.name)
+        take(values.listName, for: \.listName)
+        take(values.type, for: \.type)
+        take(values.colorName, for: \.colorName)
+        take(values.flagged, for: \.isFlagged)
+        take(values.armed, for: \.isArmed)
+        take(values.notes, for: \.notes)
+        take(values.duration, for: \.duration)
+        take(values.preWait, for: \.preWait)
+        take(values.postWait, for: \.postWait)
+        take(values.continueMode.flatMap(ContinueMode.init(rawValue:)), for: \.continueMode)
+        take(values.isBroken, for: \.isBroken)
+        take(values.isLoaded, for: \.isLoaded)
 
         return changed
     }

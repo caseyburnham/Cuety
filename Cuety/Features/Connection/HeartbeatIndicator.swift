@@ -37,8 +37,7 @@ extension QLabClient {
 
         var lines = ["Receiving heartbeats from QLab: \(heartbeatCount.formatted()) so far."]
         if let roundTrip = lastRoundTrip {
-            let milliseconds = (roundTrip * 1000).formatted(.number.precision(.fractionLength(1)))
-            lines.append("Last heartbeat: \(milliseconds) ms round trip.")
+            lines.append("Last heartbeat: \(roundTrip.millisecondsText) round trip.")
         }
         if missedThumps > 0 {
             lines.append("Missed in a row: \(missedThumps).")

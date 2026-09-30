@@ -176,29 +176,32 @@ final class QLabClient {
         OSCMessage("/disconnect"),
     ]
 
-    private func tearDownSession(sendDisconnect: Bool) {
+    /// Stops the work a session schedules for itself: heartbeats, debounced
+    /// refreshes and event-loss recovery.
+    private func cancelSessionTasks() {
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+        nextThumpWindow = nil
         cueListRefreshTask?.cancel()
         cueListRefreshTask = nil
         playheadDetailsTask?.cancel()
         playheadDetailsTask = nil
-        pendingCueDetailIDs.removeAll()
         cancelUnconfirmedDetailsRefetch()
-        heartbeatTask?.cancel()
-        heartbeatTask = nil
-        nextThumpWindow = nil
         overflowRecoveryTask?.cancel()
         overflowRecoveryTask = nil
+    }
+
+    private func tearDownSession(sendDisconnect: Bool) {
+        cancelSessionTasks()
         lastOverflowRecovery = nil
         droppedEventCount = 0
 
         let connection = self.connection
         if sendDisconnect, status.hasLiveData, let connection {
-            Task { [weak self] in
+            let log = self.log
+            Task {
                 for message in Self.goodbyeMessages {
-                    guard let byteCount = try? await connection.send(message) else { continue }
-                    self?.log.record(
-                        OSCEvent(message: message, direction: .outbound, byteCount: byteCount)
-                    )
+                    try? await Self.send(message, over: connection, loggingTo: log)
                 }
                 await connection.cancel()
             }
@@ -233,16 +236,7 @@ final class QLabClient {
     }
 
     private func handleSessionLost(reason: String) {
-        heartbeatTask?.cancel()
-        heartbeatTask = nil
-        nextThumpWindow = nil
-        cueListRefreshTask?.cancel()
-        cueListRefreshTask = nil
-        playheadDetailsTask?.cancel()
-        playheadDetailsTask = nil
-        cancelUnconfirmedDetailsRefetch()
-        overflowRecoveryTask?.cancel()
-        overflowRecoveryTask = nil
+        cancelSessionTasks()
         failAllPendingRequests(with: RequestFailure.disconnected)
         invalidateLiveSessionData()
 
@@ -436,13 +430,21 @@ final class QLabClient {
         }
     }
 
-    private func sendWithoutReply(_ message: OSCMessage) async throws {
-        guard let connection else { throw RequestFailure.disconnected }
+    /// Sends `message` and records it in the Activity Log, which only builds
+    /// the row if it is keeping rows. Static so a send can outlive the client.
+    private static func send(
+        _ message: OSCMessage, over connection: QLabConnection, loggingTo log: ActivityLog
+    ) async throws {
         let byteCount = try await connection.send(message)
         log.record(
             direction: .outbound, byteCount: byteCount,
             event: OSCEvent(message: message, direction: .outbound, byteCount: byteCount)
         )
+    }
+
+    private func sendWithoutReply(_ message: OSCMessage) async throws {
+        guard let connection else { throw RequestFailure.disconnected }
+        try await Self.send(message, over: connection, loggingTo: log)
     }
 
     @discardableResult
@@ -526,11 +528,7 @@ final class QLabClient {
         over connection: QLabConnection,
         stream: AsyncStream<QLabConnection.Event>
     ) async throws -> QLabReply<Payload> {
-        let byteCount = try await connection.send(message)
-        log.record(
-            direction: .outbound, byteCount: byteCount,
-            event: OSCEvent(message: message, direction: .outbound, byteCount: byteCount)
-        )
+        try await Self.send(message, over: connection, loggingTo: log)
 
         let deadline = Task { [weak self] in
             guard let timeout = self?.preferences.requestTimeout else { return }
@@ -548,13 +546,11 @@ final class QLabClient {
             )
 
             let expected = QLabReplyParser.correlationKey(for: message.address)
-            guard let echoed = QLabReplyParser.correlationAddress(of: incoming),
+            guard let echoed = QLabReplyParser.oscCorrelationAddress(of: incoming),
                   QLabReplyParser.correlationKey(for: echoed) == expected
             else { continue }
             do {
-                return try await Task.detached(priority: .userInitiated) {
-                    try QLabReplyParser.parse(incoming, as: payloadType)
-                }.value
+                return try await parse(incoming, as: payloadType)
             } catch {
                 throw RequestFailure.replyUnreadable(error.localizedDescription)
             }
@@ -585,13 +581,7 @@ final class QLabClient {
                 Task { [weak self] in
                     guard let self else { return }
                     do {
-                        let byteCount = try await connection.send(message)
-                        self.log.record(
-                            direction: .outbound, byteCount: byteCount,
-                            event: OSCEvent(
-                                message: message, direction: .outbound, byteCount: byteCount
-                            )
-                        )
+                        try await Self.send(message, over: connection, loggingTo: self.log)
                     } catch {
                         self.fail(requestID: id, with: error)
                         return
@@ -802,9 +792,7 @@ final class QLabClient {
               let cueID = message.arguments[2].stringValue
         else { return }
 
-        guard let listID = cueLists.first(where: {
-            $0.children.firstCue(withID: cueID) != nil
-        })?.uniqueID else {
+        guard let listID = cueLists.cueList(containing: cueID)?.uniqueID else {
             logger.info(
                 """
                 Broadcast playhead names cue \(cueID, privacy: .public), which is in no \
@@ -961,10 +949,7 @@ final class QLabClient {
     }
 
     private func reconcileWatchedCueList() {
-        if let watchedCueListID,
-           cueLists.contains(where: { $0.uniqueID == watchedCueListID }) {
-            return
-        }
+        guard watchedCueList == nil else { return }
 
         // Carts have no playhead to watch, so neither a remembered cart nor
         // a leading one is picked.
@@ -984,43 +969,25 @@ final class QLabClient {
         let session = connection
         // QLab returns an error for a cart's playback position.
         let listIDs = cueLists.filter { !$0.isCueCart }.map(\.uniqueID)
-        var nextIndex = 0
 
         // Results are gathered locally and written back in one go: assigning
         // each one as it lands would invalidate every view watching the
         // playheads once per cue list.
         var fetched: [String: PlayheadState] = [:]
 
-        await withTaskGroup(of: (String, PlayheadState)?.self) { group in
-            for _ in 0..<min(Self.maxConcurrentPlayheadRequests, listIDs.count) {
-                let listID = listIDs[nextIndex]
-                nextIndex += 1
-                group.addTask {
-                    await self.fetchPlayhead(forCueListID: listID, workspaceID: workspaceID)
-                }
+        let completed = await withBoundedConcurrency(
+            over: listIDs,
+            limit: Self.maxConcurrentPlayheadRequests,
+            while: { !Task.isCancelled && self.connection === session },
+            run: { listID in
+                await self.fetchPlayhead(forCueListID: listID, workspaceID: workspaceID)
+            },
+            collect: { result in
+                if let result { fetched[result.0] = result.1 }
             }
+        )
 
-            while let result = await group.next() {
-                guard !Task.isCancelled, connection === session else {
-                    group.cancelAll()
-                    fetched.removeAll()
-                    return
-                }
-
-                if let result {
-                    fetched[result.0] = result.1
-                }
-
-                guard nextIndex < listIDs.count else { continue }
-                let listID = listIDs[nextIndex]
-                nextIndex += 1
-                group.addTask {
-                    await self.fetchPlayhead(forCueListID: listID, workspaceID: workspaceID)
-                }
-            }
-        }
-
-        guard !fetched.isEmpty else { return }
+        guard completed, !fetched.isEmpty else { return }
         playheads.merge(fetched) { _, latest in latest }
     }
 
@@ -1070,9 +1037,14 @@ final class QLabClient {
         return playheads[watchedCueListID]
     }
 
+    /// The cue list being watched, as it is in the current tree.
+    var watchedCueList: Cue? {
+        guard let watchedCueListID else { return nil }
+        return cueLists.first { $0.uniqueID == watchedCueListID }
+    }
+
     var isWatchingCueCart: Bool {
-        guard let watchedCueListID else { return false }
-        return cueLists.first { $0.uniqueID == watchedCueListID }?.isCueCart == true
+        watchedCueList?.isCueCart == true
     }
 
     var currentPlayheadCueID: String? {
@@ -1087,9 +1059,7 @@ final class QLabClient {
             return cached.graph
         }
 
-        guard let list = cueLists.first(where: { $0.uniqueID == watchedCueListID }) else {
-            return nil
-        }
+        guard let list = watchedCueList else { return nil }
 
         let graph = CueGraph(cueList: list)
         watchedGraphCache = (cueListID: watchedCueListID, graph: graph)
@@ -1154,44 +1124,25 @@ final class QLabClient {
         guard let keysString = encodedValueKeys() else { return }
 
         let session = connection
-        var nextIndex = 0
 
         // Gathered first and applied in one pass: writing each reply back as
         // it lands would invalidate every view watching the cue lists once
         // per cue in the drawer.
         var fetched: [FetchedCueDetails] = []
 
-        await withTaskGroup(of: FetchedCueDetails?.self) { group in
-            for _ in 0..<min(Self.maxConcurrentDetailRequests, wanted.count) {
-                let cueID = wanted[nextIndex]
-                nextIndex += 1
-                group.addTask {
-                    await self.fetchCueDetails(
-                        for: cueID, workspaceID: workspaceID, keys: keysString
-                    )
-                }
-            }
-
-            while let result = await group.next() {
-                guard !Task.isCancelled, connection === session else {
-                    group.cancelAll()
-                    fetched.removeAll()
-                    return
-                }
-
+        let completed = await withBoundedConcurrency(
+            over: wanted,
+            limit: Self.maxConcurrentDetailRequests,
+            while: { !Task.isCancelled && self.connection === session },
+            run: { cueID in
+                await self.fetchCueDetails(for: cueID, workspaceID: workspaceID, keys: keysString)
+            },
+            collect: { result in
                 if let result { fetched.append(result) }
-
-                guard nextIndex < wanted.count else { continue }
-                let cueID = wanted[nextIndex]
-                nextIndex += 1
-                group.addTask {
-                    await self.fetchCueDetails(
-                        for: cueID, workspaceID: workspaceID, keys: keysString
-                    )
-                }
             }
-        }
+        )
 
+        guard completed else { return }
         apply(fetched)
     }
 

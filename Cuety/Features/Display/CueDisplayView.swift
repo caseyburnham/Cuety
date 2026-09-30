@@ -36,12 +36,6 @@ struct CueDisplayView: View {
                 ? nil
                 : client.currentPlayheadCueID
         )
-        .transaction { transaction in
-            if reduceMotion {
-                transaction.animation = nil
-                transaction.disablesAnimations = true
-            }
-        }
     }
 
     private var staleDataState: some View {
@@ -64,8 +58,7 @@ struct CueDisplayView: View {
     }
 
     private func cueListName(containing cue: Cue) -> String? {
-        if let watchedID = client.watchedCueListID,
-           let watched = client.cueLists.first(where: { $0.uniqueID == watchedID }),
+        if let watched = client.watchedCueList,
            client.watchedGraph?.cue(withID: cue.uniqueID) != nil {
             return watched.displayName
         }

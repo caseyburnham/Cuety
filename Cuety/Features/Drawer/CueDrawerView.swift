@@ -409,44 +409,16 @@ struct CueIndicators: View {
     let size: CGFloat
 
     static func accessibilityParts(for cue: Cue) -> [String] {
-        var parts: [String] = []
-        if cue.isBroken == true { parts.append("broken") }
-        if cue.isArmed == false { parts.append("disarmed, will be skipped") }
-        if cue.isLoaded == true { parts.append("loaded") }
-        if cue.isFlagged == true { parts.append("flagged") }
-        if let mode = cue.continueMode, mode != .doNotContinue {
-            parts.append(mode.title)
-        }
-        return parts
+        CueState.states(of: cue).map(\.spokenDescription)
     }
 
     var body: some View {
         HStack(spacing: 5) {
-            if cue.isBroken == true {
-                Image(systemName: DetailPillKind.broken.systemImage)
-                    .foregroundStyle(.red)
-                    .help("Broken — QLab cannot fire this cue")
-            }
-            if cue.isArmed == false {
-                Image(systemName: DetailPillKind.armed.systemImage)
-                    .rotationEffect(DetailPillKind.armed.glyphRotation)
-                    .foregroundStyle(.red)
-                    .help("Disarmed — QLab will skip this cue")
-            }
-            if cue.isLoaded == true {
-                Image(systemName: DetailPillKind.loaded.systemImage)
-                    .foregroundStyle(.yellow)
-                    .help("Loaded to a standby point")
-            }
-            if cue.isFlagged == true {
-                Image(systemName: DetailPillKind.flagged.systemImage)
-                    .foregroundStyle(.yellow)
-                    .help("Flagged")
-            }
-            if let mode = cue.continueMode, mode != .doNotContinue {
-                Image(systemName: mode.systemImage)
-                    .foregroundStyle(.blue)
-                    .help(mode.title)
+            ForEach(CueState.states(of: cue)) { state in
+                Image(systemName: state.systemImage)
+                    .rotationEffect(state.rotation)
+                    .foregroundStyle(state.tint)
+                    .help(state.help)
             }
         }
         .font(.system(size: size))

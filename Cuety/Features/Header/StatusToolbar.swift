@@ -33,11 +33,7 @@ struct StatusToolbar: View {
     private var windowSubtitle: String {
         let client = model.client
         guard client.status.hasLiveData else { return client.status.title }
-        guard let listID = client.watchedCueListID,
-              let list = client.cueLists.first(where: { $0.uniqueID == listID }),
-              let name = list.displayName
-        else { return client.status.title }
-        return name
+        return client.watchedCueList?.displayName ?? client.status.title
     }
 
     private var actions: StatusToolbarActions {

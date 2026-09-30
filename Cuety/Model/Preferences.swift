@@ -1,12 +1,5 @@
 import SwiftUI
 import ShowControlCore
-#if os(macOS)
-import AppKit
-typealias PlatformFont = NSFont
-#else
-import UIKit
-typealias PlatformFont = UIFont
-#endif
 
 enum AppearanceMode: String, CaseIterable, Hashable, Sendable, Identifiable {
     case automatic
@@ -62,17 +55,6 @@ enum FontWeightChoice: String, CaseIterable, Hashable, Sendable, Identifiable {
     }
 
     var weight: Font.Weight {
-        switch self {
-        case .regular: .regular
-        case .medium: .medium
-        case .semibold: .semibold
-        case .bold: .bold
-        case .heavy: .heavy
-        case .black: .black
-        }
-    }
-
-    var platformWeight: PlatformFont.Weight {
         switch self {
         case .regular: .regular
         case .medium: .medium
@@ -191,32 +173,31 @@ enum CueNumberSizing: String, CaseIterable, Hashable, Sendable, Identifiable {
     }
 }
 
-enum PlayheadAccent: String, Hashable, Sendable, Identifiable {
+/// The color of the cue list layout's playhead arrow. Stored by raw value,
+/// which for a cue color is QLab's own name for it.
+enum PlayheadAccent: RawRepresentable, Hashable, Sendable, Identifiable {
     case systemBlue
     case standbyCue
-    case red
-    case orange
-    case yellow
-    case green
-    case cyan
-    case blue
-    case purple
-    case magenta
-    case crimson
-    case peach
-    case olive
-    case forest
-    case skyBlue = "sky blue"
-    case midnight
-    case indigo
-    case lavender
-    case plum
-    case berry
-    case hotPink = "hot pink"
-    case gray
+    case cue(QLabCueColor)
 
-    static let allCases: [Self] = [.systemBlue, .standbyCue] + QLabCueColor.allCases.compactMap {
-        Self(rawValue: $0.rawValue)
+    static let allCases: [Self] = [.systemBlue, .standbyCue] + QLabCueColor.allCases.map(Self.cue)
+
+    init?(rawValue: String) {
+        switch rawValue {
+        case "systemBlue": self = .systemBlue
+        case "standbyCue": self = .standbyCue
+        default:
+            guard let color = QLabCueColor(rawValue: rawValue) else { return nil }
+            self = .cue(color)
+        }
+    }
+
+    var rawValue: String {
+        switch self {
+        case .systemBlue: "systemBlue"
+        case .standbyCue: "standbyCue"
+        case .cue(let color): color.rawValue
+        }
     }
 
     var id: String { rawValue }
@@ -225,18 +206,15 @@ enum PlayheadAccent: String, Hashable, Sendable, Identifiable {
         switch self {
         case .systemBlue: "System Blue"
         case .standbyCue: "Standby Cue"
-        default: QLabCueColor(rawValue: rawValue)?.title ?? rawValue
+        case .cue(let color): color.title
         }
     }
 
     func color(for standbyCue: Cue?) -> Color {
         switch self {
-        case .systemBlue:
-            .blue
-        case .standbyCue:
-            standbyCue?.color ?? .blue
-        default:
-            QLabCueColor(rawValue: rawValue)?.color ?? .blue
+        case .systemBlue: .blue
+        case .standbyCue: standbyCue?.color ?? .blue
+        case .cue(let color): color.color
         }
     }
 }

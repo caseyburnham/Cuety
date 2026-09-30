@@ -2,7 +2,6 @@ import SwiftUI
 
 struct MainWindowView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         MainSplitView(model: model) {
@@ -27,12 +26,6 @@ struct MainWindowView: View {
             }
         )
         .background(StatusToolbar())
-        .transaction { transaction in
-            if reduceMotion {
-                transaction.animation = nil
-                transaction.disablesAnimations = true
-            }
-        }
 #if os(macOS)
         .onExitCommand {
             if model.isPresenting { model.togglePresentationMode() }

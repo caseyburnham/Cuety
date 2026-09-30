@@ -231,24 +231,8 @@ final class AppModel {
             guard !pending.isEmpty else { break }
             probed.formUnion(pending.map(\.id))
 
-            await withTaskGroup(of: Void.self) { group in
-                var nextIndex = 0
-                for _ in 0..<min(Self.maxConcurrentProbes, pending.count) {
-                    let target = pending[nextIndex]
-                    nextIndex += 1
-                    group.addTask { await self.probeWorkspaces(on: target) }
-                }
-
-                while await group.next() != nil {
-                    guard !Task.isCancelled else {
-                        group.cancelAll()
-                        return
-                    }
-                    guard nextIndex < pending.count else { continue }
-                    let target = pending[nextIndex]
-                    nextIndex += 1
-                    group.addTask { await self.probeWorkspaces(on: target) }
-                }
+            await withBoundedConcurrency(over: pending, limit: Self.maxConcurrentProbes) { target in
+                await self.probeWorkspaces(on: target)
             }
 
             guard !Task.isCancelled else { return }

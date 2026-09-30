@@ -104,40 +104,17 @@ struct ConnectionInspectorView: View {
                     LabeledContent("Listening Port", value: String(port))
                 }
             }
-            VStack(spacing: 0) {
-                sessionRow("Passcode") {
-                    Label(
-                        client.usedPasscode ? "In use" : "Not required",
-                        systemImage: client.usedPasscode ? "lock.fill" : "lock.open"
-                    )
-                    .foregroundStyle(client.usedPasscode ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                    .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace.magic(fallback: .downUp)))
-                    .motion(Motion.status, value: client.usedPasscode)
-                }
-                .padding(.vertical, 4)
-
-                Divider()
-                    .padding(.vertical, 4)
-
-                sessionRow("Access") {
-                    Text(client.accessLevel.title)
-                }
-                .padding(.vertical, 4)
+            LabeledContent("Passcode") {
+                Label(
+                    client.usedPasscode ? "In use" : "Not required",
+                    systemImage: client.usedPasscode ? "lock.fill" : "lock.open"
+                )
+                .foregroundStyle(client.usedPasscode ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace.magic(fallback: .downUp)))
+                .motion(Motion.status, value: client.usedPasscode)
             }
-            .frame(maxWidth: .infinity)
+            LabeledContent("Access", value: client.accessLevel.title)
         }
-    }
-
-    private func sessionRow<Content: View>(
-        _ title: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(title)
-            Spacer(minLength: 12)
-            content()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var qlabSection: some View {
@@ -145,7 +122,7 @@ struct ConnectionInspectorView: View {
             LabeledContent("Version", value: client.qlabVersion ?? "Unknown")
             LabeledContent("Cue Lists", value: client.cueLists.count.formatted())
             LabeledContent("Cues", value: client.totalCueCount.formatted())
-            if let watched = watchedCueListName {
+            if let watched = client.watchedCueList?.displayName {
                 LabeledContent("Watching", value: watched)
             }
         }
@@ -169,10 +146,10 @@ struct ConnectionInspectorView: View {
             }
 
             if let round = client.lastRoundTrip {
-                LabeledContent("Round Trip", value: formatMilliseconds(round))
+                LabeledContent("Round Trip", value: round.millisecondsText)
             }
             if let mean = client.meanRoundTrip {
-                LabeledContent("Mean Round Trip", value: formatMilliseconds(mean))
+                LabeledContent("Mean Round Trip", value: mean.millisecondsText)
             }
 
             if client.missedThumps > 0 {
@@ -245,19 +222,10 @@ struct ConnectionInspectorView: View {
         }
     }
 
-    private var watchedCueListName: String? {
-        guard let id = client.watchedCueListID else { return nil }
-        return client.cueLists.first { $0.uniqueID == id }?.displayName
-    }
-
     private func traffic(messages: Int, bytes: Int) -> String {
         let count = messages.formatted()
         let size = bytes.formatted(.byteCount(style: .memory))
         return "\(count) messages · \(size)"
-    }
-
-    private func formatMilliseconds(_ interval: TimeInterval) -> String {
-        (interval * 1000).formatted(.number.precision(.fractionLength(1))) + " ms"
     }
 }
 

@@ -303,19 +303,19 @@ struct QLabReplyTests {
         #expect(changed.isEmpty)
     }
 
-    @Test("Correlates on the echoed address field")
-    func correlatesOnEchoedAddress() {
-        let message = replyMessage(
+    @Test("The OSC reply address correlates whether or not it names the workspace")
+    func correlatesOnOSCAddress() throws {
+        // QLab may echo a request without its workspace prefix; the key is the same.
+        let short = try #require(QLabReplyParser.oscCorrelationAddress(of: replyMessage(
             address: "/cueLists",
             json: #"{"address":"/workspace/ABC/cueLists","status":"ok"}"#
-        )
-        #expect(QLabReplyParser.correlationAddress(of: message) == "/workspace/ABC/cueLists")
-    }
-
-    @Test("Falls back to the OSC address when the body is unreadable")
-    func fallsBackToOSCAddress() {
-        let message = OSCMessage("/reply/workspace/ABC/thump", [.string("not json at all")])
-        #expect(QLabReplyParser.correlationAddress(of: message) == "/workspace/ABC/thump")
+        )))
+        let full = try #require(QLabReplyParser.oscCorrelationAddress(
+            of: OSCMessage("/reply/workspace/ABC/cueLists", [.string("not json at all")])
+        ))
+        #expect(QLabReplyParser.correlationKey(for: short)
+            == QLabReplyParser.correlationKey(for: "/workspace/ABC/cueLists"))
+        #expect(QLabReplyParser.correlationKey(for: full) == QLabReplyParser.correlationKey(for: short))
     }
 
     @Test("Recognises reply addresses")

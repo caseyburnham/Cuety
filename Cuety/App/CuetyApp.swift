@@ -20,6 +20,7 @@ struct CuetyApp: App {
             MainWindowView()
                 .environment(model)
                 .preferredColorScheme(model.preferences.appearance.colorScheme)
+                .reducingMotionWhenRequested()
         }
         .defaultSize(width: 900, height: 560)
         .keyboardShortcut("0", modifiers: .command)
@@ -34,6 +35,7 @@ struct CuetyApp: App {
             ActivityLogView()
                 .environment(model)
                 .preferredColorScheme(model.preferences.appearance.colorScheme)
+                .reducingMotionWhenRequested()
         }
         .defaultSize(width: 780, height: 460)
         .keyboardShortcut("l", modifiers: [.command, .shift])
@@ -42,6 +44,7 @@ struct CuetyApp: App {
             ConnectionInspectorView()
                 .environment(model)
                 .preferredColorScheme(model.preferences.appearance.colorScheme)
+                .reducingMotionWhenRequested()
         }
         .defaultSize(width: 460, height: 620)
         .windowResizability(.contentMinSize)
@@ -59,12 +62,14 @@ struct CuetyApp: App {
             SettingsView()
                 .environment(model)
                 .preferredColorScheme(model.preferences.appearance.colorScheme)
+                .reducingMotionWhenRequested()
         }
 #else
         WindowGroup {
             MainWindowView()
                 .environment(model)
                 .preferredColorScheme(model.preferences.appearance.colorScheme)
+                .reducingMotionWhenRequested()
         }
         .onChange(of: scenePhase) { _, phase in
             model.updateScenePhase(phase)

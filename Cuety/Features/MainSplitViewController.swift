@@ -69,8 +69,14 @@ struct MainSplitView<Sidebar: View, Detail: View>: NSViewControllerRepresentable
 
     func makeNSViewController(context: Context) -> MainSplitViewController {
         let controller = MainSplitViewController(
-            sidebar: NSHostingController(rootView: sidebar().environment(model)),
-            detail: NSHostingController(rootView: detail().environment(model))
+            // Each column is its own SwiftUI root, which inherits neither the
+            // environment nor transaction policy of the view that made it.
+            sidebar: NSHostingController(
+                rootView: sidebar().environment(model).reducingMotionWhenRequested()
+            ),
+            detail: NSHostingController(
+                rootView: detail().environment(model).reducingMotionWhenRequested()
+            )
         )
         controller.onSidebarVisibilityChange = { [model] visible in
             model.isSidebarVisible = visible
