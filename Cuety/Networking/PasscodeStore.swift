@@ -4,7 +4,7 @@ import os
 
 nonisolated protocol PasscodeStoring: Sendable {
     func passcode(serverID: String, workspaceID: String) -> String?
-    func hasPasscode(serverID: String, workspaceID: String) -> Bool
+    /// Which of `selections` have a stored passcode, found in one lookup.
     func selectionsWithPasscodes(
         _ selections: Set<WorkspaceSelection>
     ) -> Set<WorkspaceSelection>
@@ -14,12 +14,9 @@ nonisolated protocol PasscodeStoring: Sendable {
 }
 
 nonisolated extension PasscodeStoring {
-    func selectionsWithPasscodes(
-        _ selections: Set<WorkspaceSelection>
-    ) -> Set<WorkspaceSelection> {
-        Set(selections.filter { hasPasscode(
-            serverID: $0.serverID, workspaceID: $0.workspaceID
-        ) })
+    func hasPasscode(serverID: String, workspaceID: String) -> Bool {
+        let selection = WorkspaceSelection(serverID: serverID, workspaceID: workspaceID)
+        return selectionsWithPasscodes([selection]).contains(selection)
     }
 }
 
@@ -75,12 +72,6 @@ nonisolated struct PasscodeStore: PasscodeStoring {
             logger.warning("Keychain read failed with status \(status)")
         }
         return nil
-    }
-
-    func hasPasscode(serverID: String, workspaceID: String) -> Bool {
-        selectionsWithPasscodes([
-            WorkspaceSelection(serverID: serverID, workspaceID: workspaceID)
-        ]).isEmpty == false
     }
 
     func selectionsWithPasscodes(

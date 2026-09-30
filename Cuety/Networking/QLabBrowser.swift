@@ -22,6 +22,8 @@ final class QLabBrowser {
     private let pathMonitor = NWPathMonitor()
     private let pathMonitorQueue = DispatchQueue(label: "org.arvadacenter.Cuety.browserPathMonitor")
     private var lastPathStatus: NWPath.Status?
+    /// Started once for the browser's lifetime; restarting browsing keeps it.
+    private var isMonitoringPath = false
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -61,7 +63,8 @@ final class QLabBrowser {
 
         browser.start(queue: .main)
 
-        if lastPathStatus == nil {
+        if !isMonitoringPath {
+            isMonitoringPath = true
             pathMonitor.pathUpdateHandler = { [weak self] path in
                 Task { @MainActor in
                     self?.handlePathUpdate(path)

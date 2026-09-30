@@ -134,8 +134,8 @@ private final class StubPasscodeStore: PasscodeStoring, @unchecked Sendable {
         stored[[serverID, workspaceID]]
     }
 
-    func hasPasscode(serverID: String, workspaceID: String) -> Bool {
-        passcode(serverID: serverID, workspaceID: workspaceID) != nil
+    func selectionsWithPasscodes(_ selections: Set<WorkspaceSelection>) -> Set<WorkspaceSelection> {
+        selections.filter { passcode(serverID: $0.serverID, workspaceID: $0.workspaceID) != nil }
     }
 
     func save(_ passcode: String, serverID: String, workspaceID: String) throws {

@@ -59,7 +59,9 @@ final class AppModel {
 
     private let displaySleepBlocker = DisplaySleepBlocker()
 
+#if os(macOS)
     private let dockBadge = DockBadge()
+#endif
 
     init(
         preferences: Preferences = Preferences(),
@@ -123,7 +125,9 @@ final class AppModel {
     func start() {
         guard startsServices, startupTask == nil else { return }
 
+#if os(macOS)
         dockBadge.follow { [weak self] in self?.dockBadgeLabel ?? nil }
+#endif
 
         autoConnectIsArmed = preferences.autoConnect && preferences.lastWorkspace != nil
         browser.start()
@@ -252,9 +256,9 @@ final class AppModel {
         await refreshStoredPasscodes()
     }
 
+    /// One probe in flight per server; a second request for the same server
+    /// waits for it rather than starting another.
     private var probeTasks: [String: Task<Void, Never>] = [:]
-    private var probeGenerationByServerID: [String: Int] = [:]
-    private var lastProbeGeneration = 0
 
     private func probeWorkspaces(on target: QLabServer) async {
         if let existing = probeTasks[target.id] {
@@ -272,34 +276,21 @@ final class AppModel {
     }
 
     private func performProbe(_ target: QLabServer) async {
-        lastProbeGeneration += 1
-        let generation = lastProbeGeneration
-        probeGenerationByServerID[target.id] = generation
-
         refreshingServerIDs.insert(target.id)
+        defer { refreshingServerIDs.remove(target.id) }
 
         var server = target
         do {
             server.workspaces = try await client.fetchWorkspaces(from: target)
             server.lastError = nil
         } catch is CancellationError {
-            relinquishProbe(of: target.id, generation: generation)
             return
         } catch {
             server.workspaces = []
             server.lastError = error.localizedDescription
         }
         server.hasBeenProbed = true
-
-        guard probeGenerationByServerID[target.id] == generation else { return }
-        relinquishProbe(of: target.id, generation: generation)
         browser.update(server)
-    }
-
-    private func relinquishProbe(of serverID: String, generation: Int) {
-        guard probeGenerationByServerID[serverID] == generation else { return }
-        probeGenerationByServerID.removeValue(forKey: serverID)
-        refreshingServerIDs.remove(serverID)
     }
 
     private var autoConnectIsArmed = false
@@ -459,14 +450,12 @@ final class AppModel {
         return standbyCue?.displayNumber
     }
 
-    func togglePresentationMode() {
 #if os(macOS)
+    func togglePresentationMode() {
         setPresenting(!isPresenting)
-#endif
     }
 
     func setPresenting(_ presenting: Bool) {
-#if os(macOS)
         guard presenting != isPresenting else { return }
         withAnimation(Motion.chrome.unlessMotionIsReduced) {
             if presenting {
@@ -478,10 +467,8 @@ final class AppModel {
                 isSidebarVisible = wasSidebarVisibleBeforePresenting
             }
         }
-#else
-        _ = presenting
-#endif
     }
+#endif
 
     func toggleSidebar() {
         isSidebarVisible.toggle()
@@ -560,7 +547,7 @@ extension AppModel {
 
 private nonisolated struct PreviewPasscodeStore: PasscodeStoring {
     func passcode(serverID: String, workspaceID: String) -> String? { nil }
-    func hasPasscode(serverID: String, workspaceID: String) -> Bool { false }
+    func selectionsWithPasscodes(_ selections: Set<WorkspaceSelection>) -> Set<WorkspaceSelection> { [] }
     func save(_ passcode: String, serverID: String, workspaceID: String) throws {}
     func remove(serverID: String, workspaceID: String) throws {}
     func removeAll() throws {}

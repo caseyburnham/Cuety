@@ -24,8 +24,6 @@ engineering audit of 2026-09-26 is implemented except where noted here.
 
 ## Cleanup still to decide
 
-- iOS no-op platform wrappers in `DockBadge.swift` and `FullScreenPresentation.swift`
-  (optional; not a performance item).
 - Pointer hiding is duplicated with Viewtiful; a candidate for optional platform support,
   not the Foundation-only `ShowControlCore`.
 

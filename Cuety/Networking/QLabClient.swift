@@ -84,11 +84,8 @@ final class QLabClient {
     private var heartbeatTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
 
-    private var pending: [UUID: PendingRequest] = [:]
-    private var pendingByAddress: [String: [UUID]] = [:]
+    private var replies = ReplyCorrelator<CheckedContinuation<ReceivedReply, any Error>>()
     private var timeoutTasks: [UUID: Task<Void, Never>] = [:]
-
-    private var abandonedReplyDeadlines: [String: [ContinuousClock.Instant]] = [:]
     private var abandonedReplyPruneTask: Task<Void, Never>?
 
     private var currentTarget: (server: QLabServer, workspaceID: String, passcode: String?)?
@@ -216,7 +213,7 @@ final class QLabClient {
         failAllPendingRequests(with: RequestFailure.disconnected)
         abandonedReplyPruneTask?.cancel()
         abandonedReplyPruneTask = nil
-        abandonedReplyDeadlines.removeAll()
+        replies.forgetOwedReplies()
 
         workspace = nil
         accessLevel = .unspecified
@@ -395,11 +392,6 @@ final class QLabClient {
         }
     }
 
-    private struct PendingRequest {
-        let correlationKey: String
-        let continuation: CheckedContinuation<ReceivedReply, any Error>
-    }
-
     /// QLab echoes only the request path, never a request ID. When an earlier
     /// request on the same path timed out and its answer is still owed, the
     /// reply that arrives next may be that older answer: `mayBeStale` says so.
@@ -574,8 +566,7 @@ final class QLabClient {
                     return
                 }
 
-                pending[id] = PendingRequest(correlationKey: key, continuation: continuation)
-                pendingByAddress[key, default: []].append(id)
+                replies.register(id, key: key, waiter: continuation)
 
                 Task { [weak self] in
                     guard let self else { return }
@@ -586,7 +577,7 @@ final class QLabClient {
                         return
                     }
 
-                    guard self.pending[id] != nil else { return }
+                    guard self.replies.isWaiting(id) else { return }
 
                     self.timeoutTasks[id] = Task { [weak self] in
                         guard let self else { return }
@@ -604,21 +595,20 @@ final class QLabClient {
     }
 
     private func complete(requestID id: UUID, with reply: ReceivedReply) {
-        guard let request = removePending(id) else { return }
-        request.continuation.resume(returning: reply)
+        removePending(id)?.waiter.resume(returning: reply)
     }
 
     private func fail(requestID id: UUID, with error: any Error) {
-        guard let request = removePending(id) else { return }
-        request.continuation.resume(throwing: error)
+        removePending(id)?.waiter.resume(throwing: error)
     }
 
     private func timeOut(requestID id: UUID, address: String) {
         guard let request = removePending(id) else { return }
-        abandonedReplyDeadlines[request.correlationKey, default: []]
-            .append(ContinuousClock.now + .seconds(preferences.requestTimeout))
+        replies.recordAbandoned(
+            key: request.key, until: .now + .seconds(preferences.requestTimeout)
+        )
         scheduleAbandonedReplyPruning()
-        request.continuation.resume(throwing: RequestFailure.timedOut(address: address))
+        request.waiter.resume(throwing: RequestFailure.timedOut(address: address))
     }
 
     private static let abandonedReplyPruneInterval: Duration = .seconds(1)
@@ -635,55 +625,21 @@ final class QLabClient {
 
     private func pruneAbandonedReplyDeadlines() {
         abandonedReplyPruneTask = nil
-        let now = ContinuousClock.now
-
-        for key in abandonedReplyDeadlines.keys {
-            abandonedReplyDeadlines[key]?.removeAll { $0 <= now }
-            if abandonedReplyDeadlines[key]?.isEmpty == true {
-                abandonedReplyDeadlines.removeValue(forKey: key)
-            }
-        }
-
-        if !abandonedReplyDeadlines.isEmpty {
+        replies.pruneOwedReplies(at: .now)
+        if replies.hasOwedReplies {
             scheduleAbandonedReplyPruning()
         }
     }
 
-    private func hasAbandonedReply(forKey key: String) -> Bool {
-        let now = ContinuousClock.now
-        return abandonedReplyDeadlines[key]?.contains { $0 >= now } ?? false
-    }
-
-    private func consumeAbandonedReply(forKey key: String) -> Bool {
-        guard var deadlines = abandonedReplyDeadlines[key] else { return false }
-
-        let now = ContinuousClock.now
-        deadlines.removeAll { $0 < now }
-        defer {
-            if deadlines.isEmpty {
-                abandonedReplyDeadlines.removeValue(forKey: key)
-            } else {
-                abandonedReplyDeadlines[key] = deadlines
-            }
-        }
-
-        guard !deadlines.isEmpty else { return false }
-        deadlines.removeFirst()
-        return true
-    }
-
-    private func removePending(_ id: UUID) -> PendingRequest? {
+    private func removePending(
+        _ id: UUID
+    ) -> (key: String, waiter: CheckedContinuation<ReceivedReply, any Error>)? {
         timeoutTasks.removeValue(forKey: id)?.cancel()
-        guard let request = pending.removeValue(forKey: id) else { return nil }
-        pendingByAddress[request.correlationKey]?.removeAll { $0 == id }
-        if pendingByAddress[request.correlationKey]?.isEmpty == true {
-            pendingByAddress.removeValue(forKey: request.correlationKey)
-        }
-        return request
+        return replies.remove(id)
     }
 
     private func failAllPendingRequests(with error: any Error) {
-        for id in pending.keys {
+        for id in replies.waitingIDs {
             fail(requestID: id, with: error)
         }
     }
@@ -759,15 +715,16 @@ final class QLabClient {
             // every retry of a key that has timed out once. Whichever answer
             // lands first may be the older one, so the reply says when that
             // is possible and callers that retain values can confirm later.
-            if let id = pendingByAddress[key]?.first {
+            let now = ContinuousClock.now
+            if let id = replies.firstWaiting(forKey: key) {
                 let reply = ReceivedReply(
-                    message: message, mayBeStale: hasAbandonedReply(forKey: key)
+                    message: message, mayBeStale: replies.mayBeStale(forKey: key, at: now)
                 )
                 complete(requestID: id, with: reply)
                 return
             }
 
-            if consumeAbandonedReply(forKey: key) {
+            if replies.consumeOwedReply(forKey: key, at: now) {
                 lateReplyCount += 1
                 logger.debug(
                     "Dropped a late reply for \(key, privacy: .public) after its request timed out"

@@ -87,15 +87,4 @@ struct FullScreenPresentation: NSViewRepresentable {
         coordinator.scheduleApply(isPresenting: isPresenting, to: view)
     }
 }
-#else
-import SwiftUI
-
-struct FullScreenPresentation: View {
-    let isPresenting: Bool
-    let onFullScreenChange: (Bool) -> Void
-
-    var body: some View {
-        Color.clear
-    }
-}
 #endif

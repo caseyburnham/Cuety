@@ -1,7 +1,7 @@
+#if os(macOS)
 import SwiftUI
 
 struct StatusToolbar: View {
-#if os(macOS)
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
 
@@ -60,9 +60,5 @@ struct StatusToolbar: View {
             controller.scheduleUpdate(for: view, readout: readout)
         }
     }
-#else
-    var body: some View {
-        Color.clear.frame(height: 0)
-    }
-#endif
 }
+#endif

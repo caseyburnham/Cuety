@@ -20,13 +20,13 @@ struct MainWindowView: View {
             AddServerSheet()
         }
         .credentialErrorAlert(Bindable(model).credentialError, isActive: model.passcodePrompt == nil)
+#if os(macOS)
         .background(
             FullScreenPresentation(isPresenting: model.isPresenting) { isFullScreen in
                 model.setPresenting(isFullScreen)
             }
         )
         .background(StatusToolbar())
-#if os(macOS)
         .onExitCommand {
             if model.isPresenting { model.togglePresentationMode() }
         }
