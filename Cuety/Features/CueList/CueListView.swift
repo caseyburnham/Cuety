@@ -288,17 +288,13 @@ private struct DrumMetrics {
 
 /// The turning part of the drum. Its offset is animatable, so every frame
 /// of a go lays each cue out afresh at its in-between position and size.
-private struct DrumRows: View, Animatable {
+@Animatable
+private struct DrumRows: View {
     var offset: Double
-    let rows: [Cue]
-    let standby: Cue
-    let standbyIndex: Int
-    let metrics: DrumMetrics
-
-    var animatableData: Double {
-        get { offset }
-        set { offset = newValue }
-    }
+    @AnimatableIgnored var rows: [Cue]
+    @AnimatableIgnored var standby: Cue
+    @AnimatableIgnored var standbyIndex: Int
+    @AnimatableIgnored var metrics: DrumMetrics
 
     var body: some View {
         let reach = Double(DrumMetrics.lastPosition)
@@ -535,17 +531,10 @@ private struct PlayheadArrow: View {
 
 /// Animatable so a change of size or color is redrawn at each in-between
 /// value, rather than snapping while the arrow slides to its new position.
-private struct PlayheadArrowGlyph: View, Animatable {
+@Animatable
+private struct PlayheadArrowGlyph: View {
     var size: CGFloat
     var color: Color.Resolved
-
-    var animatableData: AnimatablePair<CGFloat, Color.Resolved.AnimatableData> {
-        get { AnimatablePair(size, color.animatableData) }
-        set {
-            size = newValue.first
-            color.animatableData = newValue.second
-        }
-    }
 
     var body: some View {
         Image(systemName: "arrowtriangle.right.fill")

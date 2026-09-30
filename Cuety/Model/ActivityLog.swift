@@ -84,18 +84,20 @@ nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
     }
 
     var copyableDescription: String {
-        let time = Self.clipboardFormatter.string(from: timestamp)
+        let time = timestamp.formatted(Self.clipboardFormat)
         let arrow = direction == .outbound ? "→" : (direction == .inbound ? "←" : "⚠")
         return arguments.isEmpty
             ? "\(time) \(arrow) \(address)"
             : "\(time) \(arrow) \(address) \(arguments)"
     }
 
-    private static let clipboardFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss.SSS"
-        return formatter
-    }()
+    /// A fixed 24-hour format, whatever the person's clock preference, so
+    /// copied rows line up and sort.
+    private static let clipboardFormat = Date.VerbatimFormatStyle(
+        format: "\(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)):\(minute: .twoDigits):\(second: .twoDigits).\(secondFraction: .fractional(3))",
+        timeZone: .current,
+        calendar: Calendar(identifier: .gregorian)
+    )
 }
 
 @Observable

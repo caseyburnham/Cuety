@@ -27,7 +27,6 @@ nonisolated struct PasscodeStore: PasscodeStoring {
     private let logger = Logger(category: "PasscodeStore")
 
     private static let service = "Cuety QLab Passcodes"
-    private static let legacyService = "com.ivxx.Cuety.qlab-passcode"
 
     nonisolated enum Failure: LocalizedError {
         case keychain(OSStatus)
@@ -45,55 +44,37 @@ nonisolated struct PasscodeStore: PasscodeStoring {
         "\(serverID)|\(workspaceID)"
     }
 
-    private func baseQuery(
-        serverID: String, workspaceID: String, service: String = Self.service
-    ) -> [String: Any] {
+    /// Every item Cuety stores. The Mac uses its file-based keychain: the data
+    /// protection keychain needs a keychain access group entitlement, which
+    /// Cuety is not signed with, and fails with errSecMissingEntitlement.
+    private var serviceQuery: [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account(serverID: serverID, workspaceID: workspaceID),
+            kSecAttrService as String: Self.service,
         ]
     }
 
-    func passcode(serverID: String, workspaceID: String) -> String? {
-        for service in [Self.service, Self.legacyService] {
-            var query = baseQuery(
-                serverID: serverID, workspaceID: workspaceID, service: service
-            )
-            query[kSecReturnData as String] = true
-            query[kSecMatchLimit as String] = kSecMatchLimitOne
-
-            var item: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &item)
-
-            if status == errSecSuccess, let data = item as? Data,
-               let passcode = String(data: data, encoding: .utf8) {
-                if service == Self.legacyService {
-                    migrateLegacyPasscode(
-                        passcode, serverID: serverID, workspaceID: workspaceID
-                    )
-                }
-                return passcode
-            }
-
-            if status != errSecItemNotFound {
-                logger.warning("Keychain read failed with status \(status)")
-            }
-        }
-        return nil
+    private func itemQuery(serverID: String, workspaceID: String) -> [String: Any] {
+        var query = serviceQuery
+        query[kSecAttrAccount as String] = account(serverID: serverID, workspaceID: workspaceID)
+        return query
     }
 
-    private func migrateLegacyPasscode(
-        _ passcode: String, serverID: String, workspaceID: String
-    ) {
-        do {
-            try save(passcode, serverID: serverID, workspaceID: workspaceID)
-            try remove(
-                serverID: serverID, workspaceID: workspaceID, service: Self.legacyService
-            )
-        } catch {
-            logger.warning("Could not migrate a legacy passcode to the new Keychain service")
+    func passcode(serverID: String, workspaceID: String) -> String? {
+        var query = itemQuery(serverID: serverID, workspaceID: workspaceID)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+
+        if status == errSecSuccess, let data = item as? Data {
+            return String(data: data, encoding: .utf8)
         }
+        if status != errSecItemNotFound {
+            logger.warning("Keychain read failed with status \(status)")
+        }
+        return nil
     }
 
     func hasPasscode(serverID: String, workspaceID: String) -> Bool {
@@ -112,32 +93,24 @@ nonisolated struct PasscodeStore: PasscodeStoring {
                 (account(serverID: selection.serverID, workspaceID: selection.workspaceID), selection)
             }
         )
-        var found: Set<WorkspaceSelection> = []
 
-        for service in [Self.service, Self.legacyService] {
-            let query: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecMatchLimit as String: kSecMatchLimitAll,
-                kSecReturnAttributes as String: true,
-            ]
-            var item: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &item)
+        var query = serviceQuery
+        query[kSecMatchLimit as String] = kSecMatchLimitAll
+        query[kSecReturnAttributes as String] = true
 
-            if status == errSecSuccess {
-                let attributes = (item as? [[String: Any]]) ?? []
-                for attribute in attributes {
-                    guard let account = attribute[kSecAttrAccount as String] as? String,
-                          let selection = selectionsByAccount[account]
-                    else { continue }
-                    found.insert(selection)
-                }
-            } else if status != errSecItemNotFound {
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess else {
+            if status != errSecItemNotFound {
                 logger.warning("Keychain batch read failed with status \(status)")
             }
+            return []
         }
 
-        return found
+        let attributes = (item as? [[String: Any]]) ?? []
+        return Set(attributes.compactMap { attribute in
+            (attribute[kSecAttrAccount as String] as? String).flatMap { selectionsByAccount[$0] }
+        })
     }
 
     func save(_ passcode: String, serverID: String, workspaceID: String) throws {
@@ -146,7 +119,7 @@ nonisolated struct PasscodeStore: PasscodeStoring {
             return
         }
 
-        let query = baseQuery(serverID: serverID, workspaceID: workspaceID)
+        let query = itemQuery(serverID: serverID, workspaceID: workspaceID)
         let data = Data(passcode.utf8)
 
         let updateStatus = SecItemUpdate(
@@ -172,37 +145,17 @@ nonisolated struct PasscodeStore: PasscodeStoring {
     }
 
     func remove(serverID: String, workspaceID: String) throws {
-        try remove(
-            serverID: serverID, workspaceID: workspaceID, service: Self.service
-        )
-        try remove(
-            serverID: serverID, workspaceID: workspaceID, service: Self.legacyService
-        )
-    }
-
-    private func remove(
-        serverID: String, workspaceID: String, service: String
-    ) throws {
-        let status = SecItemDelete(
-            baseQuery(
-                serverID: serverID, workspaceID: workspaceID, service: service
-            ) as CFDictionary
-        )
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw Failure.keychain(status)
-        }
+        try delete(itemQuery(serverID: serverID, workspaceID: workspaceID))
     }
 
     func removeAll() throws {
-        for service in [Self.service, Self.legacyService] {
-            let status = SecItemDelete([
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-            ] as CFDictionary)
+        try delete(serviceQuery)
+    }
 
-            guard status == errSecSuccess || status == errSecItemNotFound else {
-                throw Failure.keychain(status)
-            }
+    private func delete(_ query: [String: Any]) throws {
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw Failure.keychain(status)
         }
     }
 }

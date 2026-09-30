@@ -489,12 +489,11 @@ final class QLabClient {
 
     /// JSON decoding can be substantial for cue-list replies. Keep it off the
     /// main actor so decoding does not compete with SwiftUI rendering.
-    private func parse<Payload: Decodable & Sendable>(
+    @concurrent
+    private nonisolated func parse<Payload: Decodable & Sendable>(
         _ message: OSCMessage, as payloadType: Payload.Type
     ) async throws -> QLabReply<Payload> {
-        try await Task.detached(priority: .userInitiated) {
-            try QLabReplyParser.parse(message, as: payloadType)
-        }.value
+        try QLabReplyParser.parse(message, as: payloadType)
     }
 
     private func validateSessionReply<Payload: Decodable & Sendable>(
@@ -1286,7 +1285,8 @@ final class QLabClient {
     private func sendThump() async {
         guard let workspaceID = workspace?.uniqueID, connection != nil else { return }
 
-        let sentAt = Date()
+        // Monotonic, so a clock change mid-heartbeat cannot skew the round trip.
+        let sentAt = ContinuousClock.now
         do {
             let reply = try await request(
                 OSCMessage("/workspace/\(workspaceID)/thump"),
@@ -1296,8 +1296,7 @@ final class QLabClient {
                 throw RequestFailure.handshakeFailed(step: "thump", detail: "Unexpected heartbeat reply.")
             }
 
-            let roundTrip = Date().timeIntervalSince(sentAt)
-            recordThump(roundTrip: roundTrip)
+            recordThump(roundTrip: TimeInterval(duration: ContinuousClock.now - sentAt))
         } catch {
             guard status.hasLiveData else { return }
             missedThumps += 1

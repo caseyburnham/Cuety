@@ -71,7 +71,7 @@ struct WorkspaceSidebar: View {
     private func serverSection(_ server: QLabServer) -> some View {
         Section {
             ForEach(server.workspaces, id: \.uniqueID) { workspace in
-                erasedWorkspaceRow(workspace, on: server)
+                workspaceRow(workspace, on: server)
             }
             if server.workspaces.isEmpty {
                 serverStatus(server)
@@ -158,15 +158,6 @@ struct WorkspaceSidebar: View {
         } else {
             workspaceLabel(workspace, selection: selection)
         }
-    }
-
-    /// This row contains a platform-dependent DisclosureGroup/List selection tree.
-    /// Erasing only this branch keeps SwiftUI's surrounding Section builder tractable
-    /// on both the macOS and iPad compilers without changing the rendered hierarchy.
-    private func erasedWorkspaceRow(
-        _ workspace: QLabWorkspaceInfo, on server: QLabServer
-    ) -> AnyView {
-        AnyView(workspaceRow(workspace, on: server))
     }
 
     private func isExpanded(_ selection: WorkspaceSelection) -> Binding<Bool> {

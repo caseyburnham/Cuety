@@ -1,6 +1,9 @@
 import Foundation
 import Network
 import ShowControlCore
+#if os(macOS)
+import SystemConfiguration
+#endif
 
 nonisolated struct QLabServer: Identifiable, Hashable, Sendable {
     enum Source: Hashable, Sendable {
@@ -96,7 +99,9 @@ nonisolated struct QLabServer: Identifiable, Hashable, Sendable {
         // service looks like a second, separate machine.
         var names = [ProcessInfo.processInfo.hostName]
 #if os(macOS)
-        if let computerName = Host.current().localizedName {
+        // Read from the system configuration store rather than NSHost, which
+        // can block on a DNS lookup.
+        if let computerName = SCDynamicStoreCopyComputerName(nil, nil) as String? {
             names.append(computerName)
         }
 #endif

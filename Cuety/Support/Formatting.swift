@@ -1,6 +1,11 @@
 import Foundation
 
 nonisolated extension TimeInterval {
+    init(duration: Duration) {
+        let (seconds, attoseconds) = duration.components
+        self = Double(seconds) + Double(attoseconds) / 1e18
+    }
+
     /// A round trip as an operator reads it: "3.2 ms".
     var millisecondsText: String {
         Duration.seconds(self).formatted(

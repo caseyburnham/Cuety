@@ -1,4 +1,4 @@
-@preconcurrency import Foundation
+import Foundation
 import os
 #if os(iOS)
 import UIKit
@@ -38,7 +38,9 @@ final class DisplaySleepBlocker {
         logger.info("Display sleep block released")
     }
 
-    deinit {
+    /// Isolated so the activity token, which is not `Sendable`, is ended on
+    /// the actor that began it.
+    isolated deinit {
         if let token {
             ProcessInfo.processInfo.endActivity(token)
         }
