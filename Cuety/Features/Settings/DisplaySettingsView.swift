@@ -53,15 +53,19 @@ struct DisplaySettingsView: View {
             }
 
             Section {
+                Toggle("Show playhead", isOn: Bindable(preferences).showsPlayhead)
+                    .help("Shows the arrow marking the standby cue in Cue List layout.")
+
                 Picker("Color", selection: Bindable(preferences).playheadAccent) {
                     ForEach(PlayheadAccent.allCases) { choice in
                         Text(choice.title).tag(choice)
                     }
                 }
+                .disabled(!preferences.showsPlayhead)
             } header: {
                 Text("Playhead")
             } footer: {
-                Text("Choose a fixed accent color, or follow the color of the cue currently standing by.")
+                Text("The playhead arrow marks the cue currently standing by in Cue List layout. Choose a fixed accent color, or follow the color of the cue.")
             }
 
             Section {

@@ -62,7 +62,10 @@ struct CueDrawerView: View {
                 )
             }
         }
-        .background(.thinMaterial)
+        .background {
+            (model.standbyCue?.color ?? .clear)
+                .opacity(CueDisplayView.canvasTintOpacity)
+        }
         .contentShape(Rectangle())
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Cue list around the playhead")

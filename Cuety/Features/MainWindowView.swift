@@ -10,6 +10,11 @@ struct MainWindowView: View {
             detail
         }
         .ignoresSafeArea()
+        .background {
+            (model.standbyCue?.color ?? .clear)
+                .opacity(CueDisplayView.canvasTintOpacity)
+                .ignoresSafeArea()
+        }
         .task {
             model.start()
         }
@@ -75,6 +80,19 @@ private struct MainDetailView: View {
             }
         }
         .transition(reduceMotion ? .identity : .opacity)
+        .background {
+            (model.standbyCue?.color ?? .clear)
+                .opacity(CueDisplayView.canvasTintOpacity)
+                .ignoresSafeArea()
+        }
+#if os(iOS)
+        .toolbarBackground(
+            (model.standbyCue?.color ?? .clear)
+                .opacity(CueDisplayView.canvasTintOpacity),
+            for: .navigationBar
+        )
+        .toolbarBackgroundVisibility(.visible, for: .navigationBar)
+#endif
     }
 }
 

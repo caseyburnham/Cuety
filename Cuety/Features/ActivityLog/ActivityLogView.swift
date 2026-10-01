@@ -1,8 +1,4 @@
-#if os(macOS)
-import AppKit
-#else
-import UIKit
-#endif
+import ShowControlUI
 import SwiftUI
 
 /// Holds the activity log's filter state and turns the log's entries into the
@@ -483,12 +479,7 @@ struct ActivityLogView: View {
         let lines = copyableLines(for: ids, in: entries)
         guard !lines.isEmpty else { return }
 
-#if os(macOS)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
-#else
-        UIPasteboard.general.string = lines.joined(separator: "\n")
-#endif
+        Pasteboard.copy(lines.joined(separator: "\n"))
     }
 }
 

@@ -270,6 +270,10 @@ final class Preferences {
         didSet { defaults.set(playheadAccent.rawValue, forKey: Key.playheadAccent) }
     }
 
+    var showsPlayhead: Bool {
+        didSet { defaults.set(showsPlayhead, forKey: Key.showsPlayhead) }
+    }
+
     var cueLayout: CueLayout {
         didSet { defaults.set(cueLayout.rawValue, forKey: Key.cueLayout) }
     }
@@ -377,6 +381,7 @@ final class Preferences {
         showsCueName = defaults.object(forKey: Key.showsCueName) as? Bool ?? true
         playheadAccent = defaults.string(forKey: Key.playheadAccent)
             .flatMap(PlayheadAccent.init(rawValue:)) ?? .systemBlue
+        showsPlayhead = defaults.object(forKey: Key.showsPlayhead) as? Bool ?? true
         cueLayout = defaults.string(forKey: Key.cueLayout)
             .flatMap(CueLayout.init(rawValue:)) ?? .display
         showsDrawer = defaults.object(forKey: Key.showsDrawer) as? Bool ?? true
@@ -436,6 +441,7 @@ final class Preferences {
         static let customCueNumberSize = "customCueNumberSize"
         static let showsCueName = "showsCueName"
         static let playheadAccent = "playheadAccent"
+        static let showsPlayhead = "showsPlayhead"
         static let cueLayout = "cueLayout"
         static let showsDrawer = "showsDrawer"
         static let drawerRowCount = "drawerRowCount"

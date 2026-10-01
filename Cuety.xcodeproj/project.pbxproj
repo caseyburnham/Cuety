@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C9BD3BF9306DB7C5009C63A2 /* ShowControlUI in Frameworks */ = {isa = PBXBuildFile; productRef = C9BD3BF8306DB7C5009C63A2 /* ShowControlUI */; };
 		D5A002000000000000000001 /* ShowControlCore in Frameworks */ = {isa = PBXBuildFile; productRef = D5A001000000000000000001 /* ShowControlCore */; };
 /* End PBXBuildFile section */
 
@@ -43,6 +44,7 @@
 			isa = PBXFrameworksBuildPhase;
 			files = (
 				D5A002000000000000000001 /* ShowControlCore in Frameworks */,
+				C9BD3BF9306DB7C5009C63A2 /* ShowControlUI in Frameworks */,
 			);
 		};
 		C935D399304E220800A56199 /* Frameworks */ = {
@@ -58,6 +60,7 @@
 			children = (
 				000000000000000000000010 /* Cuety */,
 				C935D39D304E220800A56199 /* CuetyTests */,
+				C9BD3BF7306DB7C5009C63A2 /* Frameworks */,
 				000000000000000000000020 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -69,6 +72,13 @@
 				C935D39C304E220800A56199 /* CuetyTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		C9BD3BF7306DB7C5009C63A2 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -90,6 +100,7 @@
 			name = Cuety;
 			packageProductDependencies = (
 				D5A001000000000000000001 /* ShowControlCore */,
+				C9BD3BF8306DB7C5009C63A2 /* ShowControlUI */,
 			);
 			productName = Cuety;
 			productReference = 000000000000000000000120 /* Cuety.app */;
@@ -333,7 +344,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = VK8F63GZT7;
 				ENABLE_APP_SANDBOX = YES;
-				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
@@ -385,7 +396,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = VK8F63GZT7;
 				ENABLE_APP_SANDBOX = YES;
-				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
@@ -518,6 +529,11 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		C9BD3BF8306DB7C5009C63A2 /* ShowControlUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D5A000000000000000000001 /* XCLocalSwiftPackageReference "../ShowControlCore" */;
+			productName = ShowControlUI;
+		};
 		D5A001000000000000000001 /* ShowControlCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = D5A000000000000000000001 /* XCLocalSwiftPackageReference "../ShowControlCore" */;

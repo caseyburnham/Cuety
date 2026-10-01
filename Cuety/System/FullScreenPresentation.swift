@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import ShowControlUI
 import SwiftUI
 
 struct FullScreenPresentation: NSViewRepresentable {

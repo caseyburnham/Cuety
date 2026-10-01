@@ -65,15 +65,17 @@ private struct CueDrum: View {
                     metrics: metrics
                 )
 
-                PlayheadArrow(
-                    size: metrics.arrowSize,
-                    color: model.preferences.playheadAccent.color(for: standby)
-                )
-                    .position(x: metrics.arrowX, y: metrics.numberCenterY)
-                    // Keyed to the cue rather than the metrics, so the arrow
-                    // slides with the drum on a go but tracks window resizes
-                    // directly.
-                    .animation(animatesShift ? Motion.listShift : nil, value: standby.uniqueID)
+                if model.preferences.showsPlayhead {
+                    PlayheadArrow(
+                        size: metrics.arrowSize,
+                        color: model.preferences.playheadAccent.color(for: standby)
+                    )
+                        .position(x: metrics.arrowX, y: metrics.numberCenterY)
+                        // Keyed to the cue rather than the metrics, so the arrow
+                        // slides with the drum on a go but tracks window resizes
+                        // directly.
+                        .animation(animatesShift ? Motion.listShift : nil, value: standby.uniqueID)
+                }
 
                 if !model.isPresenting {
                     // The pills hang from just below the standby name, so a
@@ -152,22 +154,25 @@ private struct CueDrum: View {
             cueNumbers: graph.cueNumbers,
             typography: typography
         )
-        // Fit once for the arrow's size, then again in the width the arrow
-        // and a matching margin on the other side leave over.
+        // Fit the number to the available height first. The arrow's size and
+        // spacing scale with the number, so reserve that width algebraically
+        // instead of subtracting space based on an already width-constrained fit.
         let firstFit = typography.standbyNumberPointSize(
             for: text, reference: reference,
             in: CGSize(width: numberWidth, height: numberHeight)
-        )
-        let reserved = 2 * firstFit * (Self.arrowSizeRatio + Self.arrowSpacingRatio)
-        let numberSize = typography.standbyNumberPointSize(
-            for: text, reference: reference,
-            in: CGSize(width: max(0, numberWidth - reserved), height: numberHeight)
         )
 
         // Fixed sizing keeps the arrow beside the widest number so it holds
         // still; the other sizings draw each number at its own size, so the
         // arrow follows the standby number instead.
         let arrowText = typography.cueNumberSizing == .fixed ? reference : text
+        let widthPerPoint = typography.cueNumberWidth(of: arrowText, size: firstFit) / firstFit
+        let widthLimitedSize = model.preferences.showsPlayhead
+            ? numberWidth / (
+                widthPerPoint + 2 * (Self.arrowSizeRatio + Self.arrowSpacingRatio)
+            )
+            : numberWidth / widthPerPoint
+        let numberSize = min(firstFit, widthLimitedSize)
         let arrowSize = numberSize * Self.arrowSizeRatio
         let referenceWidth = typography.cueNumberWidth(of: arrowText, size: numberSize)
         let arrowX = max(
