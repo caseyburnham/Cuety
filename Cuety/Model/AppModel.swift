@@ -1,3 +1,4 @@
+import ShowControlUI
 import SwiftUI
 
 @Observable
@@ -43,21 +44,11 @@ final class AppModel {
         var id: String { "\(serverID)|\(workspaceID)" }
     }
 
-#if os(macOS)
-    var isPresenting = false
-#else
-    /// Presentation mode is a macOS window feature. Keeping this unavailable on
-    /// iPad prevents the iPad UI from ever presenting a misleading entry point.
-    var isPresenting: Bool { false }
-#endif
-
     private(set) var isDataStale = false
 
     var isSidebarVisible = true
 
-    private var wasSidebarVisibleBeforePresenting = true
-
-    private let displaySleepBlocker = DisplaySleepBlocker()
+    private let screenAwakeController = ScreenAwakeController(reason: "Cuety is displaying the current cue")
 
 #if os(macOS)
     private let dockBadge = DockBadge()
@@ -109,7 +100,7 @@ final class AppModel {
         }
 
         if preferences.keepsDisplayAwake {
-            displaySleepBlocker.setEnabled(true)
+            screenAwakeController.setEnabled(true)
         }
     }
 
@@ -166,6 +157,7 @@ final class AppModel {
                 self.foregroundRefreshTask = nil
             }
         case .background:
+            client.statistics.markIncomplete()
             backgroundGeneration += 1
             foregroundRefreshTask = nil
             if client.status.hasLiveData || selection != nil {
@@ -450,26 +442,6 @@ final class AppModel {
         return standbyCue?.displayNumber
     }
 
-#if os(macOS)
-    func togglePresentationMode() {
-        setPresenting(!isPresenting)
-    }
-
-    func setPresenting(_ presenting: Bool) {
-        guard presenting != isPresenting else { return }
-        withAnimation(Motion.chrome.unlessMotionIsReduced) {
-            if presenting {
-                wasSidebarVisibleBeforePresenting = isSidebarVisible
-                isPresenting = true
-                isSidebarVisible = false
-            } else {
-                isPresenting = false
-                isSidebarVisible = wasSidebarVisibleBeforePresenting
-            }
-        }
-    }
-#endif
-
     func toggleSidebar() {
         isSidebarVisible.toggle()
     }
@@ -509,7 +481,7 @@ final class AppModel {
 
     func setKeepsDisplayAwake(_ keepsAwake: Bool) {
         preferences.keepsDisplayAwake = keepsAwake
-        displaySleepBlocker.setEnabled(keepsAwake)
+        screenAwakeController.setEnabled(keepsAwake)
     }
 
     func togglePerformanceMode() {

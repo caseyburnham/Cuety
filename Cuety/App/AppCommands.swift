@@ -11,11 +11,6 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("s", modifiers: [.command, .control])
 
-            Button(model.isPresenting ? "Exit Presentation Mode" : "Enter Presentation Mode") {
-                model.togglePresentationMode()
-            }
-            .keyboardShortcut("f", modifiers: [.command, .shift])
-
             Toggle("Cue List Layout", isOn: Binding(
                 get: { model.preferences.cueLayout == .list },
                 set: { model.setCueLayout($0 ? .list : .display) }

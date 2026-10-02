@@ -1,63 +1,79 @@
 #if os(macOS)
 import SwiftUI
 
-struct StatusToolbar: View {
+struct StatusToolbar: ToolbarContent {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
 
-    var body: some View {
-        StatusToolbarHost(readout: readout, actions: actions)
-    }
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            Button {
+                Task { await model.refresh() }
+            } label: {
+                Label("Refresh Connections", systemImage: "arrow.clockwise")
+            }
+            .disabled(!model.canRefresh || model.isRefreshing)
+            .help(model.isRefreshing ? "Searching for QLab workspaces…" : "Refresh Connections")
+        }
 
-    private var readout: StatusToolbarReadout {
-        let client = model.client
-        return StatusToolbarReadout(
-            keepsDisplayAwake: model.preferences.keepsDisplayAwake,
-            performanceMode: model.preferences.performanceMode,
-            heartbeatSymbol: client.heartbeatSymbol,
-            heartbeatTint: client.heartbeatTint,
-            heartbeatSummary: client.heartbeatSummary,
-            missedHeartbeats: client.missedThumps,
-            status: client.status,
-            isRefreshing: model.isRefreshing,
-            canRefresh: model.canRefresh,
-            windowTitle: windowTitle,
-            windowSubtitle: windowSubtitle
-        )
-    }
+        ToolbarItemGroup(placement: .primaryAction) {
+            Toggle(
+                isOn: Binding(
+                    get: { model.preferences.keepsDisplayAwake },
+                    set: { model.setKeepsDisplayAwake($0) }
+                )
+            ) {
+                Image(
+                    systemName: model.preferences.keepsDisplayAwake
+                        ? "sun.max.fill"
+                        : "sun.min"
+                )
+            }
+            .accessibilityLabel("Keep Display Awake")
+            .tint(model.preferences.keepsDisplayAwake ? .orange : .primary)
+            .help(
+                model.preferences.keepsDisplayAwake
+                    ? "Keeping Display Awake"
+                    : "Allowing Display Sleep"
+            )
 
-    private var windowTitle: String {
-        model.client.workspace?.displayName ?? "Cuety"
-    }
+            Toggle(
+                isOn: Binding(
+                    get: { model.preferences.performanceMode },
+                    set: { model.preferences.performanceMode = $0 }
+                )
+            ) {
+                Image(systemName: "gauge.with.dots.needle.33percent")
+            }
+            .accessibilityLabel("Performance Mode")
+            .tint(model.preferences.performanceMode ? .blue : .primary)
+            .help(
+                model.preferences.performanceMode
+                    ? "Performance Mode On"
+                    : "Performance Mode Off"
+            )
+        }
 
-    private var windowSubtitle: String {
-        let client = model.client
-        guard client.status.hasLiveData else { return client.status.title }
-        return client.watchedCueList?.displayName ?? client.status.title
-    }
+        ToolbarItemGroup(placement: .automatic) {
+            Button {
+                openWindow(id: WindowID.connectionInspector.rawValue)
+            } label: {
+                Image(systemName: model.client.status.systemImage)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(model.client.status.tint)
+                    .accessibilityLabel("Connection Status")
+            }
+            .help("\(model.client.status.title) \(model.client.status.detail)")
 
-    private var actions: StatusToolbarActions {
-        StatusToolbarActions(
-            toggleKeepAwake: { model.toggleKeepAwake() },
-            togglePerformanceMode: { model.togglePerformanceMode() },
-            openActivityLog: { openWindow(id: WindowID.activityLog.rawValue) },
-            openConnectionInspector: { openWindow(id: WindowID.connectionInspector.rawValue) },
-            refresh: { Task { await model.refresh() } }
-        )
-    }
-
-    private struct StatusToolbarHost: NSViewRepresentable {
-        let readout: StatusToolbarReadout
-        let actions: StatusToolbarActions
-
-        func makeCoordinator() -> StatusToolbarController { StatusToolbarController() }
-
-        func makeNSView(context: Context) -> NSView { NSView() }
-
-        func updateNSView(_ view: NSView, context: Context) {
-            let controller = context.coordinator
-            controller.actions = actions
-            controller.scheduleUpdate(for: view, readout: readout)
+            Button {
+                openWindow(id: WindowID.activityLog.rawValue)
+            } label: {
+                Image(systemName: model.client.heartbeatSymbol)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(model.client.heartbeatTint)
+                    .accessibilityLabel("Activity Log")
+            }
+            .help("Activity Log \(model.client.heartbeatSummary)")
         }
     }
 }

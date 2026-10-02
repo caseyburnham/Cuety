@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Synchronization
 import Testing
 @testable import Cuety
 import ShowControlCore
@@ -1350,6 +1351,130 @@ struct QLabDisconnectTests {
         #expect(client.playheads["K1"] == nil)
     }
 
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !condition(), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(condition())
+    }
+
+    @Test("A live playhead update wins over an older multi-list snapshot", arguments: ["C1", "C2"])
+    func livePlayheadWinsOverSnapshot(cueID: String) async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = [
+            .init(id: "L1", name: "Main", cues: [
+                .init(id: "C1", number: "1", name: "House"),
+                .init(id: "C2", number: "2", name: "Thunder"),
+                .init(id: "C3", number: "3", name: "Rain"),
+            ], playheadCueID: "C1"),
+            .init(id: "L2", name: "Effects", playheadCueID: "none"),
+        ]
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let log = ActivityLog()
+        let client = QLabClient(preferences: try makePreferences(), log: log)
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.currentPlayheadCueID == "C1")
+
+        log.clear()
+        peer.cueLists[0].playheadCueID = "C3"
+        peer.withholdRepliesTo = ["/cue_id/L2/playbackPositionID"]
+        let refresh = Task { await client.refreshPlayheads() }
+        defer { refresh.cancel(); peer.releaseWithheldReplies() }
+        try await waitUntil {
+            peer.withheldReplyCount > 0 && log.entries.contains {
+                $0.direction == .inbound && $0.address == "/reply/workspace/W/cue_id/L1/playbackPositionID"
+            }
+        }
+        let updateAddress = "/update/workspace/W/cueList/L1/playbackPosition"
+        peer.push(OSCMessage(updateAddress, [.string(cueID)]))
+        try await waitUntil {
+            client.currentPlayheadCueID == cueID && log.entries.contains {
+                $0.direction == .inbound && $0.address == updateAddress
+            }
+        }
+        peer.withholdRepliesTo = []
+        peer.releaseWithheldReplies()
+        await refresh.value
+        #expect(client.currentPlayheadCueID == cueID)
+        #expect(client.status == .connected)
+    }
+
+    @Test("A failed structural refresh hides live data and recovers automatically")
+    func failedStructuralRefreshRecovers() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = Self.populatedShow
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let log = ActivityLog()
+        let client = QLabClient(preferences: try makePreferences(), log: log)
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.status == .connected)
+        peer.failCueLists = true
+        log.clear()
+        peer.push(OSCMessage("/update/workspace/W"))
+        try await waitUntil {
+            !client.status.hasLiveData && log.entries.contains {
+                $0.direction == .inbound && $0.address == "/reply/workspace/W/cueLists"
+            }
+        }
+        #expect(client.cueLists.isEmpty)
+        #expect(client.currentPlayheadCueID == nil)
+        if case .reconnecting = client.status {} else { Issue.record("Expected automatic reconnect") }
+        peer.failCueLists = false
+        try await waitUntil { client.status == .connected }
+        #expect(client.currentPlayheadCueID == "C1")
+        #expect(!client.cueLists.isEmpty)
+    }
+
+    @Test("A retired session cannot publish a parsed reply or revoke its replacement",
+          arguments: ["success", "denial", "fallback denial"])
+    func retiredParseCannotAffectReplacement(mode: String) async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = Self.populatedShow
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let client = QLabClient(preferences: try makePreferences(), log: ActivityLog())
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.status == .connected)
+        var prompts = 0
+        client.onPasscodeRequired = { _ in prompts += 1 }
+        let gate = ReplyDecodeGate(fails: mode == "fallback denial")
+        BlockingReplyPayload.gate.withLock { $0 = gate }
+        defer {
+            gate.release.signal()
+            BlockingReplyPayload.gate.withLock { $0 = nil }
+        }
+        let status = mode == "success" ? "ok" : "denied"
+        let reply = OSCMessage("/reply/workspace/W/thump", [.string(
+            "{\"address\":\"/workspace/W/thump\",\"status\":\"\(status)\",\"data\":1}"
+        )])
+        let parsed = Task {
+            do {
+                _ = try await client.validateSessionReply(reply, as: BlockingReplyPayload.self)
+                return false
+            } catch QLabClient.RequestFailure.disconnected {
+                return true
+            } catch {
+                return false
+            }
+        }
+        try await waitUntil { gate.entered.load(ordering: .acquiring) }
+        await client.reconnect()
+        try #require(client.status == .connected)
+        let replacementStarted = client.connectedSince
+        gate.release.signal()
+        #expect(await parsed.value)
+        #expect(prompts == 0)
+        #expect(client.status == .connected)
+        #expect(client.connectedSince == replacementStarted)
+        #expect(client.currentPlayheadCueID == "C1")
+    }
+
     @Test("Reconnecting keeps the cue list the operator was watching")
     func reconnectKeepsWatchedCueList() async throws {
         let peer = try AuthorizationPeer()
@@ -1405,6 +1530,7 @@ private final class AuthorizationPeer {
     private var connections: [NWConnection] = []
     var denyHeartbeat = false
     var denyCueLists = false
+    var failCueLists = false
 
     var failPlaybackPosition = false
 
@@ -1418,6 +1544,8 @@ private final class AuthorizationPeer {
 
     private var withheldReplies: [(connection: NWConnection, packet: Data)] = []
 
+    var withheldReplyCount: Int { withheldReplies.count }
+
     func releaseWithheldReplies() {
         let queued = withheldReplies
         withheldReplies.removeAll()
@@ -1426,7 +1554,11 @@ private final class AuthorizationPeer {
         }
     }
 
-    init() throws { listener = try NWListener(using: .qlabTCP(), on: .any) }
+    init() throws {
+        let parameters = NWParameters.qlabTCP()
+            .localEndpoint(.hostPort(host: "127.0.0.1", port: .any))
+        listener = try NWListener(using: parameters)
+    }
 
     func start() async throws -> UInt16 {
         listener.newConnectionHandler = { [weak self] connection in
@@ -1512,6 +1644,7 @@ private final class AuthorizationPeer {
             return ("ok", "ok:view")
         case "cueLists":
             guard !denyCueLists else { return ("denied", "denied") }
+            guard !failCueLists else { return ("error", NSNull()) }
             return ("ok", cueLists.map { list in
                 [
                     "uniqueID": list.id,
@@ -1593,6 +1726,28 @@ private final class AuthorizationPeer {
                 }
                 self.receive(connection)
             }
+        }
+    }
+}
+
+private nonisolated final class ReplyDecodeGate: @unchecked Sendable {
+    let entered = Atomic<Bool>(false)
+    let release = DispatchSemaphore(value: 0)
+    let fails: Bool
+
+    init(fails: Bool) { self.fails = fails }
+}
+
+private nonisolated struct BlockingReplyPayload: Decodable, Sendable {
+    static let gate = Mutex<ReplyDecodeGate?>(nil)
+
+    init(from decoder: any Decoder) throws {
+        guard let gate = Self.gate.withLock({ $0 }) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Missing decode gate"))
+        }
+        gate.entered.store(true, ordering: .releasing)
+        guard gate.release.wait(timeout: .now() + 10) == .success, !gate.fails else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Stopped test payload decoding"))
         }
     }
 }

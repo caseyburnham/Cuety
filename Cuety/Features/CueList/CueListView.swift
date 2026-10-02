@@ -12,7 +12,25 @@ struct CueListView: View {
         if let graph = client.watchedGraph,
            let standby = model.standbyCue,
            let index = graph.rowIndex(of: standby.uniqueID) {
-            CueDrum(graph: graph, standby: standby, standbyIndex: index)
+            GeometryReader { proxy in
+                let overflow = min(DrumMetrics.rowPitch * 2, max(0,
+                    proxy.size.height - DrumMetrics.minimumCanvasHeight
+                ))
+                ScrollView(.vertical) {
+                    CueDrum(graph: graph, standby: standby, standbyIndex: index)
+                        .frame(width: proxy.size.width, height: proxy.size.height + overflow)
+                }
+                .defaultScrollAnchor(.center)
+                .scrollDisabled(true)
+                .scrollIndicators(.hidden)
+#if os(macOS)
+                // The toolbar material supplies the blur over these rows.
+                .scrollEdgeEffectHidden(true, for: .top)
+                .ignoresSafeArea(.container, edges: .top)
+#else
+                .scrollEdgeEffectStyle(.soft, for: .top)
+#endif
+            }
         } else {
             // Connection, empty and stale states read the same in either layout.
             CueDisplayView()
@@ -77,28 +95,27 @@ private struct CueDrum: View {
                         .animation(animatesShift ? Motion.listShift : nil, value: standby.uniqueID)
                 }
 
-                if !model.isPresenting {
-                    // The pills hang from just below the standby name, so a
-                    // note or a wrapped row grows them downward without
-                    // moving the number, name or arrow.
-                    DetailPillsRow(
-                        cue: standby,
-                        kinds: model.preferences.visiblePills,
-                        cueListName: model.client.watchedCueList?.displayName,
-                        size: pillSize,
-                        showsCueTypeLabel: model.preferences.showsCueTypeLabel,
-                        performanceMode: model.preferences.performanceMode
-                    )
-                    .padding(.horizontal, Self.horizontalPadding)
-                    .padding(.top, metrics.pillsTop)
-                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
-                }
+                // The pills hang from just below the standby name, so a
+                // note or a wrapped row grows them downward without
+                // moving the number, name or arrow.
+                DetailPillsRow(
+                    cue: standby,
+                    kinds: model.preferences.visiblePills,
+                    cueListName: model.client.watchedCueList?.displayName,
+                    size: pillSize,
+                    showsCueTypeLabel: model.preferences.showsCueTypeLabel,
+                    performanceMode: model.preferences.performanceMode
+                )
+                .padding(.horizontal, Self.horizontalPadding)
+                .padding(.top, metrics.pillsTop)
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
         }
         .clipped()
         .background {
             (standby.color ?? .clear)
                 .opacity(CueDisplayView.canvasTintOpacity)
+                .ignoresSafeArea()
                 .animation(animatesShift ? Motion.listShift : nil, value: standby.uniqueID)
         }
         .onChange(of: standbyIndex, initial: true) { old, new in
@@ -135,16 +152,21 @@ private struct CueDrum: View {
     /// fills what the name and pills leave, and the arrow sits beside the
     /// widest number in the list so it never has to move between cues.
     private func metrics(in size: CGSize) -> DrumMetrics {
-        let presenting = model.isPresenting
         let showsName = model.preferences.showsCueName
-        let nameSize: CGFloat = presenting ? 40 : 28
+        let nameSize: CGFloat = min(28, max(17, size.height / 12))
         let padding = DrumMetrics.contentPadding
+        let rowRadius = min(CueLayout.listRowRadius, max(1, Int(
+            (size.height - DrumMetrics.minimumStandbyHeight - padding * 2 - DrumMetrics.bandPadding * 4)
+                / (DrumMetrics.rowPitch * 2)
+        )))
+        let bandPadding: CGFloat = rowRadius == 1 ? 0 : DrumMetrics.bandPadding
+        let bandHeight = CGFloat(rowRadius) * DrumMetrics.rowPitch + bandPadding * 2
 
         let nameBlock = showsName
             ? typography.lineHeight(size: nameSize) + DrumLabelLayout.stackedSpacing
             : 0
-        let pillBlock = presenting ? 0 : Self.pillsSpacing + pillsHeight
-        let available = max(0, size.height - DrumMetrics.bandHeight * 2 - padding * 2)
+        let pillBlock = Self.pillsSpacing + pillsHeight
+        let available = max(0, size.height - bandHeight * 2 - padding * 2)
         let numberHeight = max(0, available - nameBlock - pillBlock)
         let numberWidth = max(0, size.width - Self.horizontalPadding * 2)
 
@@ -157,10 +179,10 @@ private struct CueDrum: View {
         // Fit the number to the available height first. The arrow's size and
         // spacing scale with the number, so reserve that width algebraically
         // instead of subtracting space based on an already width-constrained fit.
-        let firstFit = typography.standbyNumberPointSize(
+        let firstFit = max(1, typography.standbyNumberPointSize(
             for: text, reference: reference,
             in: CGSize(width: numberWidth, height: numberHeight)
-        )
+        ))
 
         // Fixed sizing keeps the arrow beside the widest number so it holds
         // still; the other sizings draw each number at its own size, so the
@@ -172,7 +194,7 @@ private struct CueDrum: View {
                 widthPerPoint + 2 * (Self.arrowSizeRatio + Self.arrowSpacingRatio)
             )
             : numberWidth / widthPerPoint
-        let numberSize = min(firstFit, widthLimitedSize)
+        let numberSize = max(1, min(firstFit, widthLimitedSize))
         let arrowSize = numberSize * Self.arrowSizeRatio
         let referenceWidth = typography.cueNumberWidth(of: arrowText, size: numberSize)
         let arrowX = max(
@@ -184,10 +206,12 @@ private struct CueDrum: View {
         // sit under the name rather than against the cues below.
         let numberLineHeight = typography.lineHeight(size: numberSize)
         let blockHeight = numberLineHeight + nameBlock + pillBlock
-        let blockTop = DrumMetrics.bandHeight + padding + max(0, available - blockHeight) / 2
+        let blockTop = bandHeight + padding + max(0, available - blockHeight) / 2
 
         return DrumMetrics(
             size: size,
+            rowRadius: rowRadius,
+            verticalBandPadding: bandPadding,
             standbyNumberSize: numberSize,
             standbyNameSize: nameSize,
             showsStandbyName: showsName,
@@ -205,15 +229,21 @@ private struct DrumMetrics {
     static let rowPitch: CGFloat = 34
     static let bandPadding: CGFloat = 12
     static let contentPadding: CGFloat = 16
+    static let minimumStandbyHeight: CGFloat = 160
+    static var minimumCanvasHeight: CGFloat {
+        minimumStandbyHeight + contentPadding * 2 + bandPadding * 4 + rowPitch * 2
+    }
     /// Positions past this are off the drum: faded out beyond each band.
-    static let lastPosition = CueLayout.listRowRadius + 1
+    var lastPosition: Int { rowRadius + 1 }
 
     /// Both bands share one height so the standby cue sits in the middle.
-    static var bandHeight: CGFloat {
-        CGFloat(CueLayout.listRowRadius) * rowPitch + bandPadding * 2
+    var bandHeight: CGFloat {
+        CGFloat(rowRadius) * Self.rowPitch + verticalBandPadding * 2
     }
 
     let size: CGSize
+    let rowRadius: Int
+    let verticalBandPadding: CGFloat
     let standbyNumberSize: CGFloat
     let standbyNameSize: CGFloat
     let showsStandbyName: Bool
@@ -232,9 +262,9 @@ private struct DrumMetrics {
             if position == 0 {
                 return numberCenterY
             } else if position < 0 {
-                return Self.bandHeight - Self.bandPadding - distance * Self.rowPitch
+                return bandHeight - verticalBandPadding - distance * Self.rowPitch
             } else {
-                return size.height - Self.bandHeight + Self.bandPadding + distance * Self.rowPitch
+                return size.height - bandHeight + verticalBandPadding + distance * Self.rowPitch
             }
         }
     }
@@ -256,7 +286,7 @@ private struct DrumMetrics {
     func opacity(at position: Double) -> CGFloat {
         interpolate(position) { position in
             if position == 0 { return 1 }
-            if abs(position) >= Self.lastPosition { return 0 }
+            if abs(position) >= lastPosition { return 0 }
             return Self.role(at: position).opacity
         }
     }
@@ -277,10 +307,10 @@ private struct DrumMetrics {
     private func interpolate(
         _ position: Double, logarithmic: Bool = false, _ value: (Int) -> CGFloat
     ) -> CGFloat {
-        let last = Double(Self.lastPosition)
+        let last = Double(lastPosition)
         let clamped = min(last, max(-last, position))
         let lower = Int(clamped.rounded(.down))
-        let upper = min(Self.lastPosition, lower + 1)
+        let upper = min(lastPosition, lower + 1)
         let fraction = CGFloat(clamped - Double(lower))
         let from = value(lower), to = value(upper)
 
@@ -302,7 +332,7 @@ private struct DrumRows: View {
     @AnimatableIgnored var metrics: DrumMetrics
 
     var body: some View {
-        let reach = Double(DrumMetrics.lastPosition)
+        let reach = Double(metrics.lastPosition)
         let first = max(-1, Int((offset - reach).rounded(.down)))
         let last = min(rows.count, Int((offset + reach).rounded(.up)))
 
@@ -312,7 +342,7 @@ private struct DrumRows: View {
                 item(at: index, position: position)
                     .position(x: metrics.size.width / 2, y: metrics.y(at: position))
                     .opacity(metrics.opacity(at: position))
-                    .accessibilityHidden(abs(position) > Double(CueLayout.listRowRadius) + 0.5)
+                    .accessibilityHidden(abs(position) > Double(metrics.rowRadius) + 0.5)
             }
         }
         .frame(width: metrics.size.width, height: metrics.size.height)

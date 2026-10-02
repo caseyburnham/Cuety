@@ -2,6 +2,7 @@ import Foundation
 import Network
 import ShowControlCore
 #if os(macOS)
+import IOKit
 import SystemConfiguration
 #endif
 
@@ -42,6 +43,74 @@ nonisolated struct QLabServer: Identifiable, Hashable, Sendable {
     }
 
     var isLocalhost: Bool { id == Self.localhost().id }
+
+    var systemImage: String {
+        if id.hasPrefix("localhost:") { return Self.localComputerSystemImage }
+        return source == .bonjour ? "bonjour" : "network"
+    }
+
+    var connectedSystemImage: String? {
+        switch systemImage {
+        case "macbook", "macmini", "macstudio", "desktopcomputer", "macpro.gen3":
+            return systemImage + ".badge.checkmark"
+        default:
+            return nil
+        }
+    }
+
+    static func computerSystemImage(modelName: String) -> String {
+        let name = modelName.lowercased().replacingOccurrences(of: " ", with: "")
+        if name.hasPrefix("macbook") { return "macbook" }
+        if name.hasPrefix("macmini") { return "macmini" }
+        if name.hasPrefix("macstudio") { return "macstudio" }
+        if name.hasPrefix("macpro") {
+            if name.contains("rack") { return "macpro.gen3.server" }
+            if name.hasPrefix("macpro6,") || name.contains("2013") { return "macpro.gen2" }
+            if ["macpro1,", "macpro2,", "macpro3,", "macpro4,", "macpro5,"].contains(where: name.hasPrefix) {
+                return "macpro.gen1"
+            }
+            return "macpro.gen3"
+        }
+        return "desktopcomputer"
+    }
+
+    private static let localComputerSystemImage: String = {
+#if os(macOS)
+        // Apple silicon model identifiers do not encode the computer family.
+        var productName: String?
+        let product = IORegistryEntryFromPath(kIOMainPortDefault, "IODeviceTree:/product")
+        if product != 0 {
+            defer { IOObjectRelease(product) }
+            if let data = IORegistryEntryCreateCFProperty(
+                product, "product-name" as CFString, kCFAllocatorDefault, 0
+            )?.takeRetainedValue() as? Data,
+               let name = String(data: data, encoding: .utf8) {
+                productName = name.trimmingCharacters(in: .controlCharacters)
+            }
+        }
+
+        let platform = IOServiceGetMatchingService(
+            kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice")
+        )
+        if platform != 0 {
+            defer { IOObjectRelease(platform) }
+            if let data = IORegistryEntryCreateCFProperty(
+                platform, "model" as CFString, kCFAllocatorDefault, 0
+            )?.takeRetainedValue() as? Data,
+               let name = String(data: data, encoding: .utf8) {
+                let model = name.trimmingCharacters(in: .controlCharacters)
+                // An Intel identifier distinguishes tower and cylindrical Mac Pros
+                // even when the product name only says "Mac Pro".
+                if model.hasPrefix("MacPro"), !(productName?.lowercased().contains("rack") ?? false) {
+                    return computerSystemImage(modelName: model)
+                }
+                return computerSystemImage(modelName: productName ?? model)
+            }
+        }
+        if let productName { return computerSystemImage(modelName: productName) }
+#endif
+        return "desktopcomputer"
+    }()
 
     static func manual(host: String, port: UInt16) -> QLabServer {
         let typed = host.trimmingCharacters(in: .whitespacesAndNewlines)

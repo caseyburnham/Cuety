@@ -9,6 +9,7 @@ final class QLabClient {
     private let logger = Logger(category: "QLabClient")
     private let preferences: Preferences
     private let log: ActivityLog
+    let statistics = ShowStatistics()
 
     private(set) var status: ConnectionStatus = .offline
 
@@ -38,6 +39,7 @@ final class QLabClient {
     }
 
     private(set) var playheads: [String: PlayheadState] = [:]
+    private var playheadRevisions: [String: UInt64] = [:]
 
     var watchedCueListID: String? {
         didSet {
@@ -190,6 +192,8 @@ final class QLabClient {
 
     private func tearDownSession(sendDisconnect: Bool) {
         cancelSessionTasks()
+        statistics.markIncomplete()
+        statistics.endObservation()
         lastOverflowRecovery = nil
         droppedEventCount = 0
 
@@ -229,13 +233,12 @@ final class QLabClient {
         pendingCueDetailIDs.removeAll()
         invalidateWatchedGraph()
         playheads = [:]
+        playheadRevisions = [:]
         watchedCueListID = nil
     }
 
     private func handleSessionLost(reason: String) {
-        cancelSessionTasks()
-        failAllPendingRequests(with: RequestFailure.disconnected)
-        invalidateLiveSessionData()
+        tearDownSession(sendDisconnect: false)
 
         status = .failed(reason: reason)
         scheduleReconnect()
@@ -273,6 +276,7 @@ final class QLabClient {
         guard let connection else { return }
 
         droppedEventCount += lost
+        statistics.markIncomplete()
         logger.warning(
             "Event buffer overflowed; \(lost, privacy: .public) event(s) lost"
         )
@@ -302,7 +306,13 @@ final class QLabClient {
             logger.info("Resynchronizing after event loss")
             // A lost event may have been an edit, so no retained detail can
             // be trusted until QLab answers for it again.
-            try? await refreshCueData(invalidatingDetails: true)
+            do {
+                try await refreshCueData(invalidatingDetails: true)
+            } catch {
+                guard !Task.isCancelled, self.connection === connection else { return }
+                recordError(error)
+                handleSessionLost(reason: "Cue data could not be refreshed after missed updates. \(error.localizedDescription)")
+            }
         }
     }
 
@@ -364,6 +374,10 @@ final class QLabClient {
             OSCMessage("/listen/playhead"),
             as: QLabEmptyPayload.self
         )
+        statistics.reset(startedAt: Date())
+        for event in ["go", "panicAll", "cue/start", "cue/stop"] {
+            try await request(OSCMessage("/listen/\(event)"), as: QLabEmptyPayload.self)
+        }
         try await refreshCueData()
         guard self.connection === connection else { throw RequestFailure.disconnected }
 
@@ -376,6 +390,8 @@ final class QLabClient {
     }
 
     private func handleHandshakeFailure(_ error: any Error) {
+        statistics.markIncomplete()
+        statistics.endObservation()
         recordError(error)
 
         switch error {
@@ -437,6 +453,7 @@ final class QLabClient {
     private func sendWithoutReply(_ message: OSCMessage) async throws {
         guard let connection else { throw RequestFailure.disconnected }
         try await Self.send(message, over: connection, loggingTo: log)
+        guard self.connection === connection else { throw RequestFailure.disconnected }
     }
 
     @discardableResult
@@ -464,18 +481,25 @@ final class QLabClient {
     func validateSessionReply<Payload: Decodable & Sendable>(
         _ message: OSCMessage, as payloadType: Payload.Type
     ) async throws -> QLabReply<Payload> {
+        let session = connection
         let reply: QLabReply<Payload>
         do {
             reply = try await parse(message, as: payloadType)
         } catch {
+            guard connection === session else { throw RequestFailure.disconnected }
+            try Task.checkCancellation()
             // Error/denied replies commonly omit the requested payload, so a
             // decoding failure is often the envelope reporting a problem.
             // Read the small envelope on its own in that path only, so
             // authorization errors retain their specific behavior.
             let envelope = try await parse(message, as: QLabEmptyPayload.self)
+            guard connection === session else { throw RequestFailure.disconnected }
+            try Task.checkCancellation()
             _ = try validateSessionReply(envelope)
             throw error
         }
+        guard connection === session else { throw RequestFailure.disconnected }
+        try Task.checkCancellation()
         return try validateSessionReply(reply)
     }
 
@@ -733,6 +757,8 @@ final class QLabClient {
             return
         }
 
+        statistics.record(message)
+
         if message.address == "/qlab/event/workspace/playhead" {
             handleBroadcastPlayhead(message)
             return
@@ -845,6 +871,7 @@ final class QLabClient {
     private var cueListRefreshTask: Task<Void, Never>?
 
     private func scheduleCueListRefresh() {
+        guard let session = connection else { return }
         cueListRefreshTask?.cancel()
         cueListRefreshTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
@@ -854,9 +881,12 @@ final class QLabClient {
             } catch is CancellationError {
                 return
             } catch {
+                guard !Task.isCancelled, self.connection === session else { return }
                 self.logger.warning(
                     "Debounced cue refresh failed: \(error.localizedDescription, privacy: .public)"
                 )
+                self.recordError(error)
+                self.handleSessionLost(reason: "Cue data could not be refreshed. \(error.localizedDescription)")
             }
         }
     }
@@ -867,21 +897,24 @@ final class QLabClient {
     ///   for when updates may have been missed. Retained values stay on
     ///   screen until the new replies land.
     func refreshCueData(invalidatingDetails: Bool = false) async throws {
+        let session = connection
         cueDataGeneration += 1
         let generation = cueDataGeneration
 
         try await refreshCueLists(invalidatingDetails: invalidatingDetails)
 
-        guard generation == cueDataGeneration else { return }
+        guard generation == cueDataGeneration, connection === session else { return }
         await refreshPlayheadCueDetails()
     }
 
     func refreshCueLists(invalidatingDetails: Bool = false) async throws {
-        guard let workspaceID = workspace?.uniqueID else { return }
+        guard let workspaceID = workspace?.uniqueID, let session = connection else { return }
         let reply = try await request(
             OSCMessage("/workspace/\(workspaceID)/cueLists"),
             as: [Cue].self
         )
+        guard connection === session else { throw RequestFailure.disconnected }
+        try Task.checkCancellation()
         var refreshed = reply.data ?? []
 
         // Carry the details already fetched onto the new tree. Without this
@@ -898,6 +931,7 @@ final class QLabClient {
 
         let liveListIDs = Set(cueLists.map(\.uniqueID))
         playheads = playheads.filter { liveListIDs.contains($0.key) }
+        playheadRevisions = playheadRevisions.filter { liveListIDs.contains($0.key) }
 
         reconcileWatchedCueList()
 
@@ -921,10 +955,10 @@ final class QLabClient {
     private static let maxConcurrentPlayheadRequests = 4
 
     func refreshPlayheads() async {
-        guard let workspaceID = workspace?.uniqueID else { return }
-        let session = connection
+        guard let workspaceID = workspace?.uniqueID, let session = connection else { return }
         // QLab returns an error for a cart's playback position.
         let listIDs = cueLists.filter { !$0.isCueCart }.map(\.uniqueID)
+        let revisions = playheadRevisions
 
         // Results are gathered locally and written back in one go: assigning
         // each one as it lands would invalidate every view watching the
@@ -943,7 +977,13 @@ final class QLabClient {
             }
         )
 
-        guard completed, !fetched.isEmpty else { return }
+        guard completed, !Task.isCancelled, connection === session else { return }
+        let liveListIDs = Set(cueLists.map(\.uniqueID))
+        fetched = fetched.filter {
+            liveListIDs.contains($0.key) && playheadRevisions[$0.key] == revisions[$0.key]
+        }
+        guard !fetched.isEmpty else { return }
+        for listID in fetched.keys { playheadRevisions[listID, default: 0] &+= 1 }
         playheads.merge(fetched) { _, latest in latest }
     }
 
@@ -979,6 +1019,9 @@ final class QLabClient {
     }
 
     private func setPlayhead(_ cueID: String?, forCueListID listID: String) {
+        // A repeated notification still confirms a position more recently than
+        // any snapshot already in flight.
+        playheadRevisions[listID, default: 0] &+= 1
         guard let cueID, !cueID.isEmpty, cueID != "none" else {
             playheads[listID] = .unset
             return
@@ -1098,7 +1141,7 @@ final class QLabClient {
             }
         )
 
-        guard completed else { return }
+        guard completed, !Task.isCancelled, connection === session else { return }
         apply(fetched)
     }
 
@@ -1194,6 +1237,7 @@ final class QLabClient {
     private static let alwaysFetchedKeys = [
         "number", "name", "type", "colorName", "flagged", "armed",
         "continueMode", "isBroken", "isLoaded",
+        "notes", "duration", "preWait", "postWait",
     ]
 
     /// The encoded key list for `/valuesForKeys`, rebuilt only when the
@@ -1240,7 +1284,7 @@ final class QLabClient {
     }
 
     private func sendThump() async {
-        guard let workspaceID = workspace?.uniqueID, connection != nil else { return }
+        guard let workspaceID = workspace?.uniqueID, let session = connection else { return }
 
         // Monotonic, so a clock change mid-heartbeat cannot skew the round trip.
         let sentAt = ContinuousClock.now
@@ -1253,9 +1297,10 @@ final class QLabClient {
                 throw RequestFailure.handshakeFailed(step: "thump", detail: "Unexpected heartbeat reply.")
             }
 
+            guard connection === session else { return }
             recordThump(roundTrip: TimeInterval(duration: ContinuousClock.now - sentAt))
         } catch {
-            guard status.hasLiveData else { return }
+            guard !Task.isCancelled, connection === session, status.hasLiveData else { return }
             missedThumps += 1
 
             if missedThumps >= Self.lostThumpThreshold {

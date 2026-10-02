@@ -9,12 +9,6 @@ struct MainWindowView: View {
         } detail: {
             detail
         }
-        .ignoresSafeArea()
-        .background {
-            (model.standbyCue?.color ?? .clear)
-                .opacity(CueDisplayView.canvasTintOpacity)
-                .ignoresSafeArea()
-        }
         .task {
             model.start()
         }
@@ -26,14 +20,13 @@ struct MainWindowView: View {
         }
         .credentialErrorAlert(Bindable(model).credentialError, isActive: model.passcodePrompt == nil)
 #if os(macOS)
-        .background(
-            FullScreenPresentation(isPresenting: model.isPresenting) { isFullScreen in
-                model.setPresenting(isFullScreen)
-            }
-        )
-        .background(StatusToolbar())
-        .onExitCommand {
-            if model.isPresenting { model.togglePresentationMode() }
+        .windowFullScreenBehavior(.enabled)
+        .windowToolbarFullScreenVisibility(.visible)
+        .toolbarVisibility(.visible, for: .windowToolbar)
+        .toolbarBackground(.ultraThinMaterial, for: .windowToolbar)
+        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
+        .toolbar {
+            StatusToolbar()
         }
 #endif
     }
@@ -53,9 +46,9 @@ struct MainWindowView: View {
     }
 }
 
-/// The detail column's content. The layout switch lives in its own body
-/// because the macOS split view hosts the detail once, when it is made; read
-/// anywhere else, the layout would be frozen at whatever it was at launch.
+/// The detail column's content. Keeping the layout switch in its own body
+/// lets the native split view observe layout changes without rebuilding its
+/// container.
 private struct MainDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -67,32 +60,18 @@ private struct MainDetailView: View {
                 GeometryReader { proxy in
                     CueDisplayView()
                         .safeAreaInset(edge: .bottom, spacing: 0) {
-                            if !model.isPresenting {
-                                CueDrawerView(
-                                    availableHeight: proxy.size.height
-                                )
-                                .transition(reduceMotion ? .identity : .move(edge: .bottom).combined(with: .opacity))
-                            }
+                            CueDrawerView(
+                                availableHeight: proxy.size.height
+                            )
+                            .transition(reduceMotion ? .identity : .move(edge: .bottom).combined(with: .opacity))
                         }
                 }
+                .ignoresSafeArea(.container, edges: .top)
             case .list:
                 CueListView()
             }
         }
         .transition(reduceMotion ? .identity : .opacity)
-        .background {
-            (model.standbyCue?.color ?? .clear)
-                .opacity(CueDisplayView.canvasTintOpacity)
-                .ignoresSafeArea()
-        }
-#if os(iOS)
-        .toolbarBackground(
-            (model.standbyCue?.color ?? .clear)
-                .opacity(CueDisplayView.canvasTintOpacity),
-            for: .navigationBar
-        )
-        .toolbarBackgroundVisibility(.visible, for: .navigationBar)
-#endif
     }
 }
 

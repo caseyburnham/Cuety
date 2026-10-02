@@ -14,8 +14,8 @@ cues.
 - **Shows the cue that matters.** The current cue number and name at display scale, with
   configurable detail pills beneath it — type, duration, pre- and post-wait, continue
   mode, cue list, armed, flagged, and notes.
-- **Presentation mode** (⇧⌘F) hides all chrome for an unattended Mac display. It is not
-  offered on iPad; iPad keeps its native split-view and operator controls visible.
+- **Native Mac full screen** (⌃⌘F) uses the window's full-screen control and keeps the
+  toolbar visible. iPad keeps its native split-view and operator controls.
 - **Keep display awake** is a separate, persisted setting that holds off the screensaver
   for as long as it's on.
 - **Cue drawer** (⌥⌘D) shows the watched cue list around the playhead for context.
@@ -90,7 +90,8 @@ discovery finding nothing.
 | `Cuety/Model` | `AppModel`, cue graph, preferences, activity log |
 | `Cuety/Networking` | QLab session, Bonjour browser, Keychain passcode store |
 | `Cuety/OSC` | SLIP framing (OSC wire types and codec live in `../ShowControlCore`) |
-| `Cuety/System` | Display sleep blocking, Dock badge, full-screen and pointer hiding |
+| `Cuety/System` | Dock badge |
+| `../ShowControlCore/Sources/ShowControlUI` | Shared native screen-awake and UI helpers |
 | `CuetyTests` | Protocol, session, and model tests |
 | `../SHOW_CONTROL_COMPANION_CONTRACT.md` | Shared Cuety/Viewtiful platform and transport contract |
 | `BACKLOG.md` | Current open work and release verification |

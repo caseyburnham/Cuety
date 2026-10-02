@@ -27,7 +27,11 @@ struct CueDisplayView: View {
         // Washing the cue color across the canvas keeps it readable even when
         // the cue name is hidden. Clear stands in for "no color" so the tint
         // cross-fades with the cue change instead of popping in and out.
-        .background((canvasTint ?? .clear).opacity(Self.canvasTintOpacity))
+        .background {
+            (canvasTint ?? .clear)
+                .opacity(Self.canvasTintOpacity)
+                .ignoresSafeArea()
+        }
         // Performance mode disables the container animation; normal mode
         // retains the animated number transition and display resizing.
         .motion(
@@ -67,17 +71,15 @@ struct CueDisplayView: View {
 
     @ViewBuilder
     private func cueContent(_ cue: Cue) -> some View {
-        VStack(spacing: model.isPresenting ? 12 : 8) {
-            if !model.isPresenting {
-                standingByCaption
-            }
+        VStack(spacing: 8) {
+            standingByCaption
 
             numberOrName(cue)
 
             if model.preferences.showsCueName, cue.displayNumber != nil,
                let name = cue.displayName {
                 Text(name)
-                    .font(typography.font(size: model.isPresenting ? 40 : 28))
+                    .font(typography.font(size: 28))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
@@ -86,16 +88,14 @@ struct CueDisplayView: View {
                     .id(cue.uniqueID)
             }
 
-            if !model.isPresenting {
-                DetailPillsRow(
-                    cue: cue,
-                    kinds: model.preferences.visiblePills,
-                    cueListName: cueListName(containing: cue),
-                    size: detailPillSize,
-                    showsCueTypeLabel: model.preferences.showsCueTypeLabel,
-                    performanceMode: model.preferences.performanceMode
-                )
-            }
+            DetailPillsRow(
+                cue: cue,
+                kinds: model.preferences.visiblePills,
+                cueListName: cueListName(containing: cue),
+                size: detailPillSize,
+                showsCueTypeLabel: model.preferences.showsCueTypeLabel,
+                performanceMode: model.preferences.performanceMode
+            )
         }
         .padding(.horizontal, 32)
         .padding(.vertical, 24)
@@ -182,14 +182,10 @@ struct CueDisplayView: View {
     @ViewBuilder
     private var emptyState: some View {
         if !client.status.hasLiveData {
-            if model.isPresenting {
-                presentedStatusState
-            } else {
-                ContentUnavailableView {
-                    Label(client.status.title, systemImage: client.status.systemImage)
-                } description: {
-                    Text(client.status.detail)
-                }
+            ContentUnavailableView {
+                Label(client.status.title, systemImage: client.status.systemImage)
+            } description: {
+                Text(client.status.detail)
             }
         } else if client.cueLists.isEmpty {
             ContentUnavailableView {
@@ -230,32 +226,6 @@ struct CueDisplayView: View {
         }
     }
 
-    private var presentedStatusState: some View {
-        VStack(spacing: 24) {
-            Image(systemName: client.status.systemImage)
-                .font(.system(size: 96))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(client.status.tint)
-
-            VStack(spacing: 10) {
-                Text(client.status.title)
-                    .font(typography.font(size: 48))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.4)
-
-                Text(client.status.detail)
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                    .minimumScaleFactor(0.5)
-            }
-            .multilineTextAlignment(.center)
-        }
-        .padding(48)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(client.status.title). \(client.status.detail)")
-    }
 }
 
 @MainActor

@@ -18,6 +18,9 @@ struct CompactToolbarActions: ViewModifier {
     /// Only useful where the cue display itself isn't already on screen.
     var showsFloatingDisplay = true
 
+    @State private var isShowingDossier = false
+    @State private var isShowingStats = false
+    @State private var isShowingEventHistory = false
     @State private var isShowingSettings = false
     @State private var isShowingActivityLog = false
     @State private var isShowingConnectionInspector = false
@@ -78,6 +81,21 @@ struct CompactToolbarActions: ViewModifier {
                         .accessibilityLabel("Open floating cue display")
                     }
 
+                    Menu {
+                        Button("Standby Dossier", systemImage: "doc.text.magnifyingglass") {
+                            isShowingDossier = true
+                        }
+                        Button("Stats", systemImage: "chart.bar") {
+                            isShowingStats = true
+                        }
+                        Button("Event History", systemImage: "clock.arrow.circlepath") {
+                            isShowingEventHistory = true
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("Show details and statistics")
+
                     if showsSettings {
                         Button {
                             isShowingSettings = true
@@ -94,6 +112,45 @@ struct CompactToolbarActions: ViewModifier {
                         .frame(minWidth: 360, idealWidth: 420, minHeight: 220, idealHeight: 260)
                 }
             }
+            .sheet(isPresented: $isShowingDossier) {
+                presented {
+                    NavigationStack {
+                        StandbyDossierView()
+                            .navigationTitle("Standby Dossier")
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Done") { isShowingDossier = false }
+                                }
+                            }
+                    }
+                }
+            }
+            .sheet(isPresented: $isShowingEventHistory) {
+                presented {
+                    NavigationStack {
+                        EventHistoryView()
+                            .navigationTitle("Event History")
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Done") { isShowingEventHistory = false }
+                                }
+                            }
+                    }
+                }
+            }
+            .sheet(isPresented: $isShowingStats) {
+                presented {
+                    NavigationStack {
+                        StatsView()
+                            .navigationTitle("Stats")
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Done") { isShowingStats = false }
+                                }
+                            }
+                    }
+                }
+            }
             .sheet(isPresented: $isShowingSettings) {
                 presented { SettingsView() }
             }
@@ -107,11 +164,10 @@ struct CompactToolbarActions: ViewModifier {
 
     /// Presented content sits outside the presenting view's environment, so
     /// hand it back the model and the chosen appearance.
-    private func presented(@ViewBuilder _ content: () -> some View) -> some View {
-        content()
-            .environment(model)
-            .preferredColorScheme(model.preferences.appearance.colorScheme)
-            .reducingMotionWhenRequested()
+    private func presented(@ViewBuilder _ content: @escaping () -> some View) -> some View {
+        CuetyHostedContent(model: model) {
+            content()
+        }
     }
 }
 

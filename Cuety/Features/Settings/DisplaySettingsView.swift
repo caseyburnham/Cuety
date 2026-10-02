@@ -53,22 +53,6 @@ struct DisplaySettingsView: View {
             }
 
             Section {
-                Toggle("Show playhead", isOn: Bindable(preferences).showsPlayhead)
-                    .help("Shows the arrow marking the standby cue in Cue List layout.")
-
-                Picker("Color", selection: Bindable(preferences).playheadAccent) {
-                    ForEach(PlayheadAccent.allCases) { choice in
-                        Text(choice.title).tag(choice)
-                    }
-                }
-                .disabled(!preferences.showsPlayhead)
-            } header: {
-                Text("Playhead")
-            } footer: {
-                Text("The playhead arrow marks the cue currently standing by in Cue List layout. Choose a fixed accent color, or follow the color of the cue.")
-            }
-
-            Section {
                 Picker("Layout", selection: Binding(
                     get: { preferences.cueLayout },
                     set: { model.setCueLayout($0) }
@@ -77,13 +61,25 @@ struct DisplaySettingsView: View {
                         Label(layout.title, systemImage: layout.systemImage).tag(layout)
                     }
                 }
+
+                Toggle("Show playhead", isOn: Bindable(preferences).showsPlayhead)
+                    .disabled(preferences.cueLayout != .list)
+                    .help("Shows the arrow marking the standby cue in Cue List layout.")
+
+                Picker("Playhead color", selection: Bindable(preferences).playheadAccent) {
+                    ForEach(PlayheadAccent.allCases) { choice in
+                        Text(choice.title).tag(choice)
+                    }
+                }
             } header: {
                 Text("Layout")
             } footer: {
                 Text("""
                 Display and Drawer shows the standby cue large with the drawer \
                 beneath it. Cue List gives the whole window to the cue list, \
-                with the standby cue marked by the playhead arrow.
+                with the standby cue marked by the playhead arrow. The playhead
+                color also controls the playhead marker in Display and
+                Drawer mode.
                 """)
             }
         }

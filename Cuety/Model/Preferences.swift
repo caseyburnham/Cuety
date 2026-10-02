@@ -75,7 +75,7 @@ enum CueLayout: String, CaseIterable, Hashable, Sendable, Identifiable {
     var id: String { rawValue }
 
     /// How many cues the cue list layout shows either side of the standby cue.
-    static let listRowRadius = 2
+    static let listRowRadius = 4
 
     var title: String {
         switch self {

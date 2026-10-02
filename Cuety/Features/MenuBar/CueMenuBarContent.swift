@@ -21,14 +21,6 @@ struct CueMenuBarContent: View {
 
         Button("Show Cuety") { showMainWindow() }
 
-        Toggle("Presentation Mode", isOn: Binding(
-            get: { model.isPresenting },
-            set: { presenting in
-                showMainWindow()
-                model.setPresenting(presenting)
-            }
-        ))
-
         Divider()
 
         Button("Refresh Connections") {

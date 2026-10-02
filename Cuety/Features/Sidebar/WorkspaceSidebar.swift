@@ -58,10 +58,6 @@ struct WorkspaceSidebar: View {
                 .disabled(!model.canRefresh)
                 .accessibilityLabel("Refresh")
 
-                Button("Add Server", systemImage: "plus") {
-                    model.isAddingServer = true
-                }
-                .accessibilityHint("Add a QLab server by host name or address")
             }
         }
 #endif
@@ -153,10 +149,10 @@ struct WorkspaceSidebar: View {
                         .selectionDisabled()
                 }
             } label: {
-                workspaceLabel(workspace, selection: selection)
+                workspaceLabel(workspace, selection: selection, server: server)
             }
         } else {
-            workspaceLabel(workspace, selection: selection)
+            workspaceLabel(workspace, selection: selection, server: server)
         }
     }
 
@@ -173,16 +169,18 @@ struct WorkspaceSidebar: View {
     }
 
     private func workspaceLabel(
-        _ workspace: QLabWorkspaceInfo, selection: WorkspaceSelection
+        _ workspace: QLabWorkspaceInfo, selection: WorkspaceSelection, server: QLabServer
     ) -> some View {
         let isCurrent = model.selection == selection
+        let connectedImage = isCurrent && model.client.status == .connected
+            ? server.connectedSystemImage : nil
 
         return Label {
             HStack {
                 Text(workspace.displayName)
                     .lineLimit(2)
                 Spacer(minLength: 4)
-                if isCurrent {
+                if isCurrent && connectedImage == nil {
                     if model.client.status.isTransitional {
                         ProgressView().controlSize(.small)
                     } else {
@@ -194,7 +192,9 @@ struct WorkspaceSidebar: View {
                 }
             }
         } icon: {
-            Image(systemName: "play.display")
+            Image(systemName: connectedImage ?? server.systemImage)
+                .foregroundStyle(connectedImage == nil ? Color.primary : Color.green)
+                .accessibilityLabel(connectedImage == nil ? "QLab server" : "Connected QLab server")
         }
         .tag(Selection.workspace(selection))
         .help(workspace.displayName)

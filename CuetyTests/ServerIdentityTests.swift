@@ -9,6 +9,40 @@ import Testing
 struct ServerIdentityTests {
     private let port = QLabServer.defaultPort
 
+    @Test("Computer glyph follows the hardware family", arguments: [
+        ("MacBook Pro (14-inch, Nov 2024)", "macbook"),
+        ("MacBookAir10,1", "macbook"),
+        ("Mac mini", "macmini"),
+        ("Macmini8,1", "macmini"),
+        ("Mac Studio", "macstudio"),
+        ("MacPro5,1", "macpro.gen1"),
+        ("MacPro6,1", "macpro.gen2"),
+        ("Mac Pro (Late 2013)", "macpro.gen2"),
+        ("MacPro7,1", "macpro.gen3"),
+        ("Mac Pro (2023)", "macpro.gen3"),
+        ("Mac Pro (Rack, 2019)", "macpro.gen3.server"),
+        ("iMac21,1", "desktopcomputer"),
+        ("Mac16,8", "desktopcomputer"),
+        ("", "desktopcomputer"),
+    ])
+    func computerGlyph(modelName: String, symbol: String) {
+        #expect(QLabServer.computerSystemImage(modelName: modelName) == symbol)
+    }
+
+    @Test("Connection glyph distinguishes remote sources and local custom ports")
+    func connectionGlyph() throws {
+        let remote = try #require(QLabServer.bonjour(
+            endpoint: .service(name: "Remote QLab", type: "_qlab._tcp", domain: "local.", interface: nil)
+        ))
+        #expect(remote.systemImage == "bonjour")
+        #expect(QLabServer.manual(host: "192.0.2.1", port: port).systemImage == "network")
+        #expect(QLabServer.localhost(port: 53001).systemImage == QLabServer.localhost().systemImage)
+        var local = QLabServer.localhost()
+        local.source = .bonjour
+        #expect(local.systemImage == QLabServer.localhost().systemImage)
+        #expect(["macbook", "macmini", "macstudio", "desktopcomputer", "macpro.gen1", "macpro.gen2", "macpro.gen3", "macpro.gen3.server"].contains(local.systemImage))
+    }
+
     @Test("Every spelling of this Mac is one server", arguments: [
         "localhost",
         "LOCALHOST",

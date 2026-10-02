@@ -3,8 +3,24 @@ import SwiftUI
 
 enum WindowID: String {
     case main = "main"
+    case standbyDossier = "standby-dossier"
+    case stats = "stats"
+    case eventHistory = "event-history"
     case activityLog = "activity-log"
     case connectionInspector = "connection-inspector"
+}
+
+@MainActor
+struct CuetyHostedContent<Content: View>: View {
+    let model: AppModel
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        content()
+            .environment(model)
+            .preferredColorScheme(model.preferences.appearance.colorScheme)
+            .reducingMotionWhenRequested()
+    }
 }
 
 @main
@@ -18,12 +34,13 @@ struct CuetyApp: App {
     var body: some Scene {
 #if os(macOS)
         Window("Cuety", id: WindowID.main.rawValue) {
-            MainWindowView()
-                .environment(model)
-                .preferredColorScheme(model.preferences.appearance.colorScheme)
-                .reducingMotionWhenRequested()
+            CuetyHostedContent(model: model) {
+                MainWindowView()
+                    .frame(minWidth: 640, minHeight: 400)
+            }
         }
         .defaultSize(width: 900, height: 560)
+        .windowResizability(.contentMinSize)
         .keyboardShortcut("0", modifiers: .command)
         .onChange(of: scenePhase) { _, phase in
             model.updateScenePhase(phase)
@@ -33,44 +50,76 @@ struct CuetyApp: App {
         }
 
         Window("Activity Log", id: WindowID.activityLog.rawValue) {
-            ActivityLogView()
-                .environment(model)
-                .preferredColorScheme(model.preferences.appearance.colorScheme)
-                .reducingMotionWhenRequested()
+            CuetyHostedContent(model: model) {
+                ActivityLogView()
+                    .frame(minWidth: 600, minHeight: 320)
+            }
         }
         .defaultSize(width: 780, height: 460)
+        .windowResizability(.contentMinSize)
         .keyboardShortcut("l", modifiers: [.command, .shift])
 
         Window("Connection Status", id: WindowID.connectionInspector.rawValue) {
-            ConnectionInspectorView()
-                .environment(model)
-                .preferredColorScheme(model.preferences.appearance.colorScheme)
-                .reducingMotionWhenRequested()
+            CuetyHostedContent(model: model) {
+                ConnectionInspectorView()
+                    .frame(minWidth: 400, minHeight: 360)
+            }
         }
         .defaultSize(width: 460, height: 620)
         .windowResizability(.contentMinSize)
         .keyboardShortcut("i", modifiers: [.command, .shift])
 
+        Window("Standby Dossier", id: WindowID.standbyDossier.rawValue) {
+            CuetyHostedContent(model: model) {
+                StandbyDossierView()
+                    .frame(minWidth: 420, minHeight: 400)
+            }
+        }
+        .defaultSize(width: 520, height: 680)
+        .windowResizability(.contentMinSize)
+        .keyboardShortcut("d", modifiers: [.command, .shift])
+
+        Window("Stats", id: WindowID.stats.rawValue) {
+            CuetyHostedContent(model: model) {
+                StatsView()
+                    .frame(minWidth: 460, minHeight: 400)
+            }
+        }
+        .defaultSize(width: 560, height: 700)
+        .windowResizability(.contentMinSize)
+        .keyboardShortcut("s", modifiers: [.command, .shift])
+
+        Window("Event History", id: WindowID.eventHistory.rawValue) {
+            CuetyHostedContent(model: model) {
+                EventHistoryView()
+                    .frame(minWidth: 460, minHeight: 320)
+            }
+        }
+        .defaultSize(width: 600, height: 500)
+        .windowResizability(.contentMinSize)
+        .keyboardShortcut("e", modifiers: [.command, .shift])
+
         MenuBarExtra(isInserted: Bindable(model.preferences).showsMenuBarExtra) {
-            CueMenuBarContent(model: model)
-                .environment(model)
+            CuetyHostedContent(model: model) {
+                CueMenuBarContent(model: model)
+            }
         } label: {
-            CueMenuBarLabel()
-                .environment(model)
+            CuetyHostedContent(model: model) {
+                CueMenuBarLabel()
+            }
         }
 
         Settings {
-            SettingsView()
-                .environment(model)
-                .preferredColorScheme(model.preferences.appearance.colorScheme)
-                .reducingMotionWhenRequested()
+            CuetyHostedContent(model: model) {
+                SettingsView()
+            }
         }
+        .windowResizability(.contentSize)
 #else
         WindowGroup {
-            MainWindowView()
-                .environment(model)
-                .preferredColorScheme(model.preferences.appearance.colorScheme)
-                .reducingMotionWhenRequested()
+            CuetyHostedContent(model: model) {
+                MainWindowView()
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             model.updateScenePhase(phase)

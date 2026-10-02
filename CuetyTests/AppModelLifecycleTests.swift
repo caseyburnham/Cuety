@@ -138,43 +138,6 @@ struct AppModelLifecycleTests {
         #expect(Preferences(defaults: defaults).lastWorkspace == nil)
     }
 
-    @Test("Leaving presentation mode restores the sidebar it collapsed")
-    func presentationRestoresTheSidebar() throws {
-        let model = try makeModel()
-        model.isSidebarVisible = true
-
-        model.togglePresentationMode()
-        #expect(model.isPresenting)
-        #expect(!model.isSidebarVisible)
-
-        model.togglePresentationMode()
-        #expect(!model.isPresenting)
-        #expect(model.isSidebarVisible)
-    }
-
-    @Test("A sidebar collapsed before presenting stays collapsed afterwards")
-    func presentationRestoresACollapsedSidebar() throws {
-        let model = try makeModel()
-        model.isSidebarVisible = false
-
-        model.togglePresentationMode()
-        model.togglePresentationMode()
-
-        #expect(!model.isSidebarVisible)
-    }
-
-    @Test("A window already presenting does not overwrite the sidebar to restore")
-    func redundantPresentingIsIgnored() throws {
-        let model = try makeModel()
-        model.isSidebarVisible = true
-
-        model.setPresenting(true)
-        model.setPresenting(true)
-        model.setPresenting(false)
-
-        #expect(model.isSidebarVisible)
-    }
-
     @Test("Backgrounding labels retained QLab data stale without disconnecting")
     func backgroundMarksDataStale() async throws {
         let model = try makeModel()

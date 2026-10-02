@@ -31,6 +31,22 @@ struct CueDrawerView: View {
 
     private var isCollapsed: Bool { model.drawerStep == 0 }
 
+    /// Gives the safe-area inset an explicit height for the selected step.
+    /// Without this, the inset is content-sized and the drag only changes how
+    /// many rows fit inside a view that remains at its maximum height.
+    private var drawerHeight: CGFloat {
+        guard !isCollapsed else { return Self.handleHeight }
+        let rowArea = CGFloat(min(model.drawerStep, maximumStep) * 2) * Self.estimatedRowHeight
+        return min(
+            availableHeight * Self.maxHeightShare,
+            Self.handleHeight + 24 + rowArea
+        )
+    }
+
+    private var playheadColor: Color {
+        model.preferences.playheadAccent.color(for: model.standbyCue)
+    }
+
     var body: some View {
         if model.hasCurrentCueData,
            let graph = client.watchedGraph,
@@ -49,8 +65,6 @@ struct CueDrawerView: View {
         )
 
         VStack(alignment: .leading, spacing: 0) {
-            Divider()
-
             drawerHandle
 
             if !isCollapsed {
@@ -61,6 +75,11 @@ struct CueDrawerView: View {
                     below: neighbourhood.below
                 )
             }
+        }
+        .frame(height: drawerHeight, alignment: .top)
+        .clipped()
+        .overlay(alignment: .top) {
+            Divider()
         }
         .background {
             (model.standbyCue?.color ?? .clear)
@@ -203,7 +222,7 @@ struct CueDrawerView: View {
         HStack(spacing: 8) {
             Image(systemName: "arrowtriangle.right.fill")
                 .font(.caption2)
-                .foregroundStyle(.tint)
+                .foregroundStyle(playheadColor)
 
             if let group {
                 Text("in \(group.displayName ?? "Untitled")")
@@ -214,7 +233,7 @@ struct CueDrawerView: View {
             }
 
             Rectangle()
-                .fill(.tint.opacity(0.5))
+                .fill(playheadColor.opacity(0.5))
                 .frame(height: 1)
         }
         .padding(.vertical, 5)
@@ -234,44 +253,13 @@ struct CueDrawerView: View {
 
 extension View {
     func scrollingBound(to maxHeight: CGFloat) -> some View {
-        BoundedHeightLayout(maxHeight: maxHeight) {
-            ViewThatFits(in: .vertical) {
-                self
+        ViewThatFits(in: .vertical) {
+            self
 
-                ScrollView(.vertical) { self }
-                    .defaultScrollAnchor(.center)
-            }
+            ScrollView(.vertical) { self }
+                .defaultScrollAnchor(.center)
         }
-    }
-}
-
-struct BoundedHeightLayout: Layout {
-    let maxHeight: CGFloat
-
-    func sizeThatFits(
-        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
-    ) -> CGSize {
-        guard let subview = subviews.first else { return .zero }
-        return subview.sizeThatFits(limiting(proposal))
-    }
-
-    func placeSubviews(
-        in bounds: CGRect, proposal: ProposedViewSize,
-        subviews: Subviews, cache: inout ()
-    ) {
-        guard let subview = subviews.first else { return }
-        subview.place(
-            at: CGPoint(x: bounds.minX, y: bounds.minY),
-            anchor: .topLeading,
-            proposal: limiting(proposal)
-        )
-    }
-
-    private func limiting(_ proposal: ProposedViewSize) -> ProposedViewSize {
-        ProposedViewSize(
-            width: proposal.width,
-            height: min(proposal.height ?? .infinity, maxHeight)
-        )
+        .frame(maxHeight: maxHeight, alignment: .top)
     }
 }
 
