@@ -79,4 +79,82 @@ struct ShowStatisticsTests {
         #expect(stats.endedAt == start.addingTimeInterval(10))
         #expect(stats.goCount == 0)
     }
+
+    @Test("A new observation retains history while its activity and counters start fresh")
+    func retainedHistoryAcrossObservations() {
+        let stats = ShowStatistics()
+        stats.beginObservation(at: start)
+        let firstObservation = stats.observationID
+        stats.record(cue("go"), timestamp: start, workspaceName: "First Show")
+        stats.record(cue("go"), timestamp: start.addingTimeInterval(1), workspaceName: "First Show")
+        stats.markIncomplete()
+        stats.endObservation(at: start.addingTimeInterval(2))
+
+        stats.beginObservation(at: start.addingTimeInterval(3))
+        #expect(stats.observationID != firstObservation)
+        #expect(stats.recentEvents.count == 2)
+        #expect(stats.recentEvents.first?.workspaceName == "First Show")
+        #expect(stats.currentObservationEvents.isEmpty)
+        #expect(stats.activityInLastMinute(at: start.addingTimeInterval(3)) == 0)
+        #expect(stats.recentRepeats.isEmpty)
+        #expect(stats.goCount == 0)
+        #expect(stats.gosSinceLastPanic == 0)
+        #expect(stats.uniqueCueCount == 0)
+        #expect(!stats.isIncomplete)
+
+        stats.record(cue("go"), timestamp: start.addingTimeInterval(4), workspaceName: "Second Show")
+        #expect(stats.goCount == 1)
+        #expect(stats.currentObservationEvents.count == 1)
+        #expect(stats.activityInLastMinute(at: start.addingTimeInterval(5)) == 1)
+        #expect(stats.recentRepeats.isEmpty)
+        #expect(stats.recentEvents.last?.workspaceName == "Second Show")
+    }
+
+    @Test("Lifecycle entries work outside observations without counting as cue activity")
+    func lifecycleDoesNotCountAsActivity() {
+        let stats = ShowStatistics()
+        stats.recordLifecycle(.connecting, workspaceName: "W", timestamp: start)
+        #expect(stats.recentEvents.first?.observationID == nil)
+        stats.beginObservation(at: start)
+        stats.recordLifecycle(.connected, workspaceName: "Show", timestamp: start)
+        stats.recordLifecycle(.missedEvents, workspaceName: "Show", detail: "3 events", timestamp: start)
+        stats.recordLifecycle(.go, timestamp: start)
+        #expect(stats.recentEvents.count == 3)
+        #expect(stats.currentObservationEvents.count == 2)
+        #expect(stats.recentEvents.last?.detail == "3 events")
+        #expect(stats.goCount == 0)
+        #expect(stats.startCount == 0)
+        #expect(stats.stopCount == 0)
+        #expect(stats.panicCount == 0)
+        #expect(stats.gosSinceLastPanic == 0)
+        #expect(stats.uniqueCueCount == 0)
+        #expect(stats.activityInLastMinute(at: start) == 0)
+        #expect(stats.recentRepeats.isEmpty)
+
+        stats.endObservation(at: start.addingTimeInterval(1))
+        stats.recordLifecycle(.reconnecting, workspaceName: "W", timestamp: start.addingTimeInterval(2))
+        #expect(stats.recentEvents.last?.observationID == nil)
+        stats.markIncomplete()
+        #expect(!stats.isIncomplete)
+    }
+
+    @Test("Cue and lifecycle entries share one bounded history across observations")
+    func boundedMixedHistory() {
+        let stats = ShowStatistics()
+        stats.beginObservation(at: start)
+        for index in 0..<60 {
+            stats.record(cue("go", id: "cue-\(index)"), timestamp: start.addingTimeInterval(Double(index)))
+        }
+        stats.endObservation()
+        for index in 0..<45 {
+            stats.recordLifecycle(.reconnecting, detail: "Attempt \(index)")
+        }
+        #expect(stats.recentEvents.count == 100)
+        #expect(stats.recentEvents.first?.cueID == "cue-5")
+        #expect(stats.goCount == 60)
+        #expect(stats.currentObservationEvents.count == 55)
+        stats.reset()
+        #expect(stats.recentEvents.isEmpty)
+        #expect(stats.currentObservationEvents.isEmpty)
+    }
 }

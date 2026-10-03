@@ -3,7 +3,6 @@ import SwiftUI
 
 enum WindowID: String {
     case main = "main"
-    case standbyDossier = "standby-dossier"
     case stats = "stats"
     case eventHistory = "event-history"
     case activityLog = "activity-log"
@@ -68,16 +67,6 @@ struct CuetyApp: App {
         .defaultSize(width: 460, height: 620)
         .windowResizability(.contentMinSize)
         .keyboardShortcut("i", modifiers: [.command, .shift])
-
-        Window("Standby Dossier", id: WindowID.standbyDossier.rawValue) {
-            CuetyHostedContent(model: model) {
-                StandbyDossierView()
-                    .frame(minWidth: 420, minHeight: 400)
-            }
-        }
-        .defaultSize(width: 520, height: 680)
-        .windowResizability(.contentMinSize)
-        .keyboardShortcut("d", modifiers: [.command, .shift])
 
         Window("Stats", id: WindowID.stats.rawValue) {
             CuetyHostedContent(model: model) {

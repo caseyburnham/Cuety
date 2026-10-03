@@ -11,7 +11,7 @@ struct StandbyDossierView: View {
                 ContentUnavailableView(
                     "Data May Be Stale",
                     systemImage: "clock.badge.exclamationmark",
-                    description: Text("Waiting for Cuety to confirm the current cue with QLab.")
+                    description: Text("Confirming the standby cue with QLab.")
                 )
             } else if let cue = model.standbyCue {
                 dossier(cue)
@@ -19,81 +19,137 @@ struct StandbyDossierView: View {
                 emptyState
             }
         }
-        .navigationTitle("Standby Dossier")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func dossier(_ cue: Cue) -> some View {
         Form {
-            Section("Standing By") {
-                if let number = cue.displayNumber {
-                    LabeledContent("Cue", value: number)
+            Section {
+                HStack(spacing: 16) {
+                    Image(systemName: DetailPill.systemImage(forCueType: cue.type ?? ""))
+                        .rotationEffect(DetailPill.glyphRotation(forCueType: cue.type ?? ""))
+                        .font(.largeTitle)
+                        .foregroundStyle(cue.color ?? .secondary)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let number = cue.displayNumber {
+                            Text(number)
+                                .font(.largeTitle.bold())
+                                .monospacedDigit()
+                                .accessibilityLabel("Cue \(number)")
+                        }
+                        Text(cue.displayName ?? "Untitled")
+                            .font(.headline)
+                    }
                 }
-                LabeledContent("Name", value: cue.displayName ?? "Untitled")
-                LabeledContent("Workspace", value: client.workspace?.displayName ?? "Unknown")
-                LabeledContent("Cue List", value: client.watchedCueList?.displayName ?? "Unknown")
-                LabeledContent("Type", value: cue.type ?? "Unknown")
+            } header: {
+                Label("Standing By", systemImage: "doc.text.magnifyingglass")
+            }
+
+            Section {
+                if let number = cue.displayNumber {
+                    field("Cue", value: number)
+                }
+                field("Name", value: cue.displayName ?? "Untitled")
+                field("Workspace", value: client.workspace?.displayName ?? "Unknown")
+                field("Cue List", value: client.watchedCueList?.displayName ?? "Unknown")
+                field("Type", value: cue.type ?? "Unknown")
                 LabeledContent("Color") {
                     HStack {
                         if let color = cue.color {
                             Circle().fill(color).frame(width: 10, height: 10)
                                 .accessibilityHidden(true)
                         }
-                        Text(cue.colorName ?? "Unknown")
+                        Text(cue.colorName?.capitalized ?? "Unknown")
+                            .textSelection(.enabled)
                     }
                 }
-                LabeledContent("Cue ID", value: cue.uniqueID)
-                    .fontDesign(.monospaced)
+                LabeledContent("Cue ID") {
+                    Text(cue.uniqueID)
+                        .fontDesign(.monospaced)
+                        .textSelection(.enabled)
+                }
+            } header: {
+                Label("Identity", systemImage: "tag")
             }
 
-            Section("Readiness") {
-                LabeledContent("Armed", value: state(cue.isArmed, yes: "Armed", no: "Disarmed"))
-                LabeledContent("Loaded", value: state(cue.isLoaded, yes: "Loaded", no: "Not Loaded"))
+            Section {
+                field("Armed", value: state(cue.isArmed, yes: "Armed", no: "Disarmed"))
+                field("Loaded", value: state(cue.isLoaded, yes: "Loaded", no: "Not Loaded"))
                 LabeledContent("Broken") {
                     Text(state(cue.isBroken, yes: "Broken", no: "Not Broken"))
                         .foregroundStyle(cue.isBroken == true ? Color.red : Color.primary)
+                        .textSelection(.enabled)
                 }
-                LabeledContent("Flagged", value: state(cue.isFlagged, yes: "Flagged", no: "Not Flagged"))
+                field("Flagged", value: state(cue.isFlagged, yes: "Flagged", no: "Not Flagged"))
+            } header: {
+                Label("Readiness", systemImage: "checkmark.shield")
             }
 
-            Section("Timing") {
-                LabeledContent("Duration", value: duration(cue.duration))
-                LabeledContent("Pre-Wait", value: duration(cue.preWait))
-                LabeledContent("Post-Wait", value: duration(cue.postWait))
-                LabeledContent("Continue", value: cue.continueMode?.title ?? "Unknown")
+            Section {
+                field("Duration", value: duration(cue.duration))
+                field("Pre-Wait", value: duration(cue.preWait))
+                field("Post-Wait", value: duration(cue.postWait))
+                LabeledContent("Continue") {
+                    Label(cue.continueMode?.title ?? "Unknown",
+                          systemImage: cue.continueMode?.systemImage ?? "questionmark.circle")
+                        .textSelection(.enabled)
+                }
+            } header: {
+                Label("Timing", systemImage: "clock")
             }
 
-            Section("Notes") {
-                Text(cue.notes.map { $0.isEmpty ? "No notes" : $0 } ?? "Notes not received yet")
+            Section {
+                Text(cue.notes.map { $0.isEmpty ? "No notes" : $0 } ?? "Unknown")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            } header: {
+                Label("Notes", systemImage: "note.text")
             }
 
             if let group = client.watchedGraph?.containingRow(of: cue.uniqueID) {
-                Section("Containing Group") {
+                Section {
                     Text(cueLabel(group))
+                        .textSelection(.enabled)
+                } header: {
+                    Label("Containing Group", systemImage: "folder")
                 }
             }
 
             if cue.isGroup {
-                Section("Group Contents") {
+                Section {
                     if cue.children.isEmpty {
-                        Text("No child cues in the current cue tree")
+                        Text("No child cues")
                             .foregroundStyle(.secondary)
                     } else {
                         OutlineGroup(cue.children, children: \.dossierChildren) { child in
                             HStack {
-                                Text(cueLabel(child))
+                                Label {
+                                    Text(cueLabel(child))
+                                } icon: {
+                                    Image(systemName: DetailPill.systemImage(forCueType: child.type ?? ""))
+                                        .rotationEffect(DetailPill.glyphRotation(forCueType: child.type ?? ""))
+                                }
                                 Spacer()
                                 Text(child.type ?? "Unknown")
                                     .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
                             }
                         }
                     }
+                } header: {
+                    Label("Group Contents", systemImage: "list.bullet.indent")
                 }
             }
         }
         .formStyle(.grouped)
-        .textSelection(.enabled)
+    }
+
+    private func field(_ title: String, value: String) -> some View {
+        LabeledContent(title) {
+            Text(value).textSelection(.enabled)
+        }
     }
 
     private func state(_ value: Bool?, yes: String, no: String) -> String {

@@ -7,41 +7,64 @@ struct EventHistoryView: View {
 
     var body: some View {
         List {
-            Section {
-                if statistics.isIncomplete || model.isDataStale {
-                    Label("Some activity may be missing", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                }
-                if !model.hasCurrentCueData {
-                    Text("Monitoring is not current. Retained events describe previously observed activity.")
-                        .foregroundStyle(.secondary)
-                }
-                Text("The most recent 100 observed events, newest first. Reconnecting starts a new history.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+            if statistics.isIncomplete || model.isDataStale {
+                Label("Activity incomplete", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
             }
 
-            Section("Events") {
-                if statistics.recentEvents.isEmpty {
-                    Text("Waiting for show activity.").foregroundStyle(.secondary)
-                } else {
-                    ForEach(statistics.recentEvents.reversed()) { event in
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(event.kind.rawValue).font(.headline)
-                                if !event.cueLabel.isEmpty {
-                                    Text(event.cueLabel).foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer()
-                            Text(event.timestamp, format: .dateTime.hour().minute().second())
-                                .monospacedDigit()
+            ForEach(statistics.recentEvents.reversed()) { event in
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: symbol(for: event.kind))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(event.kind.rawValue).font(.headline)
+                        if let detail = event.detail ?? (event.cueLabel.isEmpty ? nil : event.cueLabel) {
+                            Text(detail)
                                 .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        if let workspaceName = event.workspaceName {
+                            Text(workspaceName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
                         }
                     }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(event.timestamp, format: .dateTime.hour().minute().second())
+                            .monospacedDigit()
+                        Text(event.timestamp, format: .dateTime.month(.abbreviated).day())
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
                 }
             }
         }
-        .textSelection(.enabled)
+        .overlay {
+            if statistics.recentEvents.isEmpty {
+                ContentUnavailableView("No Events", systemImage: "clock.arrow.circlepath")
+            }
+        }
+    }
+
+    private func symbol(for kind: ShowStatistics.Event.Kind) -> String {
+        switch kind {
+        case .go: "play.fill"
+        case .start: "play.circle"
+        case .stop: "stop.fill"
+        case .panic: "exclamationmark.octagon"
+        case .connecting: "network"
+        case .connected: "checkmark.circle"
+        case .disconnected: "circle.slash"
+        case .connectionLost, .connectionFailed: "exclamationmark.triangle"
+        case .reconnecting: "arrow.triangle.2.circlepath"
+        case .workspaceClosed: "rectangle.badge.xmark"
+        case .passcodeRequired, .passcodeRejected: "lock"
+        case .missedEvents: "clock.badge.exclamationmark"
+        }
     }
 }

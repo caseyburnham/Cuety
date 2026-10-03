@@ -117,13 +117,23 @@ final class QLabClient {
         return reply.data ?? []
     }
 
-    func connect(to server: QLabServer, workspaceID: String, passcode: String?) async {
+    func connect(
+        to server: QLabServer, workspaceID: String, passcode: String?,
+        reconnecting: Bool = false
+    ) async {
+        let workspaceName = reconnecting ? workspace?.displayName ?? workspaceID : workspaceID
+        if status.hasLiveData, !reconnecting {
+            statistics.recordLifecycle(.disconnected, workspaceName: workspace?.displayName)
+        }
         tearDownSession(sendDisconnect: true)
         reconnectTask?.cancel()
         reconnectTask = nil
 
         currentTarget = (server, workspaceID, passcode)
         status = .connecting
+        statistics.recordLifecycle(
+            reconnecting ? .reconnecting : .connecting, workspaceName: workspaceName
+        )
 
         let connection = QLabConnection(endpoint: server.endpoint)
         self.connection = connection
@@ -154,19 +164,29 @@ final class QLabClient {
         await connect(
             to: target.server,
             workspaceID: target.workspaceID,
-            passcode: target.passcode
+            passcode: target.passcode,
+            reconnecting: true
         )
     }
 
     func disconnect(sendDisconnect: Bool = true) {
+        if currentTarget != nil || connection != nil {
+            statistics.recordLifecycle(
+                .disconnected, workspaceName: workspace?.displayName ?? currentTarget?.workspaceID,
+                detail: status.hasLiveData ? nil : "Connection canceled"
+            )
+        }
+        endSession(sendDisconnect: sendDisconnect)
+        status = .offline
+    }
+
+    private func endSession(sendDisconnect: Bool) {
         reconnectTask?.cancel()
         reconnectTask = nil
         currentTarget = nil
         backoffAttempt = 0
 
         tearDownSession(sendDisconnect: sendDisconnect)
-
-        status = .offline
     }
 
     private static let goodbyeMessages = [
@@ -192,7 +212,6 @@ final class QLabClient {
 
     private func tearDownSession(sendDisconnect: Bool) {
         cancelSessionTasks()
-        statistics.markIncomplete()
         statistics.endObservation()
         lastOverflowRecovery = nil
         droppedEventCount = 0
@@ -238,6 +257,11 @@ final class QLabClient {
     }
 
     private func handleSessionLost(reason: String) {
+        statistics.recordLifecycle(
+            .connectionLost, workspaceName: workspace?.displayName ?? currentTarget?.workspaceID,
+            detail: reason
+        )
+        statistics.markIncomplete()
         tearDownSession(sendDisconnect: false)
 
         status = .failed(reason: reason)
@@ -273,10 +297,14 @@ final class QLabClient {
     private static let overflowRecoveryDelay: Duration = .milliseconds(250)
 
     func handleEventLoss(_ lost: Int) {
-        guard let connection else { return }
+        guard let connection, lost > 0 else { return }
 
         droppedEventCount += lost
         statistics.markIncomplete()
+        statistics.recordLifecycle(
+            .missedEvents, workspaceName: workspace?.displayName ?? currentTarget?.workspaceID,
+            detail: "\(lost) event\(lost == 1 ? "" : "s")"
+        )
         logger.warning(
             "Event buffer overflowed; \(lost, privacy: .public) event(s) lost"
         )
@@ -317,7 +345,11 @@ final class QLabClient {
     }
 
     private func handleWorkspaceClosed() {
-        disconnect(sendDisconnect: false)
+        statistics.recordLifecycle(
+            .workspaceClosed, workspaceName: workspace?.displayName ?? currentTarget?.workspaceID
+        )
+        statistics.markIncomplete()
+        endSession(sendDisconnect: false)
         status = .workspaceClosed
         onSessionEnded?(.workspaceClosed)
     }
@@ -374,7 +406,7 @@ final class QLabClient {
             OSCMessage("/listen/playhead"),
             as: QLabEmptyPayload.self
         )
-        statistics.reset(startedAt: Date())
+        statistics.beginObservation()
         for event in ["go", "panicAll", "cue/start", "cue/stop"] {
             try await request(OSCMessage("/listen/\(event)"), as: QLabEmptyPayload.self)
         }
@@ -384,6 +416,7 @@ final class QLabClient {
         connectedSince = Date()
         backoffAttempt = 0
         status = .connected
+        statistics.recordLifecycle(.connected, workspaceName: match.displayName)
         startHeartbeat()
 
         logger.info("Connected to workspace \(match.displayName, privacy: .public)")
@@ -391,7 +424,6 @@ final class QLabClient {
 
     private func handleHandshakeFailure(_ error: any Error) {
         statistics.markIncomplete()
-        statistics.endObservation()
         recordError(error)
 
         switch error {
@@ -403,6 +435,11 @@ final class QLabClient {
             handleWorkspaceClosed()
 
         default:
+            statistics.recordLifecycle(
+                .connectionFailed, workspaceName: workspace?.displayName ?? currentTarget?.workspaceID,
+                detail: error.localizedDescription
+            )
+            tearDownSession(sendDisconnect: false)
             status = .failed(reason: error.localizedDescription)
             scheduleReconnect()
         }
@@ -531,7 +568,12 @@ final class QLabClient {
         if case .needsPasscode = status { return }
 
         let rejected = currentTarget?.passcode != nil
-        disconnect(sendDisconnect: false)
+        statistics.recordLifecycle(
+            rejected ? .passcodeRejected : .passcodeRequired,
+            workspaceName: workspace?.displayName ?? currentTarget?.workspaceID
+        )
+        statistics.markIncomplete()
+        endSession(sendDisconnect: false)
         status = .needsPasscode(rejected: rejected)
         recordError(rejected ? RequestFailure.passcodeRejected : RequestFailure.passcodeRequired)
         onPasscodeRequired?(rejected)
@@ -757,7 +799,7 @@ final class QLabClient {
             return
         }
 
-        statistics.record(message)
+        statistics.record(message, workspaceName: workspace?.displayName ?? currentTarget?.workspaceID)
 
         if message.address == "/qlab/event/workspace/playhead" {
             handleBroadcastPlayhead(message)
@@ -1366,7 +1408,8 @@ final class QLabClient {
             await self.connect(
                 to: target.server,
                 workspaceID: target.workspaceID,
-                passcode: target.passcode
+                passcode: target.passcode,
+                reconnecting: true
             )
         }
     }

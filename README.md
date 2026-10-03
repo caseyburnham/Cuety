@@ -19,6 +19,11 @@ cues.
 - **Keep display awake** is a separate, persisted setting that holds off the screensaver
   for as long as it's on.
 - **Cue drawer** (⌥⌘D) shows the watched cue list around the playhead for context.
+- **Standby Dossier** (⇧⌘D) opens a native right-hand inspector with cue identity,
+  readiness, timing, notes, and group contents.
+- **Stats** (⇧⌘S) tracks activity for the current connection, including GOs since the
+  last panic. **Event History** (⇧⌘E) retains recent cue and connection events across
+  reconnects.
 - **Activity Log** (⇧⌘L) records the OSC conversation, with passcodes redacted.
 - **Connection Status** (⇧⌘I) exposes heartbeat and session state when something looks
   wrong.

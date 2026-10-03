@@ -47,6 +47,7 @@ final class AppModel {
     private(set) var isDataStale = false
 
     var isSidebarVisible = true
+    var isDossierVisible = false
 
     private let screenAwakeController = ScreenAwakeController(reason: "Cuety is displaying the current cue")
 

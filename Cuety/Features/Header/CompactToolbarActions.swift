@@ -18,7 +18,6 @@ struct CompactToolbarActions: ViewModifier {
     /// Only useful where the cue display itself isn't already on screen.
     var showsFloatingDisplay = true
 
-    @State private var isShowingDossier = false
     @State private var isShowingStats = false
     @State private var isShowingEventHistory = false
     @State private var isShowingSettings = false
@@ -83,7 +82,7 @@ struct CompactToolbarActions: ViewModifier {
 
                     Menu {
                         Button("Standby Dossier", systemImage: "doc.text.magnifyingglass") {
-                            isShowingDossier = true
+                            model.isDossierVisible.toggle()
                         }
                         Button("Stats", systemImage: "chart.bar") {
                             isShowingStats = true
@@ -110,19 +109,6 @@ struct CompactToolbarActions: ViewModifier {
                 presented {
                     CueDisplayView()
                         .frame(minWidth: 360, idealWidth: 420, minHeight: 220, idealHeight: 260)
-                }
-            }
-            .sheet(isPresented: $isShowingDossier) {
-                presented {
-                    NavigationStack {
-                        StandbyDossierView()
-                            .navigationTitle("Standby Dossier")
-                            .toolbar {
-                                ToolbarItem(placement: .confirmationAction) {
-                                    Button("Done") { isShowingDossier = false }
-                                }
-                            }
-                    }
                 }
             }
             .sheet(isPresented: $isShowingEventHistory) {

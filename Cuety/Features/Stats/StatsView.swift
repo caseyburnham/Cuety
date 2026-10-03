@@ -7,7 +7,7 @@ struct StatsView: View {
     private var statistics: ShowStatistics { model.client.statistics }
 
     private var activityMinutes: [(minute: Date, count: Int)] {
-        let events = statistics.recentEvents.filter { $0.kind == .go || $0.kind == .start }
+        let events = statistics.currentObservationEvents.filter { $0.kind == .go || $0.kind == .start }
         let groups = Dictionary(grouping: events) { event in
             Date(timeIntervalSince1970: floor(event.timestamp.timeIntervalSince1970 / 60) * 60)
         }
@@ -24,73 +24,76 @@ struct StatsView: View {
             Section {
                 Label(model.client.status.title, systemImage: model.client.status.systemImage)
                     .foregroundStyle(model.client.status.tint)
-                Text("Counts cover broadcasts observed during this connection.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
                 if statistics.isIncomplete || model.isDataStale {
-                    Label("Some activity may be missing", systemImage: "exclamationmark.triangle")
+                    Label("Activity incomplete", systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
-                }
-                if !model.hasCurrentCueData {
-                    Text("Monitoring is not current.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Show odometer") {
-                LabeledContent("GO events", value: statistics.goCount.formatted())
-                LabeledContent("Cue start events", value: statistics.startCount.formatted())
-                LabeledContent("Distinct cues in GO / start events", value: statistics.uniqueCueCount.formatted())
-                LabeledContent("Cue stops", value: statistics.stopCount.formatted())
-                LabeledContent("Panics", value: statistics.panicCount.formatted())
-                if let startedAt = statistics.startedAt {
-                    LabeledContent("Monitoring began") {
-                        Text(startedAt, format: .dateTime.hour().minute().second())
-                    }
-                }
-                if let startedAt = statistics.startedAt {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        LabeledContent("Monitoring duration", value: elapsed(from: startedAt, to: statistics.endedAt ?? context.date))
-                    }
-                }
-                if let lastGO = statistics.lastGO {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        LabeledContent(statistics.isIncomplete ? "Time since last observed GO" : "Time since last GO", value: elapsed(from: lastGO, to: statistics.endedAt ?? context.date))
-                            .monospacedDigit()
-                    }
-                } else {
-                    LabeledContent("Time since last GO", value: "No GO observed")
                 }
             }
 
             Section {
-                Text("\(statistics.gosSinceLastPanic.formatted()) GOs since \(statistics.lastPanic == nil ? "monitoring began" : "last panic")")
-
-                    .monospacedDigit()
-                if statistics.lastPanic == nil {
-                    Text("No panic observed yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                LabeledContent("GOs since last panic") {
+                    Text(statistics.gosSinceLastPanic.formatted())
+                        .font(.largeTitle.bold())
+                        .monospacedDigit()
+                        .textSelection(.enabled)
                 }
             }
 
-            Section("Recent activity") {
-                if !statistics.recentEvents.isEmpty {
+            Section {
+                field("GO events", value: statistics.goCount.formatted())
+                field("Cue start events", value: statistics.startCount.formatted())
+                field("Distinct cues", value: statistics.uniqueCueCount.formatted())
+                field("Cue stops", value: statistics.stopCount.formatted())
+                field("Panics", value: statistics.panicCount.formatted())
+            } header: {
+                Label("This Connection", systemImage: "chart.bar")
+            }
+
+            Section {
+                if let startedAt = statistics.startedAt {
+                    LabeledContent("Monitoring began") {
+                        Text(startedAt, format: .dateTime.hour().minute().second())
+                            .textSelection(.enabled)
+                    }
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        field("Monitoring duration", value: elapsed(from: startedAt, to: statistics.endedAt ?? context.date))
+                    }
+                }
+                if let lastGO = statistics.lastGO {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        field("Time since last GO", value: elapsed(from: lastGO, to: statistics.endedAt ?? context.date))
+                    }
+                } else {
+                    field("Time since last GO", value: "—")
+                }
+            } header: {
+                Label("Timing", systemImage: "clock")
+            }
+
+            Section {
+                if !activityMinutes.isEmpty {
                     Chart(activityMinutes, id: \.minute) { bucket in
                         BarMark(x: .value("Minute", bucket.minute, unit: .minute), y: .value("GO / start events", bucket.count))
                     }
                     .chartYAxis { AxisMarks(values: .automatic(desiredCount: 3)) }
                     .frame(height: 100)
                     .accessibilityLabel("Recent GO and start events per minute")
+                } else {
+                    Text("No cue activity")
+                        .foregroundStyle(.secondary)
                 }
-                Text("Chart covers the most recent 100 observed events.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Recent Activity", systemImage: "waveform.path")
             }
-
         }
         .formStyle(.grouped)
-        .textSelection(.enabled)
+    }
+
+    private func field(_ title: String, value: String) -> some View {
+        LabeledContent(title) {
+            Text(value)
+                .monospacedDigit()
+                .textSelection(.enabled)
+        }
     }
 }

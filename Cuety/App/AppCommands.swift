@@ -23,6 +23,9 @@ struct AppCommands: Commands {
             ))
             .keyboardShortcut("d", modifiers: [.command, .option])
             .disabled(model.preferences.cueLayout == .list)
+
+            Toggle("Standby Dossier", isOn: Bindable(model).isDossierVisible)
+                .keyboardShortcut("d", modifiers: [.command, .shift])
         }
 
         CommandMenu("Connection") {

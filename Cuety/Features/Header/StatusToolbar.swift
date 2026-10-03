@@ -75,6 +75,11 @@ struct StatusToolbar: ToolbarContent {
             }
             .help("Activity Log \(model.client.heartbeatSummary)")
         }
+
+        ToolbarItem(placement: .primaryAction) {
+            Toggle("Standby Dossier", systemImage: "sidebar.right", isOn: Bindable(model).isDossierVisible)
+                .help("Standby Dossier")
+        }
     }
 }
 #endif

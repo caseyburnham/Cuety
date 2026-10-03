@@ -9,6 +9,10 @@ struct MainWindowView: View {
         } detail: {
             detail
         }
+        .inspector(isPresented: Bindable(model).isDossierVisible) {
+            dossierInspector
+                .inspectorColumnWidth(min: 320, ideal: 380, max: 520)
+        }
         .task {
             model.start()
         }
@@ -27,6 +31,35 @@ struct MainWindowView: View {
         .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         .toolbar {
             StatusToolbar()
+        }
+#endif
+    }
+
+    private var dossierInspector: some View {
+#if os(macOS)
+        StandbyDossierView()
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack {
+                    Text("Standby Dossier").font(.headline)
+                    Spacer()
+                    Button("Close Dossier", systemImage: "xmark") {
+                        model.isDossierVisible = false
+                    }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                }
+                .padding()
+                .background(.bar)
+            }
+#else
+        NavigationStack {
+            StandbyDossierView()
+                .navigationTitle("Standby Dossier")
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { model.isDossierVisible = false }
+                    }
+                }
         }
 #endif
     }
