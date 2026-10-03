@@ -29,28 +29,13 @@ struct MainWindowView: View {
         .toolbarVisibility(.visible, for: .windowToolbar)
         .toolbarBackground(.ultraThinMaterial, for: .windowToolbar)
         .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
-        .toolbar {
-            StatusToolbar()
-        }
+        .statusToolbarActions()
 #endif
     }
 
     private var dossierInspector: some View {
 #if os(macOS)
         StandbyDossierView()
-            .safeAreaInset(edge: .top, spacing: 0) {
-                HStack {
-                    Text("Standby Dossier").font(.headline)
-                    Spacer()
-                    Button("Close Dossier", systemImage: "xmark") {
-                        model.isDossierVisible = false
-                    }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                }
-                .padding()
-                .background(.bar)
-            }
 #else
         NavigationStack {
             StandbyDossierView()
@@ -70,11 +55,7 @@ struct MainWindowView: View {
             // Each split view column owns its own navigation bar, so the status
             // and heartbeat controls must be attached to the detail column to
             // stay visible on the cue display during a show.
-            .compactToolbarActions(
-                showsRefresh: false,
-                showsSettings: true,
-                showsFloatingDisplay: false
-            )
+            .statusToolbarActions()
 #endif
     }
 }

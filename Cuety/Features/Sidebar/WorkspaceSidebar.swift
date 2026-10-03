@@ -48,18 +48,7 @@ struct WorkspaceSidebar: View {
         .scrollContentBackground(.hidden)
 #if os(iOS)
         .navigationTitle("Workspaces")
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    Task { await model.refresh() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .disabled(!model.canRefresh)
-                .accessibilityLabel("Refresh")
-
-            }
-        }
+        .sidebarToolbarActions()
 #endif
     }
 
