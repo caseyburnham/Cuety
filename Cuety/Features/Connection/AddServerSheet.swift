@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AddServerSheet: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
 
     @State private var host = ""
     @State private var port = ""
@@ -20,7 +21,7 @@ struct AddServerSheet: View {
             }
             HStack {
                 Spacer()
-                Button("Cancel", role: .cancel) { model.isAddingServer = false }
+                Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button("Add", action: addServer)
                     .keyboardShortcut(.defaultAction)
@@ -48,7 +49,7 @@ struct AddServerSheet: View {
     private func addServer() {
         guard !trimmedHost.isEmpty, let parsedPort else { return }
         let server = model.browser.addManualServer(host: trimmedHost, port: parsedPort)
-        model.isAddingServer = false
+        dismiss()
         Task { await model.refreshWorkspaces(onServerWithID: server.id) }
     }
 }

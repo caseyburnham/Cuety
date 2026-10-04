@@ -19,14 +19,40 @@ private struct SidebarToolbarActions: ViewModifier {
                     .disabled(!model.canRefresh || model.isRefreshing)
 
                     Menu {
-                        Button("Stats", systemImage: "chart.bar") {
-                            isShowingStats = true
+                        Section("View") {
+                            Toggle("Cue List Layout", isOn: Binding(
+                                get: { model.preferences.cueLayout == .list },
+                                set: { model.setCueLayout($0 ? .list : .display) }
+                            ))
+
+                            Toggle("Cue Drawer", isOn: Binding(
+                                get: { model.preferences.showsDrawer },
+                                set: { model.setShowsDrawer($0) }
+                            ))
+                            .disabled(model.preferences.cueLayout == .list)
                         }
-                        Button("Event History", systemImage: "clock.arrow.circlepath") {
-                            isShowingEventHistory = true
+
+                        Section("Connection") {
+                            Button("Add Server…", systemImage: "plus") {
+                                model.isAddingServer = true
+                            }
+
+                            Button("Disconnect") {
+                                model.disconnect()
+                            }
+                            .disabled(!model.canDisconnect)
                         }
-                        Button("Settings", systemImage: "gearshape") {
-                            isShowingSettings = true
+
+                        Section {
+                            Button("Stats", systemImage: "chart.bar") {
+                                isShowingStats = true
+                            }
+                            Button("Event History", systemImage: "clock.arrow.circlepath") {
+                                isShowingEventHistory = true
+                            }
+                            Button("Settings", systemImage: "gearshape") {
+                                isShowingSettings = true
+                            }
                         }
                     } label: {
                         Label("More", systemImage: "ellipsis.circle")
@@ -61,7 +87,18 @@ private struct SidebarToolbarActions: ViewModifier {
                 }
             }
             .sheet(isPresented: $isShowingSettings) {
-                CuetyHostedContent(model: model) { SettingsView() }
+                CuetyHostedContent(model: model) {
+                    NavigationStack {
+                        SettingsView()
+                            .navigationTitle("Settings")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Done") { isShowingSettings = false }
+                                }
+                            }
+                    }
+                }
             }
     }
 }

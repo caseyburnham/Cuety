@@ -43,13 +43,6 @@ struct DisplaySettingsView: View {
                 .disabled(preferences.cueNumberSizing != .custom)
             } header: {
                 Text("Cue Number Size")
-            } footer: {
-                Text("""
-                Fixed draws every cue in the list at the same size, fitted to the \
-                widest number. Custom uses the point size you choose, shrinking \
-                only when a number would not fit. As Large as Possible fills the \
-                display with each number.
-                """)
             }
 
             Section {
@@ -75,11 +68,8 @@ struct DisplaySettingsView: View {
                 Text("Layout")
             } footer: {
                 Text("""
-                Display and Drawer shows the standby cue large with the drawer \
-                beneath it. Cue List gives the whole window to the cue list, \
-                with the standby cue marked by the playhead arrow. The playhead
-                color also controls the playhead marker in Display and
-                Drawer mode.
+                Display and Drawer shows the standby cue large with a cue drawer 
+                beneath it. Cue List gives the whole window to the cue list.
                 """)
             }
         }

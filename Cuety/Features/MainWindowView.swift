@@ -9,10 +9,12 @@ struct MainWindowView: View {
         } detail: {
             detail
         }
-        .inspector(isPresented: Bindable(model).isDossierVisible) {
-            dossierInspector
-                .inspectorColumnWidth(min: 320, ideal: 380, max: 520)
-        }
+#if os(macOS)
+        // AppKit can cycle hosting constraints during animated panel resizing.
+        // Scope this to panel state so cue and drawer animations keep working.
+        .transaction(value: model.isDossierVisible) { $0.disablesAnimations = true }
+        .transaction(value: model.isSidebarVisible) { $0.disablesAnimations = true }
+#endif
         .task {
             model.start()
         }
@@ -27,9 +29,6 @@ struct MainWindowView: View {
         .windowFullScreenBehavior(.enabled)
         .windowToolbarFullScreenVisibility(.visible)
         .toolbarVisibility(.visible, for: .windowToolbar)
-        .toolbarBackground(.ultraThinMaterial, for: .windowToolbar)
-        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
-        .statusToolbarActions()
 #endif
     }
 
@@ -51,12 +50,11 @@ struct MainWindowView: View {
 
     private var detail: some View {
         MainDetailView()
-#if os(iOS)
-            // Each split view column owns its own navigation bar, so the status
-            // and heartbeat controls must be attached to the detail column to
-            // stay visible on the cue display during a show.
+            .inspector(isPresented: Bindable(model).isDossierVisible) {
+                dossierInspector
+                    .inspectorColumnWidth(min: 320, ideal: 380, max: 520)
+            }
             .statusToolbarActions()
-#endif
     }
 }
 

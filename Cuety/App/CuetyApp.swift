@@ -35,7 +35,10 @@ struct CuetyApp: App {
         Window("Cuety", id: WindowID.main.rawValue) {
             CuetyHostedContent(model: model) {
                 MainWindowView()
-                    .frame(minWidth: 640, minHeight: 400)
+                    .frame(
+                        minWidth: 640, maxWidth: .infinity,
+                        minHeight: 400, maxHeight: .infinity
+                    )
             }
         }
         .defaultSize(width: 900, height: 560)

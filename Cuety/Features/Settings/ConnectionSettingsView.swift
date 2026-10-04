@@ -5,6 +5,7 @@ struct ConnectionSettingsView: View {
 
     @Environment(AppModel.self) private var model
 
+    @State private var isAddingServer = false
     @State private var isConfirmingForgetAll = false
 
     /// Shown in this window, where the person asked to forget the passcode.
@@ -21,6 +22,9 @@ struct ConnectionSettingsView: View {
         }
         .formStyle(.grouped)
         .task { await model.refreshStoredPasscodes() }
+        .sheet(isPresented: $isAddingServer) {
+            AddServerSheet()
+        }
         .confirmationDialog(
             "Forget every saved passcode?",
             isPresented: $isConfirmingForgetAll
@@ -107,7 +111,7 @@ struct ConnectionSettingsView: View {
     private var addedServersSection: some View {
         Section {
             Button("Add Server", systemImage: "plus") {
-                model.isAddingServer = true
+                isAddingServer = true
             }
 
             if addedServers.isEmpty {

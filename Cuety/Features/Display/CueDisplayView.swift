@@ -72,7 +72,10 @@ struct CueDisplayView: View {
     @ViewBuilder
     private func cueContent(_ cue: Cue) -> some View {
         VStack(spacing: 8) {
-            standingByCaption
+            if client.watchedGraph?.isLast(cue.uniqueID) == true {
+                caption("End of List")
+                    .foregroundStyle(.tertiary)
+            }
 
             numberOrName(cue)
 
@@ -157,19 +160,6 @@ struct CueDisplayView: View {
             cueNumbers: client.watchedGraph?.cueNumbers ?? [],
             typography: typography
         )
-    }
-
-    private var standingByCaption: some View {
-        HStack(spacing: 6) {
-            caption("Standing By")
-            if let graph = client.watchedGraph,
-               let cueID = client.currentPlayheadCueID,
-               graph.isLast(cueID) {
-                caption("· End of List")
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .foregroundStyle(.secondary)
     }
 
     private func caption(_ text: String) -> some View {

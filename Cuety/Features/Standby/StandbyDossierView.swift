@@ -43,7 +43,7 @@ struct StandbyDossierView: View {
                     }
                 }
             } header: {
-                Label("Standing By", systemImage: "doc.text.magnifyingglass")
+                Label("Standing By", systemImage: "info.circle.text.page")
             }
 
             Section {

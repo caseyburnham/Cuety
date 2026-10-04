@@ -1,99 +1,11 @@
 import SwiftUI
 
-struct StatusToolbar: ToolbarContent {
+private struct StatusToolbarActions: ViewModifier {
     @Environment(AppModel.self) private var model
 
-    let showConnectionStatus: () -> Void
-    let showActivityLog: () -> Void
-
-    var body: some ToolbarContent {
-#if os(macOS)
-        ToolbarItem(placement: .navigation) {
-            Button {
-                Task { await model.refresh() }
-            } label: {
-                Label("Refresh Connections", systemImage: "arrow.clockwise")
-            }
-            .disabled(!model.canRefresh || model.isRefreshing)
-            .help(model.isRefreshing ? "Searching for QLab workspaces…" : "Refresh Connections")
-        }
-#endif
-
-        ToolbarItemGroup(placement: .primaryAction) {
-            Toggle(
-                isOn: Binding(
-                    get: { model.preferences.keepsDisplayAwake },
-                    set: { model.setKeepsDisplayAwake($0) }
-                )
-            ) {
-                Image(
-                    systemName: model.preferences.keepsDisplayAwake
-                        ? "sun.max.fill"
-                        : "sun.min"
-                )
-            }
-            .toggleStyle(.button)
-            .accessibilityLabel("Keep Display Awake")
-            .tint(model.preferences.keepsDisplayAwake ? .orange : .primary)
-            .help(
-                model.preferences.keepsDisplayAwake
-                    ? "Keeping Display Awake"
-                    : "Allowing Display Sleep"
-            )
-
-            Toggle(
-                isOn: Binding(
-                    get: { model.preferences.performanceMode },
-                    set: { model.preferences.performanceMode = $0 }
-                )
-            ) {
-                Image(
-                    systemName: model.preferences.performanceMode
-                        ? "gauge.with.dots.needle.100percent"
-                        : "gauge.with.dots.needle.33percent"
-                )
-            }
-            .toggleStyle(.button)
-            .accessibilityLabel("Performance Mode")
-            .tint(model.preferences.performanceMode ? .blue : .primary)
-            .help(
-                model.preferences.performanceMode
-                    ? "Performance Mode On"
-                    : "Performance Mode Off"
-            )
-
-            Button(action: showConnectionStatus) {
-                Image(systemName: model.isDataStale ? "clock.badge.exclamationmark" : model.client.status.systemImage)
-                    .foregroundStyle(model.isDataStale ? .orange : model.client.status.tint)
-            }
-            .accessibilityLabel("Connection Status")
-            .accessibilityValue(model.isDataStale ? "Data may be stale" : model.client.status.title)
-            .help(
-                model.isDataStale
-                    ? "Confirming the current cue with QLab."
-                    : "\(model.client.status.title) \(model.client.status.detail)"
-            )
-
-            Button(action: showActivityLog) {
-                HeartbeatIndicator()
-            }
-            .accessibilityLabel("Heartbeat and Activity Log")
-            .accessibilityValue(model.client.heartbeatSummary)
-            .help("Activity Log \(model.client.heartbeatSummary)")
-
-            Toggle("Standby Dossier", systemImage: "sidebar.right", isOn: Bindable(model).isDossierVisible)
-                .toggleStyle(.button)
-                .labelStyle(.iconOnly)
-                .help("Standby Dossier")
-        }
-    }
-}
-
-private struct StatusToolbarActions: ViewModifier {
 #if os(macOS)
     @Environment(\.openWindow) private var openWindow
 #else
-    @Environment(AppModel.self) private var model
     @State private var isShowingConnectionStatus = false
     @State private var isShowingActivityLog = false
 #endif
@@ -101,14 +13,100 @@ private struct StatusToolbarActions: ViewModifier {
     func body(content: Content) -> some View {
         content
             .toolbar {
-                StatusToolbar(
-                    showConnectionStatus: showConnectionStatus,
-                    showActivityLog: showActivityLog
-                )
+#if os(macOS)
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        Task { await model.refresh() }
+                    } label: {
+                        Label("Refresh Connections", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(!model.canRefresh || model.isRefreshing)
+                    .help(model.isRefreshing ? "Searching for QLab workspaces…" : "Refresh Connections")
+                }
+#endif
+
+                ToolbarItem(placement: .primaryAction) {
+                    Button(
+                        "Keep Display Awake",
+                        systemImage: model.preferences.keepsDisplayAwake ? "sun.max.fill" : "sun.min"
+                    ) {
+                        model.setKeepsDisplayAwake(!model.preferences.keepsDisplayAwake)
+                    }
+                    .accessibilityValue(model.preferences.keepsDisplayAwake ? "On" : "Off")
+                    .labelStyle(.iconOnly)
+                    .tint(model.preferences.keepsDisplayAwake ? .orange : nil)
+                    .help(model.preferences.keepsDisplayAwake ? "Keeping Display Awake" : "Allowing Display Sleep")
+                }
+
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+
+                ToolbarItem(placement: .primaryAction) {
+                    Button(
+                        "Performance Mode",
+                        systemImage: model.preferences.performanceMode
+                            ? "gauge.with.dots.needle.100percent"
+                            : "gauge.with.dots.needle.33percent"
+                    ) {
+                        model.preferences.performanceMode.toggle()
+                    }
+                    .accessibilityValue(model.preferences.performanceMode ? "On" : "Off")
+                    .labelStyle(.iconOnly)
+                    .tint(model.preferences.performanceMode ? .blue : nil)
+                    .help(model.preferences.performanceMode ? "Performance Mode On" : "Performance Mode Off")
+                }
+
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button(action: showConnectionStatus) {
+                        Label("Connection Status", systemImage: model.isDataStale
+                              ? "clock.badge.exclamationmark" : model.client.status.systemImage)
+                            .foregroundStyle(model.isDataStale ? .orange : model.client.status.tint)
+                    }
+                    .labelStyle(.iconOnly)
+                    .accessibilityValue(model.isDataStale ? "Data may be stale" : model.client.status.title)
+                    .help(model.isDataStale
+                          ? "Confirming the current cue with QLab."
+                          : "\(model.client.status.title) \(model.client.status.detail)")
+
+                    Button(action: showActivityLog) {
+                        Label {
+                            Text("Heartbeat and Activity Log")
+                        } icon: {
+                            HeartbeatIndicator()
+                        }
+                    }
+                    .labelStyle(.iconOnly)
+                    .accessibilityValue(model.client.heartbeatSummary)
+                    .help("Activity Log \(model.client.heartbeatSummary)")
+                }
+
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Standby Dossier", systemImage: "info.circle.text.page") {
+                        model.isDossierVisible.toggle()
+                    }
+                    .labelStyle(.iconOnly)
+                    .tint(model.isDossierVisible ? .accentColor : nil)
+                    .accessibilityValue(model.isDossierVisible ? "Shown" : "Hidden")
+                    .help("Standby Dossier")
+                }
             }
 #if os(iOS)
             .sheet(isPresented: $isShowingConnectionStatus) {
-                CuetyHostedContent(model: model) { ConnectionInspectorView() }
+                CuetyHostedContent(model: model) {
+                    NavigationStack {
+                        ConnectionInspectorView()
+                            .navigationTitle("Connection Status")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Done") { isShowingConnectionStatus = false }
+                                }
+                            }
+                    }
+                }
             }
             .sheet(isPresented: $isShowingActivityLog) {
                 CuetyHostedContent(model: model) { ActivityLogView() }
