@@ -44,12 +44,28 @@ struct MainSplitView<Sidebar: View, Detail: View>: View {
             let visibility: NavigationSplitViewVisibility = visible ? .all : .detailOnly
             let column: NavigationSplitViewColumn = visible ? .sidebar : .detail
 
+#if os(macOS)
+            // AppKit can cycle hosting constraints during animated panel
+            // resizing. Keep this suppression local to the split-view state
+            // update so detail content and its toolbar retain their motion.
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                if sidebarVisibility != visibility {
+                    sidebarVisibility = visibility
+                }
+                if compactColumn != column {
+                    compactColumn = column
+                }
+            }
+#else
             if sidebarVisibility != visibility {
                 sidebarVisibility = visibility
             }
             if compactColumn != column {
                 compactColumn = column
             }
+#endif
         }
         .onChange(of: sidebarVisibility) { _, visibility in
             let visible = visibility != .detailOnly

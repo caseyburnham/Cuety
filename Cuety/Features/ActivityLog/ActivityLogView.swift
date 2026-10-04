@@ -236,14 +236,13 @@ struct ActivityLogView: View {
         // A fixed-width segmented control can't overflow, so in the narrow
         // iPad sheet it collided with the bar's buttons. It gets its own
         // strip under the navigation bar instead.
-        .safeAreaInset(edge: .top, spacing: 0) {
+        .safeAreaBar(edge: .top, spacing: 0) {
             VStack(spacing: 8) {
                 modePicker
                 directionPicker
             }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .background(.bar)
         }
 #endif
         .copyable(copyableLines(for: selection, in: snapshot.filteredEntries))
@@ -251,7 +250,7 @@ struct ActivityLogView: View {
             messageInspector(for: snapshot)
         }
         .searchable(text: $presenter.searchText, prompt: "Filter by address or arguments")
-        .safeAreaInset(edge: .bottom) {
+        .safeAreaBar(edge: .bottom) {
             statusBar(for: snapshot)
         }
         .toolbar {
@@ -355,11 +354,10 @@ struct ActivityLogView: View {
             }
         }
 #if os(iOS)
-        .safeAreaInset(edge: .top, spacing: 0) {
+        .safeAreaBar(edge: .top, spacing: 0) {
             modePicker
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .background(.bar)
         }
 #else
         .toolbar {
@@ -523,7 +521,6 @@ struct ActivityLogView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
 #endif
-        .background(.bar)
     }
 
     private func total(_ count: Int, direction: OSCEvent.Direction) -> some View {

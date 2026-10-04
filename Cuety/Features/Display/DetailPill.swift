@@ -363,6 +363,7 @@ struct DetailPillsRow: View {
     var performanceMode = false
 
     @Namespace private var glassNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         // Build the content once per update; every pill below is handed the
@@ -432,7 +433,7 @@ struct DetailPillsRow: View {
         } else {
             detailPill
                 .glassEffectID(entry.kind, in: glassNamespace)
-                .glassEffectTransition(.matchedGeometry)
+                .glassEffectTransition(reduceMotion ? .identity : .matchedGeometry)
         }
     }
 }

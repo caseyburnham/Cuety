@@ -13,36 +13,42 @@ struct PasscodeSheet: View {
     @FocusState private var isFieldFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-
-            SecureField("Passcode", text: $passcode)
-                .focused($isFieldFocused)
-                .onSubmit(submit)
-                .disabled(isSubmitting)
-
-            Toggle("Remember in my Keychain", isOn: $shouldRemember)
-                .disabled(isSubmitting)
-
-            if let attemptError {
-                Text(attemptError)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel) {
-                    model.disconnect()
+        NavigationStack {
+            Form {
+                Section {
+                    header
                 }
-                .keyboardShortcut(.cancelAction)
-                .disabled(isSubmitting)
-                Button(isSubmitting ? "Connecting…" : "Connect", action: submit)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(passcode.isEmpty || isSubmitting)
+
+                Section {
+                    SecureField("Passcode", text: $passcode)
+                        .focused($isFieldFocused)
+                        .onSubmit(submit)
+                        .disabled(isSubmitting)
+
+                    Toggle("Remember in my Keychain", isOn: $shouldRemember)
+                        .disabled(isSubmitting)
+
+                    if let attemptError {
+                        Text(attemptError)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .navigationTitle(currentPrompt.wasRejected ? "Passcode Not Accepted" : "Passcode Required")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", role: .cancel) { model.disconnect() }
+                        .keyboardShortcut(.cancelAction)
+                        .disabled(isSubmitting)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSubmitting ? "Connecting…" : "Connect", action: submit)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(passcode.isEmpty || isSubmitting)
+                }
             }
         }
-        .padding(20)
         .frame(width: 360)
         .onAppear { isFieldFocused = true }
         .interactiveDismissDisabled(isSubmitting)

@@ -9,26 +9,30 @@ struct AddServerSheet: View {
     @FocusState private var hostIsFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Add Server").font(.headline)
-            Text("Enter the address of the Mac running QLab.")
-                .foregroundStyle(.secondary)
+        NavigationStack {
             Form {
-                TextField("Host", text: $host, prompt: Text("192.168.1.10"))
-                    .focused($hostIsFocused)
-                TextField("Port", text: $port)
-                    .monospacedDigit()
+                Section {
+                    Text("Enter the address of the Mac running QLab.")
+                        .foregroundStyle(.secondary)
+                    TextField("Host", text: $host, prompt: Text("192.168.1.10"))
+                        .focused($hostIsFocused)
+                    TextField("Port", text: $port)
+                        .monospacedDigit()
+                }
             }
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("Add", action: addServer)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(trimmedHost.isEmpty || parsedPort == nil)
+            .navigationTitle("Add Server")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", role: .cancel) { dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add", action: addServer)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(trimmedHost.isEmpty || parsedPort == nil)
+                }
             }
         }
-        .padding(20)
         .frame(width: 380)
         .onAppear {
             host = ""

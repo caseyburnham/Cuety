@@ -9,9 +9,6 @@ struct MainWindowView: View {
         } detail: {
             detail
         }
-#if os(macOS)
-        .transaction(value: model.isSidebarVisible) { $0.disablesAnimations = true }
-#endif
         .task {
             model.start()
         }
