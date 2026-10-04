@@ -175,6 +175,12 @@ struct WorkspaceSidebar: View {
                     } else {
                         Image(systemName: model.client.status.systemImage)
                             .foregroundStyle(model.client.status.tint)
+                            .contentTransition(
+                                reduceMotion
+                                    ? .identity
+                                    : .symbolEffect(.replace.magic(fallback: .downUp))
+                            )
+                            .motion(Motion.status, value: model.client.status)
                             .help(model.client.status.title)
                             .accessibilityLabel(model.client.status.title)
                     }

@@ -9,7 +9,7 @@ final class QLabClient {
     private let logger = Logger(category: "QLabClient")
     private let preferences: Preferences
     private let log: ActivityLog
-    let statistics = ShowStatistics()
+    let eventHistory = EventHistory()
 
     private(set) var status: ConnectionStatus = .offline
 
@@ -123,7 +123,7 @@ final class QLabClient {
     ) async {
         let workspaceName = reconnecting ? workspace?.displayName ?? workspaceID : workspaceID
         if status.hasLiveData, !reconnecting {
-            statistics.recordLifecycle(.disconnected, workspaceName: workspace?.displayName)
+            eventHistory.recordLifecycle(.disconnected, workspaceName: workspace?.displayName)
         }
         tearDownSession(sendDisconnect: true)
         reconnectTask?.cancel()
@@ -131,7 +131,7 @@ final class QLabClient {
 
         currentTarget = (server, workspaceID, passcode)
         status = .connecting
-        statistics.recordLifecycle(
+        eventHistory.recordLifecycle(
             reconnecting ? .reconnecting : .connecting, workspaceName: workspaceName
         )
 
@@ -171,7 +171,7 @@ final class QLabClient {
 
     func disconnect(sendDisconnect: Bool = true) {
         if currentTarget != nil || connection != nil {
-            statistics.recordLifecycle(
+            eventHistory.recordLifecycle(
                 .disconnected, workspaceName: workspace?.displayName ?? currentTarget?.workspaceID,
                 detail: status.hasLiveData ? nil : "Connection canceled"
             )
@@ -212,7 +212,7 @@ final class QLabClient {
 
     private func tearDownSession(sendDisconnect: Bool) {
         cancelSessionTasks()
-        statistics.endObservation()
+        eventHistory.endObservation()
         lastOverflowRecovery = nil
         droppedEventCount = 0
 
@@ -242,7 +242,7 @@ final class QLabClient {
         accessLevel = .unspecified
         usedPasscode = false
         invalidateLiveSessionData()
-        resetHeartbeatStatistics()
+        resetHeartbeatMetrics()
     }
 
     private func invalidateLiveSessionData() {
@@ -257,11 +257,11 @@ final class QLabClient {
     }
 
     private func handleSessionLost(reason: String) {
-        statistics.recordLifecycle(
+        eventHistory.recordLifecycle(
             .connectionLost, workspaceName: workspace?.displayName ?? currentTarget?.workspaceID,
             detail: reason
         )
-        statistics.markIncomplete()
+        eventHistory.markIncomplete()
         tearDownSession(sendDisconnect: false)
 
         status = .failed(reason: reason)
@@ -300,8 +300,8 @@ final class QLabClient {
         guard let connection, lost > 0 else { return }
 
         droppedEventCount += lost
-        statistics.markIncomplete()
-        statistics.recordLifecycle(
+        eventHistory.markIncomplete()
+        eventHistory.recordLifecycle(
             .missedEvents, workspaceName: workspace?.displayName ?? currentTarget?.workspaceID,
             detail: "\(lost) event\(lost == 1 ? "" : "s")"
         )
@@ -345,10 +345,10 @@ final class QLabClient {
     }
 
     private func handleWorkspaceClosed() {
-        statistics.recordLifecycle(
+        eventHistory.recordLifecycle(
             .workspaceClosed, workspaceName: workspace?.displayName ?? currentTarget?.workspaceID
         )
-        statistics.markIncomplete()
+        eventHistory.markIncomplete()
         endSession(sendDisconnect: false)
         status = .workspaceClosed
         onSessionEnded?(.workspaceClosed)
@@ -406,7 +406,7 @@ final class QLabClient {
             OSCMessage("/listen/playhead"),
             as: QLabEmptyPayload.self
         )
-        statistics.beginObservation()
+        eventHistory.beginObservation()
         for event in ["go", "panicAll", "cue/start", "cue/stop"] {
             try await request(OSCMessage("/listen/\(event)"), as: QLabEmptyPayload.self)
         }
@@ -416,14 +416,14 @@ final class QLabClient {
         connectedSince = Date()
         backoffAttempt = 0
         status = .connected
-        statistics.recordLifecycle(.connected, workspaceName: match.displayName)
+        eventHistory.recordLifecycle(.connected, workspaceName: match.displayName)
         startHeartbeat()
 
         logger.info("Connected to workspace \(match.displayName, privacy: .public)")
     }
 
     private func handleHandshakeFailure(_ error: any Error) {
-        statistics.markIncomplete()
+        eventHistory.markIncomplete()
         recordError(error)
 
         switch error {
@@ -435,7 +435,7 @@ final class QLabClient {
             handleWorkspaceClosed()
 
         default:
-            statistics.recordLifecycle(
+            eventHistory.recordLifecycle(
                 .connectionFailed, workspaceName: workspace?.displayName ?? currentTarget?.workspaceID,
                 detail: error.localizedDescription
             )
@@ -568,11 +568,11 @@ final class QLabClient {
         if case .needsPasscode = status { return }
 
         let rejected = currentTarget?.passcode != nil
-        statistics.recordLifecycle(
+        eventHistory.recordLifecycle(
             rejected ? .passcodeRejected : .passcodeRequired,
             workspaceName: workspace?.displayName ?? currentTarget?.workspaceID
         )
-        statistics.markIncomplete()
+        eventHistory.markIncomplete()
         endSession(sendDisconnect: false)
         status = .needsPasscode(rejected: rejected)
         recordError(rejected ? RequestFailure.passcodeRejected : RequestFailure.passcodeRequired)
@@ -799,7 +799,7 @@ final class QLabClient {
             return
         }
 
-        statistics.record(message, workspaceName: workspace?.displayName ?? currentTarget?.workspaceID)
+        eventHistory.record(message, workspaceName: workspace?.displayName ?? currentTarget?.workspaceID)
 
         if message.address == "/qlab/event/workspace/playhead" {
             handleBroadcastPlayhead(message)
@@ -1371,7 +1371,7 @@ final class QLabClient {
         if case .degraded = status { status = .connected }
     }
 
-    private func resetHeartbeatStatistics() {
+    private func resetHeartbeatMetrics() {
         heartbeatCount = 0
         lastThumpDate = nil
         nextThumpWindow = nil

@@ -2,6 +2,7 @@ import SwiftUI
 
 private struct StatusToolbarActions: ViewModifier {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
 #if os(macOS)
     @Environment(\.openWindow) private var openWindow
@@ -59,9 +60,18 @@ private struct StatusToolbarActions: ViewModifier {
 
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button(action: showConnectionStatus) {
-                        Label("Connection Status", systemImage: model.isDataStale
-                              ? "clock.badge.exclamationmark" : model.client.status.systemImage)
-                            .foregroundStyle(model.isDataStale ? .orange : model.client.status.tint)
+                        Label {
+                            Text("Connection Status")
+                        } icon: {
+                            Image(systemName: connectionStatusImage)
+                                .foregroundStyle(connectionStatusTint)
+                                .contentTransition(
+                                    reduceMotion
+                                        ? .identity
+                                        : .symbolEffect(.replace.magic(fallback: .downUp))
+                                )
+                                .motion(Motion.status, value: connectionStatusImage)
+                        }
                     }
                     .labelStyle(.iconOnly)
                     .accessibilityValue(model.isDataStale ? "Data may be stale" : model.client.status.title)
@@ -79,18 +89,6 @@ private struct StatusToolbarActions: ViewModifier {
                     .labelStyle(.iconOnly)
                     .accessibilityValue(model.client.heartbeatSummary)
                     .help("Activity Log \(model.client.heartbeatSummary)")
-                }
-
-                ToolbarSpacer(.fixed, placement: .primaryAction)
-
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Standby Dossier", systemImage: "info.circle.text.page") {
-                        model.isDossierVisible.toggle()
-                    }
-                    .labelStyle(.iconOnly)
-                    .tint(model.isDossierVisible ? .accentColor : nil)
-                    .accessibilityValue(model.isDossierVisible ? "Shown" : "Hidden")
-                    .help("Standby Dossier")
                 }
             }
 #if os(iOS)
@@ -120,6 +118,14 @@ private struct StatusToolbarActions: ViewModifier {
 #else
         isShowingConnectionStatus = true
 #endif
+    }
+
+    private var connectionStatusImage: String {
+        model.isDataStale ? "clock.badge.exclamationmark" : model.client.status.systemImage
+    }
+
+    private var connectionStatusTint: Color {
+        model.isDataStale ? .orange : model.client.status.tint
     }
 
     private func showActivityLog() {

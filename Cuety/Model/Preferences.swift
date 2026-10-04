@@ -157,8 +157,6 @@ enum CueNumberSizing: String, CaseIterable, Hashable, Sendable, Identifiable {
     /// Sized to fit the widest number in the cue list, so every cue in the
     /// list is drawn at the same size.
     case fixed
-    /// A point size the user chooses, shrunk only when it would not fit.
-    case custom
     /// Each number as large as it can be drawn in the space available.
     case dynamic
 
@@ -167,8 +165,7 @@ enum CueNumberSizing: String, CaseIterable, Hashable, Sendable, Identifiable {
     var title: String {
         switch self {
         case .fixed: "Fixed"
-        case .custom: "Custom"
-        case .dynamic: "As Large as Possible"
+        case .dynamic: "Dynamic"
         }
     }
 }
@@ -226,7 +223,6 @@ final class Preferences {
         static let heartbeatInterval = 1.0...60.0
         static let requestTimeout = 1.0...60.0
         static let drawerRows = 1...10
-        static let cueNumberSize = 24.0...Double(Typography.cueNumberBaseSize)
     }
 
     let defaults: UserDefaults
@@ -235,7 +231,6 @@ final class Preferences {
     private var storedDefaultPort: Int
     private var storedHeartbeatInterval: TimeInterval
     private var storedRequestTimeout: TimeInterval
-    private var storedCustomCueNumberSize: Double
 
     var appearance: AppearanceMode {
         didSet { defaults.set(appearance.rawValue, forKey: Key.appearance) }
@@ -251,15 +246,6 @@ final class Preferences {
 
     var cueNumberSizing: CueNumberSizing {
         didSet { defaults.set(cueNumberSizing.rawValue, forKey: Key.cueNumberSizing) }
-    }
-
-    /// The point size used when `cueNumberSizing` is `.custom`.
-    var customCueNumberSize: Double {
-        get { storedCustomCueNumberSize }
-        set {
-            storedCustomCueNumberSize = Limits.cueNumberSize.clamping(newValue)
-            defaults.set(storedCustomCueNumberSize, forKey: Key.customCueNumberSize)
-        }
     }
 
     var showsCueName: Bool {
@@ -317,10 +303,6 @@ final class Preferences {
         didSet { defaults.set(menuBarReadout.rawValue, forKey: Key.menuBarReadout) }
     }
 
-    var showsDockBadge: Bool {
-        didSet { defaults.set(showsDockBadge, forKey: Key.showsDockBadge) }
-    }
-
     var keepsDisplayAwake: Bool {
         didSet { defaults.set(keepsDisplayAwake, forKey: Key.keepsDisplayAwake) }
     }
@@ -374,10 +356,6 @@ final class Preferences {
             .flatMap(FontWeightChoice.init(rawValue:)) ?? .bold
         cueNumberSizing = defaults.string(forKey: Key.cueNumberSizing)
             .flatMap(CueNumberSizing.init(rawValue:)) ?? .fixed
-        storedCustomCueNumberSize = Limits.cueNumberSize.clamping(
-            defaults.object(forKey: Key.customCueNumberSize) as? Double ?? 240
-        )
-
         showsCueName = defaults.object(forKey: Key.showsCueName) as? Bool ?? true
         playheadAccent = defaults.string(forKey: Key.playheadAccent)
             .flatMap(PlayheadAccent.init(rawValue:)) ?? .systemBlue
@@ -397,8 +375,6 @@ final class Preferences {
         showsMenuBarExtra = defaults.bool(forKey: Key.showsMenuBarExtra)
         menuBarReadout = defaults.string(forKey: Key.menuBarReadout)
             .flatMap(MenuBarReadout.init(rawValue:)) ?? .default
-        showsDockBadge = defaults.bool(forKey: Key.showsDockBadge)
-
         keepsDisplayAwake = defaults.bool(forKey: Key.keepsDisplayAwake)
         performanceMode = defaults.bool(forKey: Key.performanceMode)
 
@@ -438,7 +414,6 @@ final class Preferences {
         static let usesRoundedSystemFont = "usesRoundedSystemFont"
         static let fontWeight = "fontWeight"
         static let cueNumberSizing = "cueNumberSizing"
-        static let customCueNumberSize = "customCueNumberSize"
         static let showsCueName = "showsCueName"
         static let playheadAccent = "playheadAccent"
         static let showsPlayhead = "showsPlayhead"
@@ -450,7 +425,6 @@ final class Preferences {
         static let showsCueTypeLabel = "showsCueTypeLabel"
         static let showsMenuBarExtra = "showsMenuBarExtra"
         static let menuBarReadout = "menuBarReadout"
-        static let showsDockBadge = "showsDockBadge"
         static let keepsDisplayAwake = "keepsDisplayAwake"
         static let performanceMode = "performanceMode"
         static let defaultPort = "defaultPort"

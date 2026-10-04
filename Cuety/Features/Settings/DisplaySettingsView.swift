@@ -29,18 +29,6 @@ struct DisplaySettingsView: View {
                     }
                 }
 
-                // Always shown, so the pane keeps its height when the sizing
-                // changes; it only applies to custom sizing.
-                SteppedField(
-                    title: "Custom size",
-                    value: Bindable(preferences).customCueNumberSize,
-                    range: Preferences.Limits.cueNumberSize,
-                    step: 10,
-                    format: FloatingPointFormatStyle<Double>.number
-                        .precision(.fractionLength(0))
-                        .grouping(.never)
-                )
-                .disabled(preferences.cueNumberSizing != .custom)
             } header: {
                 Text("Cue Number Size")
             }

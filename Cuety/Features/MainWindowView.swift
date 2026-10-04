@@ -10,9 +10,6 @@ struct MainWindowView: View {
             detail
         }
 #if os(macOS)
-        // AppKit can cycle hosting constraints during animated panel resizing.
-        // Scope this to panel state so cue and drawer animations keep working.
-        .transaction(value: model.isDossierVisible) { $0.disablesAnimations = true }
         .transaction(value: model.isSidebarVisible) { $0.disablesAnimations = true }
 #endif
         .task {
@@ -32,28 +29,8 @@ struct MainWindowView: View {
 #endif
     }
 
-    private var dossierInspector: some View {
-#if os(macOS)
-        StandbyDossierView()
-#else
-        NavigationStack {
-            StandbyDossierView()
-                .navigationTitle("Standby Dossier")
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { model.isDossierVisible = false }
-                    }
-                }
-        }
-#endif
-    }
-
     private var detail: some View {
         MainDetailView()
-            .inspector(isPresented: Bindable(model).isDossierVisible) {
-                dossierInspector
-                    .inspectorColumnWidth(min: 320, ideal: 380, max: 520)
-            }
             .statusToolbarActions()
     }
 }

@@ -47,13 +47,8 @@ final class AppModel {
     private(set) var isDataStale = false
 
     var isSidebarVisible = true
-    var isDossierVisible = false
 
     private let screenAwakeController = ScreenAwakeController(reason: "Cuety is displaying the current cue")
-
-#if os(macOS)
-    private let dockBadge = DockBadge()
-#endif
 
     init(
         preferences: Preferences = Preferences(),
@@ -117,10 +112,6 @@ final class AppModel {
     func start() {
         guard startsServices, startupTask == nil else { return }
 
-#if os(macOS)
-        dockBadge.follow { [weak self] in self?.dockBadgeLabel ?? nil }
-#endif
-
         autoConnectIsArmed = preferences.autoConnect && preferences.lastWorkspace != nil
         browser.start()
         startupTask = Task { [weak self] in
@@ -158,7 +149,7 @@ final class AppModel {
                 self.foregroundRefreshTask = nil
             }
         case .background:
-            client.statistics.markIncomplete()
+            client.eventHistory.markIncomplete()
             backgroundGeneration += 1
             foregroundRefreshTask = nil
             if client.status.hasLiveData || selection != nil {
@@ -187,7 +178,7 @@ final class AppModel {
     }
 
     /// Whether cue data may be presented as current. Every cue surface — the
-    /// display, drawer, cue list, menu bar and Dock — applies this one rule.
+    /// display, drawer, cue list and menu bar — applies this one rule.
     var hasCurrentCueData: Bool {
         client.status.hasLiveData && !isDataStale
     }
@@ -436,11 +427,6 @@ final class AppModel {
 
     var standbyCue: Cue? {
         hasCurrentCueData ? client.playheadCue : nil
-    }
-
-    var dockBadgeLabel: String? {
-        guard preferences.showsDockBadge else { return nil }
-        return standbyCue?.displayNumber
     }
 
     func toggleSidebar() {

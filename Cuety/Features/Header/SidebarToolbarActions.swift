@@ -4,8 +4,6 @@ import SwiftUI
 private struct SidebarToolbarActions: ViewModifier {
     @Environment(AppModel.self) private var model
 
-    @State private var isShowingStats = false
-    @State private var isShowingEventHistory = false
     @State private var isShowingSettings = false
 
     func body(content: Content) -> some View {
@@ -44,12 +42,6 @@ private struct SidebarToolbarActions: ViewModifier {
                         }
 
                         Section {
-                            Button("Stats", systemImage: "chart.bar") {
-                                isShowingStats = true
-                            }
-                            Button("Event History", systemImage: "clock.arrow.circlepath") {
-                                isShowingEventHistory = true
-                            }
                             Button("Settings", systemImage: "gearshape") {
                                 isShowingSettings = true
                             }
@@ -58,32 +50,6 @@ private struct SidebarToolbarActions: ViewModifier {
                         Label("More", systemImage: "ellipsis.circle")
                     }
                     .labelStyle(.iconOnly)
-                }
-            }
-            .sheet(isPresented: $isShowingStats) {
-                CuetyHostedContent(model: model) {
-                    NavigationStack {
-                        StatsView()
-                            .navigationTitle("Stats")
-                            .toolbar {
-                                ToolbarItem(placement: .confirmationAction) {
-                                    Button("Done") { isShowingStats = false }
-                                }
-                            }
-                    }
-                }
-            }
-            .sheet(isPresented: $isShowingEventHistory) {
-                CuetyHostedContent(model: model) {
-                    NavigationStack {
-                        EventHistoryView()
-                            .navigationTitle("Event History")
-                            .toolbar {
-                                ToolbarItem(placement: .confirmationAction) {
-                                    Button("Done") { isShowingEventHistory = false }
-                                }
-                            }
-                    }
                 }
             }
             .sheet(isPresented: $isShowingSettings) {

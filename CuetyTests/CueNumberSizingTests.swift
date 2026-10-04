@@ -92,12 +92,11 @@ struct CueNumberSizingTests {
         #expect(size == Typography.cueNumberBaseSize)
     }
 
-    private func typography(sizing: CueNumberSizing, customSize: Double = 240) throws -> Typography {
+    private func typography(sizing: CueNumberSizing) throws -> Typography {
         let preferences = Preferences(
             defaults: EphemeralDefaults()
         )
         preferences.cueNumberSizing = sizing
-        preferences.customCueNumberSize = customSize
         return Typography(preferences: preferences)
     }
 
@@ -117,25 +116,4 @@ struct CueNumberSizingTests {
             == typography.cueNumberPointSize(fitting: "1", in: space))
     }
 
-    @Test("Custom sizing uses the chosen size, shrinking only to fit")
-    func customSizingIsCappedByTheSpace() throws {
-        let small = try typography(sizing: .custom, customSize: 100)
-        #expect(small.standbyNumberPointSize(for: "1", reference: "127.5", in: space) == 100)
-
-        let large = try typography(sizing: .custom, customSize: 720)
-        let narrow = CGSize(width: 200, height: 600)
-        #expect(large.standbyNumberPointSize(for: "127.5", reference: "127.5", in: narrow)
-            == large.cueNumberPointSize(fitting: "127.5", in: narrow))
-    }
-
-    @Test("The custom size is kept within its limits")
-    func customSizeIsClamped() throws {
-        let preferences = Preferences(
-            defaults: EphemeralDefaults()
-        )
-        preferences.customCueNumberSize = 1
-        #expect(preferences.customCueNumberSize == Preferences.Limits.cueNumberSize.lowerBound)
-        preferences.customCueNumberSize = 10_000
-        #expect(preferences.customCueNumberSize == Preferences.Limits.cueNumberSize.upperBound)
-    }
 }

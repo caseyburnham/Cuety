@@ -6,43 +6,7 @@ import Testing
 @Suite("Drawer height bound")
 @MainActor
 struct DrawerBoundTests {
-    private func heightOfferedAWindow(_ view: some View) -> CGFloat {
-        let renderer = ImageRenderer(content: view)
-        renderer.proposedSize = ProposedViewSize(
-            width: 900, height: Self.windowHeight
-        )
-        return renderer.nsImage?.size.height ?? 0
-    }
-
     private static let windowHeight: CGFloat = 560
-
-    private func rows(_ count: Int) -> some View {
-        VStack(spacing: 0) {
-            ForEach(0..<count, id: \.self) { _ in
-                Color.clear.frame(height: Self.rowHeight)
-            }
-        }
-    }
-
-    private static let rowHeight: CGFloat = 24
-    private static let bound: CGFloat = 252
-
-    @Test("A drawer smaller than its bound keeps its own height")
-    func shortContentIsNotStretched() throws {
-        let natural = Self.rowHeight * 3
-        try #require(natural < Self.bound)
-
-        let bounded = heightOfferedAWindow(rows(3).scrollingBound(to: Self.bound))
-        #expect(bounded == natural)
-    }
-
-    @Test("A drawer larger than its bound is held to it")
-    func tallContentIsClamped() throws {
-        try #require(Self.rowHeight * 21 > Self.bound)
-
-        let bounded = heightOfferedAWindow(rows(21).scrollingBound(to: Self.bound))
-        #expect(bounded == Self.bound)
-    }
 
     @Test("The window's share never leaves the display the smaller half")
     func shareFavoursTheDisplay() {
@@ -63,21 +27,22 @@ struct DrawerBoundTests {
         #expect(CueDrawerView.stepsFitting(120) == Preferences.Limits.drawerRows.lowerBound)
     }
 
-    /// The drawer's height at a step, by the same estimate `stepsFitting`
-    /// divides by: the handle, the rows' padding, and a row each side per step.
-    private static func estimatedHeight(atStep step: Int) -> CGFloat {
-        CueDrawerView.handleHeight + 24
-            + CGFloat(max(0, step * 2)) * CueDrawerView.estimatedRowHeight
-    }
-
     @Test("The step a window snaps to keeps the drawer inside its share")
     func fittedStepsStayInsideTheShare() {
         for height in stride(from: 400.0, through: 1_600.0, by: 100) {
             let step = CueDrawerView.stepsFitting(height)
             #expect(
-                Self.estimatedHeight(atStep: step)
+                CueDrawerView.height(atStep: step)
                     <= height * CueDrawerView.maxHeightShare
             )
+
+            let nextStep = step + 1
+            if nextStep <= Preferences.Limits.drawerRows.upperBound {
+                #expect(
+                    CueDrawerView.height(atStep: nextStep)
+                        > height * CueDrawerView.maxHeightShare
+                )
+            }
         }
     }
 }

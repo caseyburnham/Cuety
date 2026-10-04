@@ -90,7 +90,8 @@ struct ConnectionSettingsView: View {
                 range: Preferences.Limits.heartbeatInterval,
                 format: FloatingPointFormatStyle<Double>.number
                     .precision(.fractionLength(0)),
-                unit: "s"
+                unit: "s",
+                showsStepper: false
             )
             .help("A shorter heartbeat notices a dropped connection sooner, with more traffic.")
 
@@ -100,7 +101,8 @@ struct ConnectionSettingsView: View {
                 range: Preferences.Limits.requestTimeout,
                 format: FloatingPointFormatStyle<Double>.number
                     .precision(.fractionLength(0)),
-                unit: "s"
+                unit: "s",
+                showsStepper: false
             )
             .help("How long Cuety waits for QLab to answer a request.")
         } header: {

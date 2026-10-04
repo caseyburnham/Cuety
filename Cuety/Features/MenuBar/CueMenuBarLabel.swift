@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CueMenuBarLabel: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var client: QLabClient { model.client }
 
@@ -33,6 +34,9 @@ struct CueMenuBarLabel: View {
     private var statusGlyph: some View {
         Image(systemName: client.status.systemImage)
             .foregroundStyle(client.status.tint)
+            .contentTransition(
+                reduceMotion ? .identity : .symbolEffect(.replace.magic(fallback: .downUp))
+            )
             .motion(Motion.status, value: client.status)
     }
 

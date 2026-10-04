@@ -19,12 +19,8 @@ cues.
 - **Keep display awake** is a separate, persisted setting that holds off the screensaver
   for as long as it's on.
 - **Cue drawer** (⌥⌘D) shows the watched cue list around the playhead for context.
-- **Standby Dossier** (⇧⌘D) opens a native right-hand inspector with cue identity,
-  readiness, timing, notes, and group contents.
-- **Stats** (⇧⌘S) tracks activity for the current connection, including GOs since the
-  last panic. **Event History** (⇧⌘E) retains recent cue and connection events across
-  reconnects.
-- **Activity Log** (⇧⌘L) records the OSC conversation, with passcodes redacted.
+- **Activity Log** (⇧⌘L) records the OSC conversation and recent cue/connection events,
+  with passcodes redacted.
 - **Connection Status** (⇧⌘I) exposes heartbeat and session state when something looks
   wrong.
 - **Passcode-protected workspaces** are supported; passcodes are stored in the Keychain,
@@ -95,7 +91,6 @@ discovery finding nothing.
 | `Cuety/Model` | `AppModel`, cue graph, preferences, activity log |
 | `Cuety/Networking` | QLab session, Bonjour browser, Keychain passcode store |
 | `Cuety/OSC` | SLIP framing (OSC wire types and codec live in `../ShowControlCore`) |
-| `Cuety/System` | Dock badge |
 | `../ShowControlCore/Sources/ShowControlUI` | Shared native screen-awake and UI helpers |
 | `CuetyTests` | Protocol, session, and model tests |
 | `../SHOW_CONTROL_COMPANION_CONTRACT.md` | Shared Cuety/Viewtiful platform and transport contract |

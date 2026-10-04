@@ -42,10 +42,6 @@ struct GeneralSettingsView: View {
                 .disabled(!preferences.showsMenuBarExtra)
                 .help(preferences.menuBarReadout.detail)
             }
-
-            Section("Dock") {
-                Toggle("Badge the Dock icon with the cue number", isOn: Bindable(preferences).showsDockBadge)
-            }
 #endif
         }
         .formStyle(.grouped)

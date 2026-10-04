@@ -3,8 +3,6 @@ import SwiftUI
 
 enum WindowID: String {
     case main = "main"
-    case stats = "stats"
-    case eventHistory = "event-history"
     case activityLog = "activity-log"
     case connectionInspector = "connection-inspector"
 }
@@ -70,26 +68,6 @@ struct CuetyApp: App {
         .defaultSize(width: 460, height: 620)
         .windowResizability(.contentMinSize)
         .keyboardShortcut("i", modifiers: [.command, .shift])
-
-        Window("Stats", id: WindowID.stats.rawValue) {
-            CuetyHostedContent(model: model) {
-                StatsView()
-                    .frame(minWidth: 460, minHeight: 400)
-            }
-        }
-        .defaultSize(width: 560, height: 700)
-        .windowResizability(.contentMinSize)
-        .keyboardShortcut("s", modifiers: [.command, .shift])
-
-        Window("Event History", id: WindowID.eventHistory.rawValue) {
-            CuetyHostedContent(model: model) {
-                EventHistoryView()
-                    .frame(minWidth: 460, minHeight: 320)
-            }
-        }
-        .defaultSize(width: 600, height: 500)
-        .windowResizability(.contentMinSize)
-        .keyboardShortcut("e", modifiers: [.command, .shift])
 
         MenuBarExtra(isInserted: Bindable(model.preferences).showsMenuBarExtra) {
             CuetyHostedContent(model: model) {

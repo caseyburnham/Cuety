@@ -29,7 +29,7 @@ struct QLabSessionTests {
         #expect(client.status == .needsPasscode(rejected: false))
         #expect(!client.status.hasLiveData)
         #expect(client.heartbeatCount == 0)
-        #expect(client.statistics.recentEvents.map(\.kind) == [.passcodeRequired])
+        #expect(client.eventHistory.recentEvents.map(\.kind) == [.passcodeRequired])
     }
 
     @Test("Denied cue lists prompt before attempting to decode the error payload")
@@ -63,7 +63,7 @@ struct QLabSessionTests {
             }
         }
         #expect(prompts == 1)
-        #expect(client.statistics.recentEvents.filter { $0.kind == .passcodeRequired }.count == 1)
+        #expect(client.eventHistory.recentEvents.filter { $0.kind == .passcodeRequired }.count == 1)
     }
 
     @Test("Failed setup requests cannot masquerade as successful empty replies",
@@ -130,13 +130,13 @@ struct QLabLiveAuthorizationTests {
         #expect(client.workspace == nil)
         #expect(client.cueLists.isEmpty)
         #expect(!client.isSessionActive)
-        #expect(client.statistics.recentEvents.map(\.kind) == [.connecting, .connected, .passcodeRejected])
-        #expect(client.statistics.recentEvents.last?.workspaceName == "Test")
-        #expect(client.statistics.isIncomplete)
+        #expect(client.eventHistory.recentEvents.map(\.kind) == [.connecting, .connected, .passcodeRejected])
+        #expect(client.eventHistory.recentEvents.last?.workspaceName == "Test")
+        #expect(client.eventHistory.isIncomplete)
         peer.denyHeartbeat = false
         await client.connect(to: server, workspaceID: "W", passcode: "new")
         #expect(client.status == .connected)
-        #expect(client.statistics.recentEvents.filter { $0.kind == .connected }.count == 2)
+        #expect(client.eventHistory.recentEvents.filter { $0.kind == .connected }.count == 2)
     }
 
     @Test("Denied cue lists after connect never establish a live session")
@@ -150,8 +150,8 @@ struct QLabLiveAuthorizationTests {
         await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: "old")
         #expect(client.status == .needsPasscode(rejected: true))
         #expect(client.connectedSince == nil)
-        #expect(client.statistics.recentEvents.map(\.kind) == [.connecting, .passcodeRejected])
-        #expect(client.statistics.isIncomplete)
+        #expect(client.eventHistory.recentEvents.map(\.kind) == [.connecting, .passcodeRejected])
+        #expect(client.eventHistory.isIncomplete)
     }
 
     @Test("A workspace needing a passcode records that boundary without a generic disconnect")
@@ -166,9 +166,8 @@ struct QLabLiveAuthorizationTests {
         await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
 
         #expect(client.status == .needsPasscode(rejected: false))
-        #expect(client.statistics.recentEvents.map(\.kind) == [.connecting, .passcodeRequired])
-        #expect(client.statistics.recentEvents.last?.workspaceName == "Test")
-        #expect(client.statistics.goCount == 0)
+        #expect(client.eventHistory.recentEvents.map(\.kind) == [.connecting, .passcodeRequired])
+        #expect(client.eventHistory.recentEvents.last?.workspaceName == "Test")
     }
 }
 
@@ -224,10 +223,10 @@ struct QLabDisconnectTests {
 
         #expect(client.status == .offline)
         #expect(!client.isSessionActive)
-        #expect(client.statistics.recentEvents.map(\.kind) == [.connecting, .disconnected])
-        #expect(client.statistics.recentEvents.last?.workspaceName == "W")
-        #expect(client.statistics.recentEvents.last?.detail == "Connection canceled")
-        #expect(!client.statistics.isIncomplete)
+        #expect(client.eventHistory.recentEvents.map(\.kind) == [.connecting, .disconnected])
+        #expect(client.eventHistory.recentEvents.last?.workspaceName == "W")
+        #expect(client.eventHistory.recentEvents.last?.detail == "Connection canceled")
+        #expect(!client.eventHistory.isIncomplete)
     }
 
     private static let populatedShow: [AuthorizationPeer.CueListStub] = [
@@ -254,13 +253,13 @@ struct QLabDisconnectTests {
         let server = QLabServer.localhost(port: port)
         await client.connect(to: server, workspaceID: "W", passcode: nil)
         try #require(client.status == .connected)
-        let firstObservation = client.statistics.observationID
+        let firstObservation = client.eventHistory.observationID
         let heartbeatDeadline = ContinuousClock.now + .seconds(3)
         while client.heartbeatCount == 0, ContinuousClock.now < heartbeatDeadline {
             try await Task.sleep(for: .milliseconds(20))
         }
         try #require(client.heartbeatCount > 0)
-        #expect(client.statistics.recentEvents.map(\.kind) == [.connecting, .connected])
+        #expect(client.eventHistory.recentEvents.map(\.kind) == [.connecting, .connected])
 
         let go = OSCMessage("/qlab/event/workspace/go", [
             .string("1"), .string("House to Half"), .string("C1"), .string("Fade"),
@@ -268,39 +267,38 @@ struct QLabDisconnectTests {
         peer.push(go)
         peer.push(go)
         let deadline = ContinuousClock.now + .seconds(2)
-        while client.statistics.goCount < 2, ContinuousClock.now < deadline {
+        while client.eventHistory.recentEvents.filter({ $0.kind == .go }).count < 2,
+              ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
-        try #require(client.statistics.goCount == 2)
-        #expect(client.statistics.recentRepeats.first?.count == 2)
+        try #require(client.eventHistory.recentEvents.filter({ $0.kind == .go }).count == 2)
 
         await client.reconnect()
 
         try #require(client.status == .connected)
-        #expect(client.statistics.observationID != firstObservation)
-        #expect(client.statistics.goCount == 0)
-        #expect(client.statistics.activityInLastMinute(at: Date()) == 0)
-        #expect(client.statistics.recentRepeats.isEmpty)
-        #expect(client.statistics.recentEvents.map(\.kind) == [
+        #expect(client.eventHistory.observationID != firstObservation)
+        #expect(client.eventHistory.recentEvents.map(\.kind) == [
             .connecting, .connected, .go, .go, .reconnecting, .connected,
         ])
-        #expect(client.statistics.recentEvents.filter { $0.kind == .go }.allSatisfy {
+        #expect(client.eventHistory.recentEvents.filter { $0.kind == .go }.allSatisfy {
             $0.workspaceName == "Test" && $0.observationID == firstObservation
         })
-        #expect(client.statistics.recentEvents.first { $0.kind == .reconnecting }?.workspaceName == "Test")
+        #expect(client.eventHistory.recentEvents.first { $0.kind == .reconnecting }?.workspaceName == "Test")
 
         client.disconnect()
-        let endedAt = client.statistics.endedAt
+        let endedAt = client.eventHistory.endedAt
         client.disconnect()
         #expect(endedAt != nil)
-        #expect(client.statistics.endedAt == endedAt)
-        #expect(!client.statistics.isIncomplete)
-        #expect(client.statistics.recentEvents.filter { $0.kind == .disconnected }.count == 1)
-        #expect(client.statistics.recentEvents.last?.workspaceName == "Test")
+        #expect(client.eventHistory.endedAt == endedAt)
+        #expect(!client.eventHistory.isIncomplete)
+        #expect(client.eventHistory.recentEvents.filter { $0.kind == .disconnected }.count == 1)
+        #expect(client.eventHistory.recentEvents.last?.workspaceName == "Test")
 
         await client.connect(to: server, workspaceID: "W", passcode: nil)
-        #expect(client.statistics.recentEvents.filter { $0.kind == .go }.count == 2)
-        #expect(client.statistics.currentObservationEvents.map(\.kind) == [.connected])
+        #expect(client.eventHistory.recentEvents.filter { $0.kind == .go }.count == 2)
+        #expect(client.eventHistory.recentEvents
+            .filter { $0.observationID == client.eventHistory.observationID }
+            .map(\.kind) == [.connected])
     }
 
     @Test("Failed monitoring setup records its failure and ends an incomplete observation")
@@ -315,13 +313,14 @@ struct QLabDisconnectTests {
         await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
 
         #expect(!client.status.hasLiveData)
-        #expect(client.statistics.isIncomplete)
-        #expect(client.statistics.endedAt != nil)
-        #expect(client.statistics.recentEvents.map(\.kind) == [.connecting, .connectionFailed])
-        #expect(client.statistics.recentEvents.last?.workspaceName == "Test")
-        #expect(client.statistics.recentEvents.last?.detail?.isEmpty == false)
-        #expect(client.statistics.currentObservationEvents.map(\.kind) == [.connectionFailed])
-        #expect(client.statistics.goCount == 0)
+        #expect(client.eventHistory.isIncomplete)
+        #expect(client.eventHistory.endedAt != nil)
+        #expect(client.eventHistory.recentEvents.map(\.kind) == [.connecting, .connectionFailed])
+        #expect(client.eventHistory.recentEvents.last?.workspaceName == "Test")
+        #expect(client.eventHistory.recentEvents.last?.detail?.isEmpty == false)
+        #expect(client.eventHistory.recentEvents
+            .filter { $0.observationID == client.eventHistory.observationID }
+            .map(\.kind) == [.connectionFailed])
     }
 
     @Test("A QLab that quits leaves a session that is visibly retrying")
@@ -346,9 +345,9 @@ struct QLabDisconnectTests {
         #expect(!client.status.hasLiveData)
         #expect(client.cueLists.isEmpty)
         #expect(client.isSessionActive)
-        #expect(client.statistics.recentEvents.filter { $0.kind == .connectionLost }.count == 1)
-        #expect(client.statistics.recentEvents.first { $0.kind == .connectionLost }?.workspaceName == "Test")
-        #expect(client.statistics.isIncomplete)
+        #expect(client.eventHistory.recentEvents.filter { $0.kind == .connectionLost }.count == 1)
+        #expect(client.eventHistory.recentEvents.first { $0.kind == .connectionLost }?.workspaceName == "Test")
+        #expect(client.eventHistory.isIncomplete)
 
         var reachedAttempt = 0
         let retried = ContinuousClock.now + .seconds(8)
@@ -360,8 +359,8 @@ struct QLabDisconnectTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(reachedAttempt >= 2)
-        #expect(client.statistics.recentEvents.contains { $0.kind == .reconnecting })
-        #expect(!client.statistics.recentEvents.contains { $0.kind == .disconnected })
+        #expect(client.eventHistory.recentEvents.contains { $0.kind == .reconnecting })
+        #expect(!client.eventHistory.recentEvents.contains { $0.kind == .disconnected })
     }
 
     @Test("A workspace QLab has closed ends the session for good")
@@ -385,8 +384,8 @@ struct QLabDisconnectTests {
         #expect(client.status == .workspaceClosed)
         #expect(ended == [.workspaceClosed])
         #expect(!client.isSessionActive)
-        #expect(client.statistics.recentEvents.map(\.kind) == [.connecting, .connected, .workspaceClosed])
-        #expect(client.statistics.recentEvents.last?.workspaceName == "Test")
+        #expect(client.eventHistory.recentEvents.map(\.kind) == [.connecting, .connected, .workspaceClosed])
+        #expect(client.eventHistory.recentEvents.last?.workspaceName == "Test")
         try await Task.sleep(for: .milliseconds(900))
         #expect(client.status == .workspaceClosed)
     }
@@ -404,8 +403,8 @@ struct QLabDisconnectTests {
 
         #expect(client.status == .workspaceClosed)
         #expect(!client.isSessionActive)
-        #expect(client.statistics.recentEvents.map(\.kind) == [.connecting, .workspaceClosed])
-        #expect(client.statistics.recentEvents.last?.workspaceName == "W")
+        #expect(client.eventHistory.recentEvents.map(\.kind) == [.connecting, .workspaceClosed])
+        #expect(client.eventHistory.recentEvents.last?.workspaceName == "W")
     }
 
     @Test("A drop stops presenting the cue that was on screen as live")
@@ -436,33 +435,6 @@ struct QLabDisconnectTests {
         #expect(client.playheadCue == nil)
         #expect(client.watchedGraph == nil)
         #expect(client.connectedSince == nil)
-    }
-
-    @Test("A drop takes the cue number off the Dock badge")
-    func dropClearsTheDockBadge() async throws {
-        let peer = try AuthorizationPeer()
-        peer.cueLists = Self.populatedShow
-        let port = try await peer.start()
-        let model = AppModel(preferences: try makePreferences(requestTimeout: 0.3))
-        defer { model.disconnect() }
-        model.preferences.showsDockBadge = true
-
-        await model.client.connect(
-            to: .localhost(port: port), workspaceID: "W", passcode: nil
-        )
-        try #require(model.client.status == .connected)
-        try #require(model.dockBadgeLabel == "1")
-
-        peer.stop()
-
-        let deadline = ContinuousClock.now + .seconds(3)
-        while model.client.status.hasLiveData, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-
-        #expect(!model.client.status.hasLiveData)
-        #expect(model.standbyCue == nil)
-        #expect(model.dockBadgeLabel == nil)
     }
 
     @Test("A reconnect repopulates the display without a manual refresh")
@@ -1147,11 +1119,10 @@ struct QLabDisconnectTests {
         #expect(client.cueLists.first?.children.count == 2)
         #expect(client.droppedEventCount == 1)
         #expect(client.status == .connected)
-        #expect(client.statistics.isIncomplete)
-        #expect(client.statistics.recentEvents.last?.kind == .missedEvents)
-        #expect(client.statistics.recentEvents.last?.workspaceName == "Test")
-        #expect(client.statistics.recentEvents.last?.detail == "1 event")
-        #expect(client.statistics.goCount == 0)
+        #expect(client.eventHistory.isIncomplete)
+        #expect(client.eventHistory.recentEvents.last?.kind == .missedEvents)
+        #expect(client.eventHistory.recentEvents.last?.workspaceName == "Test")
+        #expect(client.eventHistory.recentEvents.last?.detail == "1 event")
     }
 
     @Test("A first event loss refetches details of cues already cached")
@@ -1222,9 +1193,9 @@ struct QLabDisconnectTests {
         }
         #expect(client.status == .connected)
         #expect(client.currentPlayheadCueID == "C1")
-        #expect(client.statistics.recentEvents.filter { $0.kind == .missedEvents }.count == 2)
-        #expect(client.statistics.recentEvents.contains { $0.kind == .reconnecting })
-        #expect(!client.statistics.isIncomplete)
+        #expect(client.eventHistory.recentEvents.filter { $0.kind == .missedEvents }.count == 2)
+        #expect(client.eventHistory.recentEvents.contains { $0.kind == .reconnecting })
+        #expect(!client.eventHistory.isIncomplete)
     }
 
     private static func showWithDetails(

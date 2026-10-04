@@ -12,10 +12,16 @@ struct CueDrawerView: View {
 
     static let maxHeightShare: CGFloat = 0.45
     static let handleHeight: CGFloat = 22
-    static let estimatedRowHeight: CGFloat = 29
+    // This is a conservative row pitch. It includes the small spacing between
+    // rows so every snapped step fits without needing a scrolling fallback.
+    static let estimatedRowHeight: CGFloat = 33
+
+    static func height(atStep step: Int) -> CGFloat {
+        handleHeight + 24 + CGFloat(max(0, step * 2)) * estimatedRowHeight
+    }
 
     static func stepsFitting(_ height: CGFloat) -> Int {
-        let available = max(0, height * maxHeightShare - handleHeight - 24)
+        let available = max(0, height * maxHeightShare - Self.height(atStep: 0))
         return max(
             Preferences.Limits.drawerRows.lowerBound,
             min(
@@ -36,10 +42,9 @@ struct CueDrawerView: View {
     /// many rows fit inside a view that remains at its maximum height.
     private var drawerHeight: CGFloat {
         guard !isCollapsed else { return Self.handleHeight }
-        let rowArea = CGFloat(min(model.drawerStep, maximumStep) * 2) * Self.estimatedRowHeight
         return min(
             availableHeight * Self.maxHeightShare,
-            Self.handleHeight + 24 + rowArea
+            Self.height(atStep: min(model.drawerStep, maximumStep))
         )
     }
 
@@ -212,10 +217,9 @@ struct CueDrawerView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
 
-        // The step already keeps the rows inside the drawer's share of the
-        // window; the bound is what catches a step whose rows measure taller
-        // than they were estimated to, so the display is never squeezed.
-        stack.scrollingBound(to: availableHeight * Self.maxHeightShare)
+        // Keep the rows intrinsic. The snapped step height above is
+        // deliberately conservative, so there is no scrolling fallback.
+        stack.fixedSize(horizontal: false, vertical: true)
     }
 
     private func playheadMarker(insideGroup group: Cue?) -> some View {
@@ -248,18 +252,6 @@ struct CueDrawerView: View {
             .font(.caption2)
             .foregroundStyle(.tertiary)
             .padding(.vertical, 3)
-    }
-}
-
-extension View {
-    func scrollingBound(to maxHeight: CGFloat) -> some View {
-        ViewThatFits(in: .vertical) {
-            self
-
-            ScrollView(.vertical) { self }
-                .defaultScrollAnchor(.center)
-        }
-        .frame(maxHeight: maxHeight, alignment: .top)
     }
 }
 
@@ -453,7 +445,7 @@ struct CueIndicators: View {
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
-            .scrollingBound(to: height * CueDrawerView.maxHeightShare)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .background(.thinMaterial)
     }

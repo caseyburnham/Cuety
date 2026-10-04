@@ -14,12 +14,11 @@ struct MenuBarReadoutTests {
         AppModel(preferences: try makePreferences())
     }
 
-    @Test("Neither readout is on until it is asked for")
+    @Test("The menu bar readout is off until it is asked for")
     func readoutsAreOffByDefault() throws {
         let preferences = try makePreferences()
 
         #expect(!preferences.showsMenuBarExtra)
-        #expect(!preferences.showsDockBadge)
         #expect(preferences.menuBarReadout == .cueNumber)
     }
 
@@ -30,12 +29,10 @@ struct MenuBarReadoutTests {
 
         preferences.showsMenuBarExtra = true
         preferences.menuBarReadout = .heartbeat
-        preferences.showsDockBadge = true
 
         let reloaded = Preferences(defaults: defaults)
         #expect(reloaded.showsMenuBarExtra)
         #expect(reloaded.menuBarReadout == .heartbeat)
-        #expect(reloaded.showsDockBadge)
     }
 
     @Test("An unrecognised stored readout falls back to the default")
@@ -44,24 +41,6 @@ struct MenuBarReadoutTests {
         defaults.set("semaphore", forKey: "menuBarReadout")
 
         #expect(Preferences(defaults: defaults).menuBarReadout == .default)
-    }
-
-    @Test("An unasked-for badge is no badge")
-    func badgeIsAbsentUntilEnabled() throws {
-        let model = try makeModel()
-
-        #expect(!model.preferences.showsDockBadge)
-        #expect(model.dockBadgeLabel == nil)
-    }
-
-    @Test("With no live session there is nothing to badge")
-    func badgeIsAbsentWithoutALiveSession() throws {
-        let model = try makeModel()
-        model.preferences.showsDockBadge = true
-
-        #expect(!model.client.status.hasLiveData)
-        #expect(model.standbyCue == nil)
-        #expect(model.dockBadgeLabel == nil)
     }
 
     @Test(

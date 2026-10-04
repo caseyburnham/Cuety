@@ -17,14 +17,12 @@ struct Typography {
     let usesRounded: Bool
     let cueNumberWeight: Font.Weight
     let cueNumberSizing: CueNumberSizing
-    let customCueNumberSize: CGFloat
     private let measuringWeight: MeasuringFont.Weight
 
     init(preferences: Preferences) {
         self.usesRounded = preferences.usesRoundedSystemFont
         self.cueNumberWeight = preferences.fontWeight.weight
         self.cueNumberSizing = preferences.cueNumberSizing
-        self.customCueNumberSize = CGFloat(preferences.customCueNumberSize)
         self.measuringWeight = Self.platformWeight(for: preferences.fontWeight.weight)
     }
 
@@ -63,13 +61,10 @@ struct Typography {
     /// The size to draw the standby number `text` at, following the sizing
     /// preference. `reference` is the widest number in the cue list, which
     /// fixed sizing fits so every cue in the list is drawn at the same size.
-    /// A custom size is shrunk when `text` would not otherwise fit `space`.
     func standbyNumberPointSize(for text: String, reference: String, in space: CGSize) -> CGFloat {
         switch cueNumberSizing {
         case .fixed:
             cueNumberPointSize(fitting: reference, in: space)
-        case .custom:
-            min(customCueNumberSize, cueNumberPointSize(fitting: text, in: space))
         case .dynamic:
             cueNumberPointSize(fitting: text, in: space)
         }

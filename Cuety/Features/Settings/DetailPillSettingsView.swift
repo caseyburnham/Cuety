@@ -7,13 +7,6 @@ struct DetailPillSettingsView: View {
 
     private var preferences: Preferences { model.preferences }
 
-    private var isAtDefaults: Bool {
-        preferences.enabledPills == DetailPillKind.defaultEnabled
-            && preferences.pillSize == .default
-            && preferences.showsCueTypeLabel
-            && preferences.showsCueName
-    }
-
     var body: some View {
         Form {
             Section("Appearance") {
@@ -41,19 +34,12 @@ struct DetailPillSettingsView: View {
                 pillToggle(.notes)
             }
 
-            Section {
-                HStack {
-                    Spacer()
-
-                    Button("Restore Defaults") {
-                        preferences.enabledPills = DetailPillKind.defaultEnabled
-                        preferences.pillSize = .default
-                        preferences.showsCueTypeLabel = true
-                        preferences.showsCueName = true
-                        refreshDetails()
-                    }
-                    .disabled(isAtDefaults)
-                }
+            Button("Restore Defaults") {
+                preferences.enabledPills = DetailPillKind.defaultEnabled
+                preferences.pillSize = .default
+                preferences.showsCueTypeLabel = true
+                preferences.showsCueName = true
+                refreshDetails()
             }
         }
         .formStyle(.grouped)

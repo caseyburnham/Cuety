@@ -192,6 +192,5 @@ struct AppModelLifecycleTests {
 
         #expect(!model.hasCurrentCueData)
         #expect(model.standbyCue == nil)
-        #expect(model.dockBadgeLabel == nil)
     }
 }

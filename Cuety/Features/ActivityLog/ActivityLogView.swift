@@ -8,6 +8,20 @@ import SwiftUI
 @MainActor
 @Observable
 final class ActivityLogPresenter {
+    enum Mode: String, CaseIterable, Identifiable {
+        case messages
+        case events
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .messages: "Messages"
+            case .events: "Events"
+            }
+        }
+    }
+
     enum DirectionFilter: String, CaseIterable, Identifiable {
         case all, sent, received, malformed
 
@@ -40,6 +54,7 @@ final class ActivityLogPresenter {
     }
 
     var searchText = ""
+    var mode: Mode = .messages
     var directionFilter: DirectionFilter = .all
     var sortOrder = [KeyPathComparator(\OSCEvent.timestamp, order: .reverse)]
 
@@ -129,7 +144,7 @@ struct ActivityLogView: View {
         // On iPad the log is presented in a sheet, which has no navigation
         // bar of its own for the toolbar and search field to live in.
         NavigationStack {
-            logContent
+            activityContent
                 .navigationTitle("Activity Log")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -139,12 +154,22 @@ struct ActivityLogView: View {
                 }
         }
 #else
-        logContent
+        activityContent
 #endif
     }
 
     @ViewBuilder
-    private var logContent: some View {
+    private var activityContent: some View {
+        switch presenter.mode {
+        case .messages:
+            messageContent
+        case .events:
+            eventContent
+        }
+    }
+
+    @ViewBuilder
+    private var messageContent: some View {
         let snapshot = presenter.snapshot(of: model.log)
 
         Group {
@@ -212,7 +237,10 @@ struct ActivityLogView: View {
         // iPad sheet it collided with the bar's buttons. It gets its own
         // strip under the navigation bar instead.
         .safeAreaInset(edge: .top, spacing: 0) {
-            directionPicker
+            VStack(spacing: 8) {
+                modePicker
+                directionPicker
+            }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .background(.bar)
@@ -229,8 +257,10 @@ struct ActivityLogView: View {
         .toolbar {
 #if os(macOS)
             ToolbarItem(placement: .principal) {
-                directionPicker
-                    .fixedSize()
+                HStack(spacing: 12) {
+                    modePicker
+                    directionPicker
+                }
             }
             // The filter stays in the bar; the actions below give way to the
             // overflow menu first when the bar runs out of room.
@@ -271,6 +301,99 @@ struct ActivityLogView: View {
                 .help("Show the selected message in full")
             }
             .visibilityPriority(.low)
+        }
+    }
+
+    private var eventContent: some View {
+        let history = model.client.eventHistory
+        let events = history.recentEvents.reversed()
+
+        return List {
+            if history.isIncomplete || model.isDataStale {
+                Label("Activity incomplete", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+            }
+
+            ForEach(events) { event in
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: symbol(for: event.kind))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20)
+                        .accessibilityHidden(true)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(event.kind.rawValue).font(.headline)
+                        if let detail = event.detail ?? (event.cueLabel.isEmpty ? nil : event.cueLabel) {
+                            Text(detail)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        if let workspaceName = event.workspaceName {
+                            Text(workspaceName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(event.timestamp, format: .dateTime.hour().minute().second())
+                            .monospacedDigit()
+                        Text(event.timestamp, format: .dateTime.month(.abbreviated).day())
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                }
+            }
+        }
+        .overlay {
+            if history.recentEvents.isEmpty {
+                ContentUnavailableView("No Events", systemImage: "clock.arrow.circlepath")
+            }
+        }
+#if os(iOS)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            modePicker
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(.bar)
+        }
+#else
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                modePicker
+            }
+        }
+#endif
+    }
+
+    private var modePicker: some View {
+        Picker("Show", selection: $presenter.mode) {
+            ForEach(ActivityLogPresenter.Mode.allCases) { mode in
+                Text(mode.title).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+    }
+
+    private func symbol(for kind: EventHistory.Event.Kind) -> String {
+        switch kind {
+        case .go: "play.fill"
+        case .start: "play.circle"
+        case .stop: "stop.fill"
+        case .panic: "exclamationmark.octagon"
+        case .connecting: "network"
+        case .connected: "checkmark.circle"
+        case .disconnected: "circle.slash"
+        case .connectionLost, .connectionFailed: "exclamationmark.triangle"
+        case .reconnecting: "arrow.triangle.2.circlepath"
+        case .workspaceClosed: "rectangle.badge.xmark"
+        case .passcodeRequired, .passcodeRejected: "lock"
+        case .missedEvents: "clock.badge.exclamationmark"
         }
     }
 

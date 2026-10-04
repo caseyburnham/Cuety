@@ -51,7 +51,11 @@ struct ConnectionInspectorView: View {
                         .variableColor.iterative,
                         isActive: !reduceMotion && client.status.isTransitional
                     )
-                    .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                    .contentTransition(
+                        reduceMotion
+                            ? .identity
+                            : .symbolEffect(.replace.magic(fallback: .downUp))
+                    )
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(client.status.title)
