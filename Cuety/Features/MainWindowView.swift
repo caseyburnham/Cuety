@@ -29,6 +29,18 @@ struct MainWindowView: View {
     private var detail: some View {
         MainDetailView()
             .statusToolbarActions()
+#if os(macOS)
+            // The status toolbar belongs to the detail column. Keep its native
+            // translucent surface stable while either detail layout changes.
+            .toolbarBackground(.ultraThinMaterial, for: .windowToolbar)
+            .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
+#endif
+#if os(iOS)
+            // The detail column owns this navigation bar. Keep its native
+            // translucent surface stable while either detail layout changes.
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+            .toolbarBackgroundVisibility(.visible, for: .navigationBar)
+#endif
     }
 }
 

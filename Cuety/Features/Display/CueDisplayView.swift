@@ -30,7 +30,6 @@ struct CueDisplayView: View {
         .background {
             (canvasTint ?? .clear)
                 .opacity(Self.canvasTintOpacity)
-                .ignoresSafeArea()
         }
         // Performance mode disables the container animation; normal mode
         // retains the animated number transition and display resizing.

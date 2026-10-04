@@ -115,7 +115,6 @@ private struct CueDrum: View {
         .background {
             (standby.color ?? .clear)
                 .opacity(CueDisplayView.canvasTintOpacity)
-                .ignoresSafeArea()
                 .animation(animatesShift ? Motion.listShift : nil, value: standby.uniqueID)
         }
         .onChange(of: standbyIndex, initial: true) { old, new in
