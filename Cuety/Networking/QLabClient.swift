@@ -15,13 +15,12 @@ final class QLabClient {
 
     private(set) var workspace: QLabWorkspaceInfo?
 
-    private(set) var cueLists: [Cue] = [] {
-        didSet { cachedTotalCueCount = nil }
-    }
+    private(set) var cueLists: [Cue] = []
 
+    /// Detail replies preserve topology, so this cache changes only on structural replacements.
     @ObservationIgnored private var cachedTotalCueCount: Int?
 
-    /// Every cue in every list, counted once per change to `cueLists`. The
+    /// Every cue in every list, counted once per structural snapshot. The
     /// inspector shows it beside values that change on each heartbeat, so the
     /// traversal would otherwise repeat several times a second.
     var totalCueCount: Int {
@@ -257,6 +256,7 @@ final class QLabClient {
     private func invalidateLiveSessionData() {
         connectedSince = nil
         cueLists = []
+        cachedTotalCueCount = nil
         cuesWithLoadedDetails.removeAll()
         pendingCueDetailIDs.removeAll()
         cueDetailRevisions.removeAll()
@@ -1034,6 +1034,7 @@ final class QLabClient {
         cuesWithLoadedDetails = invalidatingDetails ? [] : carried
 
         cueLists = refreshed
+        cachedTotalCueCount = nil
         invalidateWatchedGraph()
 
         let liveListIDs = Set(cueLists.map(\.uniqueID))

@@ -5,6 +5,7 @@ import Testing
 @testable import Cuety
 import ShowControlCore
 
+@MainActor
 private func isolatedPreferences() -> Preferences {
     Preferences(defaults: EphemeralDefaults())
 }
@@ -89,6 +90,41 @@ struct QLabSessionTests {
         )
         #expect(reply.data?.isEmpty == true)
         #expect(client.status == .offline)
+    }
+
+    @Test("A warmed cue count follows structural snapshots")
+    func cueCountCacheFollowsStructure() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = [
+            .init(
+                id: "L1", name: "Main",
+                cues: [.init(id: "C1", number: "1", name: "One")],
+                playheadCueID: "C1"
+            ),
+        ]
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let client = QLabClient(preferences: isolatedPreferences(), log: ActivityLog())
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+
+        #expect(client.totalCueCount == 2)
+
+        peer.cueLists[0].cues[0] = .init(id: "C1", number: "1", name: "Renamed")
+        peer.push(OSCMessage("/update/workspace/W/cue_id/C1"))
+        let editDeadline = ContinuousClock.now + .seconds(2)
+        while client.playheadCue?.displayName != "Renamed", ContinuousClock.now < editDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(client.totalCueCount == 2)
+
+        peer.cueLists[0].cues.append(.init(id: "C2", number: "2", name: "Two"))
+        peer.push(OSCMessage("/update/workspace/W"))
+        let structureDeadline = ContinuousClock.now + .seconds(3)
+        while client.totalCueCount != 3, ContinuousClock.now < structureDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(client.totalCueCount == 3)
     }
 
     @Test("Cancelling a connection releases an event-loss handler cycle")

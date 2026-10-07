@@ -52,6 +52,43 @@ struct CueGraphTests {
         #expect(graph.cue(withID: "nope", in: list) == nil)
     }
 
+    @Test("Stale and unwatched cue paths resolve against the current tree")
+    func valueUpdatesFindCuesAfterTheirPathsChange() throws {
+        var graph = CueGraph(cueList: cue("list", "Main", children: [
+            cue("target", "Target"),
+        ]))
+        var currentLists = [
+            cue("other", "Other", children: [cue("offwatch", "Off watch")]),
+            cue("list", "Main", children: [
+                cue("first", "First"),
+                cue("group", "Group", children: [cue("target", "Target")]),
+            ]),
+        ]
+        let values = try JSONDecoder().decode(
+            QLabCueValues.self,
+            from: Data(#"{"number":"7","duration":42}"#.utf8)
+        )
+
+        let changes = currentLists.applyValuesAndFindCues(
+            ["target": values, "offwatch": values], using: graph
+        )
+
+        #expect(changes.foundCueIDs == Set(["target", "offwatch"]))
+        #expect(changes.changedCueIDs == Set(["target", "offwatch"]))
+        #expect(currentLists.firstCue(withID: "target")?.displayNumber == "7")
+        #expect(currentLists.firstCue(withID: "target")?.duration == 42)
+        #expect(currentLists.firstCue(withID: "offwatch")?.duration == 42)
+
+        graph.applyCueNumberUpdates(changes.cueNumberUpdates)
+        #expect(graph.cueNumbers == ["7"])
+
+        let identical = currentLists.applyValuesAndFindCues(
+            ["target": values, "offwatch": values], using: graph
+        )
+        #expect(identical.foundCueIDs == Set(["target", "offwatch"]))
+        #expect(identical.changedCueIDs.isEmpty)
+    }
+
     @Test("A playhead inside a group is positioned against the group's row")
     func nestedPlayheadUsesItsGroupsRow() {
         let graph = CueGraph(cueList: showList())
