@@ -52,10 +52,12 @@ final class AppModel {
 
     init(
         preferences: Preferences = Preferences(),
-        passcodes: any PasscodeStoring = PasscodeStore()
+        passcodes: any PasscodeStoring = PasscodeStore(),
+        startsServices: Bool = true
     ) {
         self.preferences = preferences
         self.passcodes = passcodes
+        self.startsServices = startsServices
         let log = ActivityLog()
         self.log = log
         self.client = QLabClient(preferences: preferences, log: log)
@@ -84,6 +86,7 @@ final class AppModel {
             guard let self else { return }
             switch end {
             case .workspaceClosed:
+                self.invalidateOperatorAttempt()
                 let closedSelection = self.selection
                 self.selection = nil
                 if let closedSelection,
@@ -95,7 +98,7 @@ final class AppModel {
             }
         }
 
-        if preferences.keepsDisplayAwake {
+        if startsServices, preferences.keepsDisplayAwake {
             screenAwakeController.setEnabled(true)
         }
     }
@@ -107,7 +110,7 @@ final class AppModel {
     private(set) var foregroundRefreshTask: Task<Void, Never>?
 
     /// False for the preview model, so the canvas never browses or probes the network.
-    private var startsServices = true
+    private var startsServices: Bool
 
     func start() {
         guard startsServices, startupTask == nil else { return }
@@ -279,8 +282,35 @@ final class AppModel {
 
     private var autoConnectIsArmed = false
 
+    /// Owns effects that follow an operator-selected connection attempt.
+    private var operatorAttemptGeneration: UInt64 = 0
+
+    private var passcodeScanGeneration: UInt64 = 0
+
+    private func beginOperatorAttempt() -> UInt64 {
+        operatorAttemptGeneration &+= 1
+        return operatorAttemptGeneration
+    }
+
+    private func invalidateOperatorAttempt() {
+        operatorAttemptGeneration &+= 1
+    }
+
+    private func invalidatePasscodeScan() {
+        passcodeScanGeneration &+= 1
+    }
+
+    private func ownsLiveOperatorAttempt(
+        _ generation: UInt64, target: WorkspaceSelection
+    ) -> Bool {
+        operatorAttemptGeneration == generation
+            && selection == target
+            && client.hasLiveSession(for: target)
+    }
+
     private func handleDiscoveredServer(_ server: QLabServer) async {
         await probeWorkspaces(on: server)
+        await refreshStoredPasscodes()
         await autoConnectIfPossible()
     }
 
@@ -316,6 +346,7 @@ final class AppModel {
     func connect(to selection: WorkspaceSelection, useSavedPasscode: Bool = false) async {
         guard let server = browser.server(withID: selection.serverID) else { return }
 
+        let generation = beginOperatorAttempt()
         self.selection = selection
         passcodePrompt = nil
         let stored = useSavedPasscode ? passcodes.passcode(
@@ -328,23 +359,25 @@ final class AppModel {
             passcode: stored
         )
 
-        if client.status.hasLiveData {
-            isDataStale = false
-            preferences.lastWorkspace = selection
-        }
+        guard ownsLiveOperatorAttempt(generation, target: selection) else { return }
+        isDataStale = false
+        preferences.lastWorkspace = selection
     }
 
     func submitPasscode(
         _ passcode: String, for prompt: PasscodePrompt, remember: Bool
     ) async {
-        guard let server = browser.server(withID: prompt.serverID) else { return }
+        guard passcodePrompt == prompt,
+              let server = browser.server(withID: prompt.serverID)
+        else { return }
+        let generation = beginOperatorAttempt()
         let target = WorkspaceSelection(
             serverID: prompt.serverID, workspaceID: prompt.workspaceID
         )
         selection = target
         await client.connect(to: server, workspaceID: prompt.workspaceID, passcode: passcode)
 
-        guard client.status.hasLiveData else { return }
+        guard ownsLiveOperatorAttempt(generation, target: target) else { return }
 
         isDataStale = false
         preferences.lastWorkspace = target
@@ -353,6 +386,7 @@ final class AppModel {
         passcodePrompt = nil
 
         if remember {
+            invalidatePasscodeScan()
             do {
                 try passcodes.save(
                     passcode, serverID: prompt.serverID, workspaceID: prompt.workspaceID
@@ -368,6 +402,7 @@ final class AppModel {
     }
 
     func disconnect() {
+        invalidateOperatorAttempt()
         startupTask?.cancel()
         autoConnectIsArmed = false
 
@@ -377,6 +412,7 @@ final class AppModel {
     }
 
     func forgetPasscode(for selection: WorkspaceSelection) throws(CredentialError) {
+        invalidatePasscodeScan()
         do {
             try passcodes.remove(
                 serverID: selection.serverID, workspaceID: selection.workspaceID
@@ -391,6 +427,7 @@ final class AppModel {
     }
 
     func forgetAllPasscodes() throws(CredentialError) {
+        invalidatePasscodeScan()
         do {
             try passcodes.removeAll()
             storedPasscodeSelections.removeAll()
@@ -403,6 +440,9 @@ final class AppModel {
     }
 
     func refreshStoredPasscodes() async {
+        passcodeScanGeneration &+= 1
+        let generation = passcodeScanGeneration
+
         var selections: Set<WorkspaceSelection> = []
         for server in browser.servers {
             selections.formUnion(server.workspaces.map { workspace in
@@ -415,7 +455,7 @@ final class AppModel {
             passcodes.selectionsWithPasscodes(Set(selections))
         }.value
 
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, generation == passcodeScanGeneration else { return }
         storedPasscodeSelections = found
     }
 
@@ -462,17 +502,9 @@ final class AppModel {
         Task { await client.refreshPlayheadCueDetails() }
     }
 
-    func toggleKeepAwake() {
-        setKeepsDisplayAwake(!preferences.keepsDisplayAwake)
-    }
-
     func setKeepsDisplayAwake(_ keepsAwake: Bool) {
         preferences.keepsDisplayAwake = keepsAwake
         screenAwakeController.setEnabled(keepsAwake)
-    }
-
-    func togglePerformanceMode() {
-        preferences.performanceMode.toggle()
     }
 
     func setShowsDrawer(_ showsDrawer: Bool) {
@@ -497,9 +529,9 @@ extension AppModel {
         defaults.removePersistentDomain(forName: domain)
         let model = AppModel(
             preferences: Preferences(defaults: defaults),
-            passcodes: PreviewPasscodeStore()
+            passcodes: PreviewPasscodeStore(),
+            startsServices: false
         )
-        model.startsServices = false
         return model
     }
 }

@@ -31,24 +31,25 @@ struct CueGraphTests {
     func groupsCollapseToOneRow() {
         let graph = CueGraph(cueList: showList())
 
-        #expect(graph.rows.map(\.uniqueID) == ["1", "2", "3", "4"])
+        #expect(graph.rowIDs == ["1", "2", "3", "4"])
     }
 
     @Test("Neighbouring rows skip whatever is inside a group")
     func neighboursAreRows() {
         let graph = CueGraph(cueList: showList())
 
-        #expect(graph.rowsAbove("3", count: 2).map(\.uniqueID) == ["1", "2"])
-        #expect(graph.rowsBelow("1", count: 2).map(\.uniqueID) == ["2", "3"])
+        #expect(graph.rowsAbove("3", count: 2) == ["1", "2"])
+        #expect(graph.rowsBelow("1", count: 2) == ["2", "3"])
     }
 
     @Test("Children are still findable even though they are not drawn")
     func nestedCuesRemainIndexed() {
-        let graph = CueGraph(cueList: showList())
+        let list = showList()
+        let graph = CueGraph(cueList: list)
 
-        #expect(graph.cue(withID: "2.1")?.displayName == "Thunder")
-        #expect(graph.cue(withID: "2.2.1")?.displayName == "Drips")
-        #expect(graph.cue(withID: "nope") == nil)
+        #expect(graph.cue(withID: "2.1", in: list)?.displayName == "Thunder")
+        #expect(graph.cue(withID: "2.2.1", in: list)?.displayName == "Drips")
+        #expect(graph.cue(withID: "nope", in: list) == nil)
     }
 
     @Test("A playhead inside a group is positioned against the group's row")
@@ -56,8 +57,8 @@ struct CueGraphTests {
         let graph = CueGraph(cueList: showList())
 
         for cueID in ["2", "2.1", "2.2", "2.2.1"] {
-            #expect(graph.rowsAbove(cueID, count: 3).map(\.uniqueID) == ["1"])
-            #expect(graph.rowsBelow(cueID, count: 3).map(\.uniqueID) == ["3", "4"])
+            #expect(graph.rowsAbove(cueID, count: 3) == ["1"])
+            #expect(graph.rowsBelow(cueID, count: 3) == ["3", "4"])
         }
     }
 
@@ -65,12 +66,12 @@ struct CueGraphTests {
     func containingRowNamesTheGroup() {
         let graph = CueGraph(cueList: showList())
 
-        #expect(graph.containingRow(of: "2.1")?.uniqueID == "2")
-        #expect(graph.containingRow(of: "2.2.1")?.uniqueID == "2")
+        #expect(graph.containingRowID(of: "2.1") == "2")
+        #expect(graph.containingRowID(of: "2.2.1") == "2")
 
-        #expect(graph.containingRow(of: "2") == nil)
-        #expect(graph.containingRow(of: "1") == nil)
-        #expect(graph.containingRow(of: "nope") == nil)
+        #expect(graph.containingRowID(of: "2") == nil)
+        #expect(graph.containingRowID(of: "1") == nil)
+        #expect(graph.containingRowID(of: "nope") == nil)
     }
 
     @Test("Boundaries are claimed only for the first and last rows")
@@ -91,7 +92,7 @@ struct CueGraphTests {
     func emptyList() {
         let graph = CueGraph(cueList: cue("list", "Main"))
 
-        #expect(graph.rows.isEmpty)
+        #expect(graph.rowIDs.isEmpty)
         #expect(graph.rowsAbove("anything", count: 3).isEmpty)
         #expect(graph.rowsBelow("anything", count: 3).isEmpty)
         #expect(!graph.isFirst("anything"))
@@ -111,9 +112,9 @@ struct CueGraphTests {
         let graph = CueGraph(cueList: showList())
 
         #expect(graph.rowsAbove("1", count: 5).isEmpty)
-        #expect(graph.rowsAbove("2", count: 5).map(\.uniqueID) == ["1"])
+        #expect(graph.rowsAbove("2", count: 5) == ["1"])
         #expect(graph.rowsBelow("4", count: 5).isEmpty)
-        #expect(graph.rowsBelow("3", count: 5).map(\.uniqueID) == ["4"])
+        #expect(graph.rowsBelow("3", count: 5) == ["4"])
     }
 
     private func longList() -> Cue {
@@ -125,11 +126,11 @@ struct CueGraphTests {
         let graph = CueGraph(cueList: longList())
 
         let nearEnd = graph.neighbourhood(around: "5", above: 3, below: 3)
-        #expect(nearEnd.above.map(\.uniqueID) == ["1", "2", "3", "4"])
-        #expect(nearEnd.below.map(\.uniqueID) == ["6"])
+        #expect(nearEnd.above == ["1", "2", "3", "4"])
+        #expect(nearEnd.below == ["6"])
 
         let atEnd = graph.neighbourhood(around: "6", above: 3, below: 3)
-        #expect(atEnd.above.map(\.uniqueID) == ["1", "2", "3", "4", "5"])
+        #expect(atEnd.above == ["1", "2", "3", "4", "5"])
         #expect(atEnd.below.isEmpty)
     }
 
@@ -139,11 +140,11 @@ struct CueGraphTests {
 
         let atStart = graph.neighbourhood(around: "1", above: 3, below: 3)
         #expect(atStart.above.isEmpty)
-        #expect(atStart.below.map(\.uniqueID) == ["2", "3", "4", "5", "6"])
+        #expect(atStart.below == ["2", "3", "4", "5", "6"])
 
         let nearStart = graph.neighbourhood(around: "2", above: 3, below: 3)
-        #expect(nearStart.above.map(\.uniqueID) == ["1"])
-        #expect(nearStart.below.map(\.uniqueID) == ["3", "4", "5", "6"])
+        #expect(nearStart.above == ["1"])
+        #expect(nearStart.below == ["3", "4", "5", "6"])
     }
 
     @Test("In the middle of a list, both sides get exactly what was asked for")
@@ -151,8 +152,8 @@ struct CueGraphTests {
         let graph = CueGraph(cueList: longList())
 
         let middle = graph.neighbourhood(around: "4", above: 3, below: 2)
-        #expect(middle.above.map(\.uniqueID) == ["1", "2", "3"])
-        #expect(middle.below.map(\.uniqueID) == ["5", "6"])
+        #expect(middle.above == ["1", "2", "3"])
+        #expect(middle.below == ["5", "6"])
     }
 
     @Test("A side set to none stays empty, and lends rather than borrows")
@@ -176,7 +177,7 @@ struct CueGraphTests {
 
         let neighbourhood = graph.neighbourhood(around: "1", above: 3, below: 3)
         #expect(neighbourhood.above.isEmpty)
-        #expect(neighbourhood.below.map(\.uniqueID) == ["2"])
+        #expect(neighbourhood.below == ["2"])
         #expect(neighbourhood.count == 1)
     }
 
@@ -188,7 +189,7 @@ struct CueGraphTests {
         ]))
 
         let neighbourhood = graph.neighbourhood(around: "4.1", above: 2, below: 2)
-        #expect(neighbourhood.above.map(\.uniqueID) == ["1", "2", "3"])
+        #expect(neighbourhood.above == ["1", "2", "3"])
         #expect(neighbourhood.below.isEmpty)
     }
 

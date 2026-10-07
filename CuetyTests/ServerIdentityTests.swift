@@ -172,7 +172,9 @@ struct ServerIdentityTests {
 
     private func model() throws -> AppModel {
         let defaults = EphemeralDefaults()
-        return AppModel(preferences: Preferences(defaults: defaults))
+        return AppModel(
+            preferences: Preferences(defaults: defaults), passcodes: TestPasscodeStore()
+        )
     }
 
     @Test("Only servers the operator added are theirs to remove")
@@ -194,7 +196,9 @@ struct ServerIdentityTests {
     @Test("A removed server stays removed across a relaunch")
     func removalIsPersisted() throws {
         let defaults = EphemeralDefaults()
-        let model = AppModel(preferences: Preferences(defaults: defaults))
+        let model = AppModel(
+            preferences: Preferences(defaults: defaults), passcodes: TestPasscodeStore()
+        )
         let added = model.browser.addManualServer(host: "192.168.1.10", port: port)
         try #require(model.browser.server(withID: added.id) != nil)
 

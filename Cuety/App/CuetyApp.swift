@@ -23,7 +23,10 @@ struct CuetyHostedContent<Content: View>: View {
 @main
 @MainActor
 struct CuetyApp: App {
-    @State private var model = AppModel()
+    @State private var model = AppModel(
+        // XCTest launches the app as its host; do not browse or auto-connect there.
+        startsServices: ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
+    )
 
     /// The aggregate phase of every scene, rather than one window's.
     @Environment(\.scenePhase) private var scenePhase

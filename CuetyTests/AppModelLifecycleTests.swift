@@ -17,7 +17,7 @@ struct AppModelLifecycleTests {
         preferences.autoConnect = autoConnect
         preferences.lastWorkspace = lastWorkspace
         if let requestTimeout { preferences.requestTimeout = requestTimeout }
-        return AppModel(preferences: preferences)
+        return AppModel(preferences: preferences, passcodes: TestPasscodeStore())
     }
 
     private static let unroutableHost = "192.0.2.1"
@@ -128,7 +128,7 @@ struct AppModelLifecycleTests {
         let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
         preferences.lastWorkspace = target
-        let model = AppModel(preferences: preferences)
+        let model = AppModel(preferences: preferences, passcodes: TestPasscodeStore())
         model.selection = target
 
         model.client.onSessionEnded?(.workspaceClosed)

@@ -75,34 +75,28 @@ struct ConnectionSettingsView: View {
 
     private var connectionSection: some View {
         Section {
-            SteppedField(
+            NumericField(
                 title: "TCP port",
                 value: Bindable(preferences).defaultPort,
-                range: Preferences.Limits.port,
-                format: IntegerFormatStyle<Int>.number.grouping(.never),
-                showsStepper: false
+                format: IntegerFormatStyle<Int>.number.grouping(.never)
             )
             .help("The starting port when you add a server by hand. QLab uses 53000.")
 
-            SteppedField(
+            NumericField(
                 title: "Heartbeat",
                 value: Bindable(preferences).heartbeatInterval,
-                range: Preferences.Limits.heartbeatInterval,
                 format: FloatingPointFormatStyle<Double>.number
                     .precision(.fractionLength(0)),
-                unit: "s",
-                showsStepper: false
+                unit: "s"
             )
             .help("A shorter heartbeat notices a dropped connection sooner, with more traffic.")
 
-            SteppedField(
+            NumericField(
                 title: "Request timeout",
                 value: Bindable(preferences).requestTimeout,
-                range: Preferences.Limits.requestTimeout,
                 format: FloatingPointFormatStyle<Double>.number
                     .precision(.fractionLength(0)),
-                unit: "s",
-                showsStepper: false
+                unit: "s"
             )
             .help("How long Cuety waits for QLab to answer a request.")
         } header: {

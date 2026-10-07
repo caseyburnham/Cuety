@@ -55,19 +55,26 @@ struct CueDrawerView: View {
     var body: some View {
         if model.hasCurrentCueData,
            let graph = client.watchedGraph,
+           let cueList = client.watchedCueList,
            let cueID = client.currentPlayheadCueID {
-            content(graph: graph, playheadID: cueID)
+            content(graph: graph, cueList: cueList, playheadID: cueID)
         }
     }
 
     @ViewBuilder
-    private func content(graph: CueGraph, playheadID: String) -> some View {
+    private func content(graph: CueGraph, cueList: Cue, playheadID: String) -> some View {
         let step = min(model.drawerStep, maximumStep)
         let neighbourhood = graph.neighbourhood(
             around: playheadID,
             above: step,
             below: step
         )
+        let above = neighbourhood.above.compactMap {
+            graph.cue(withID: $0, in: cueList)
+        }
+        let below = neighbourhood.below.compactMap {
+            graph.cue(withID: $0, in: cueList)
+        }
 
         VStack(alignment: .leading, spacing: 0) {
             drawerHandle
@@ -75,9 +82,10 @@ struct CueDrawerView: View {
             if !isCollapsed {
                 rows(
                     graph: graph,
+                    cueList: cueList,
                     playheadID: playheadID,
-                    above: neighbourhood.above,
-                    below: neighbourhood.below
+                    above: above,
+                    below: below
                 )
             }
         }
@@ -183,9 +191,12 @@ struct CueDrawerView: View {
 
     @ViewBuilder
     private func rows(
-        graph: CueGraph, playheadID: String, above: [Cue], below: [Cue]
+        graph: CueGraph, cueList: Cue, playheadID: String, above: [Cue], below: [Cue]
     ) -> some View {
         let numberWidth = numberColumnWidth(above: above, below: below)
+        let containingGroup = graph.containingRowID(of: playheadID).flatMap {
+            graph.cue(withID: $0, in: cueList)
+        }
 
         let stack = VStack(alignment: .leading, spacing: 2) {
             if graph.isFirst(playheadID) {
@@ -200,7 +211,7 @@ struct CueDrawerView: View {
                 }
             }
 
-            playheadMarker(insideGroup: graph.containingRow(of: playheadID))
+            playheadMarker(insideGroup: containingGroup)
 
             if graph.isLast(playheadID) {
                 boundaryRow("End of cue list", systemImage: "arrow.down.to.line")

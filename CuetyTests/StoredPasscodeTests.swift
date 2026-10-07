@@ -7,7 +7,7 @@ import Testing
 @MainActor
 struct StoredPasscodeTests {
     private func makeModel(
-        _ store: StubPasscodeStore, withStoredPasscode: Bool = true
+        _ store: TestPasscodeStore, withStoredPasscode: Bool = true
     ) async throws -> (model: AppModel, target: WorkspaceSelection) {
         let defaults = EphemeralDefaults()
         let model = AppModel(
@@ -35,7 +35,7 @@ struct StoredPasscodeTests {
 
     @Test("Forget removes the credential and the row together")
     func forgetUpdatesObservableState() async throws {
-        let store = StubPasscodeStore()
+        let store = TestPasscodeStore()
         let (model, target) = try await makeModel(store)
         try #require(model.storedPasscodeSelections.contains(target))
 
@@ -47,7 +47,7 @@ struct StoredPasscodeTests {
 
     @Test("A Forget that fails says so, and does not pretend the row is gone")
     func forgetFailureIsSurfaced() async throws {
-        let store = StubPasscodeStore()
+        let store = TestPasscodeStore()
         let (model, target) = try await makeModel(store)
         store.removeError = PasscodeStore.Failure.keychain(errSecAuthFailed)
 
@@ -56,12 +56,12 @@ struct StoredPasscodeTests {
         }
         #expect(error.message.contains("could not remove"))
         #expect(model.storedPasscodeSelections.contains(target))
-        #expect(store.hasPasscode(serverID: target.serverID, workspaceID: target.workspaceID))
+        #expect(store.selectionsWithPasscodes([target]).contains(target))
     }
 
     @Test("Forget All clears the credentials and the rows")
     func forgetAllSucceeds() async throws {
-        let store = StubPasscodeStore()
+        let store = TestPasscodeStore()
         let (model, target) = try await makeModel(store)
         try #require(model.storedPasscodeSelections.contains(target))
 
@@ -73,7 +73,7 @@ struct StoredPasscodeTests {
 
     @Test("A Forget All that fails says so")
     func forgetAllFailureIsSurfaced() async throws {
-        let store = StubPasscodeStore()
+        let store = TestPasscodeStore()
         let (model, target) = try await makeModel(store)
         store.removeAllError = PasscodeStore.Failure.keychain(errSecAuthFailed)
 
@@ -86,7 +86,7 @@ struct StoredPasscodeTests {
 
     @Test("The reported reason comes from the Keychain, not from Swift")
     func failureReasonIsOperatorReadable() async throws {
-        let store = StubPasscodeStore()
+        let store = TestPasscodeStore()
         let (model, target) = try await makeModel(store)
         store.removeError = PasscodeStore.Failure.keychain(errSecAuthFailed)
 
@@ -99,7 +99,7 @@ struct StoredPasscodeTests {
 
     @Test("A rejected passcode that cannot be removed is reported to the connection flow")
     func rejectedPasscodeRemovalFailureIsSurfaced() async throws {
-        let store = StubPasscodeStore()
+        let store = TestPasscodeStore()
         let (model, target) = try await makeModel(store)
         store.removeError = PasscodeStore.Failure.keychain(errSecAuthFailed)
         model.selection = target
@@ -113,7 +113,7 @@ struct StoredPasscodeTests {
 
     @Test("Rebuilding the set finds credentials for workspaces that become visible")
     func refreshFindsNewlyVisibleWorkspaces() async throws {
-        let store = StubPasscodeStore()
+        let store = TestPasscodeStore()
         let (model, target) = try await makeModel(store, withStoredPasscode: false)
         try #require(model.storedPasscodeSelections.isEmpty)
 
@@ -122,34 +122,69 @@ struct StoredPasscodeTests {
 
         #expect(model.storedPasscodeSelections.contains(target))
     }
+
 }
 
-private final class StubPasscodeStore: PasscodeStoring, @unchecked Sendable {
-    var stored: [[String]: String] = [:]
-    var saveError: (any Error)?
-    var removeError: (any Error)?
-    var removeAllError: (any Error)?
+final class TestPasscodeStore: PasscodeStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValues: [[String]: String] = [:]
+    private var saveFailure: (any Error)?
+    private var removeFailure: (any Error)?
+    private var removeAllFailure: (any Error)?
+
+    var stored: [[String]: String] { withLock { storedValues } }
+
+    var saveError: (any Error)? {
+        get { withLock { saveFailure } }
+        set { withLock { saveFailure = newValue } }
+    }
+
+    var removeError: (any Error)? {
+        get { withLock { removeFailure } }
+        set { withLock { removeFailure = newValue } }
+    }
+
+    var removeAllError: (any Error)? {
+        get { withLock { removeAllFailure } }
+        set { withLock { removeAllFailure = newValue } }
+    }
 
     func passcode(serverID: String, workspaceID: String) -> String? {
-        stored[[serverID, workspaceID]]
+        withLock { storedValues[[serverID, workspaceID]] }
     }
 
     func selectionsWithPasscodes(_ selections: Set<WorkspaceSelection>) -> Set<WorkspaceSelection> {
-        selections.filter { passcode(serverID: $0.serverID, workspaceID: $0.workspaceID) != nil }
+        withLock {
+            selections.filter {
+                storedValues[[$0.serverID, $0.workspaceID]] != nil
+            }
+        }
     }
 
     func save(_ passcode: String, serverID: String, workspaceID: String) throws {
-        if let saveError { throw saveError }
-        stored[[serverID, workspaceID]] = passcode
+        try withLock {
+            if let saveFailure { throw saveFailure }
+            storedValues[[serverID, workspaceID]] = passcode
+        }
     }
 
     func remove(serverID: String, workspaceID: String) throws {
-        if let removeError { throw removeError }
-        stored.removeValue(forKey: [serverID, workspaceID])
+        try withLock {
+            if let removeFailure { throw removeFailure }
+            storedValues.removeValue(forKey: [serverID, workspaceID])
+        }
     }
 
     func removeAll() throws {
-        if let removeAllError { throw removeAllError }
-        stored.removeAll()
+        try withLock {
+            if let removeAllFailure { throw removeAllFailure }
+            storedValues.removeAll()
+        }
+    }
+
+    private func withLock<T>(_ operation: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try operation()
     }
 }

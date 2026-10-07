@@ -5,6 +5,10 @@ import Testing
 @testable import Cuety
 import ShowControlCore
 
+private func isolatedPreferences() -> Preferences {
+    Preferences(defaults: EphemeralDefaults())
+}
+
 @Suite("Session authorization")
 @MainActor
 struct QLabSessionTests {
@@ -16,7 +20,7 @@ struct QLabSessionTests {
 
     @Test("Denied heartbeat revokes authorization even with a thump payload")
     func deniedHeartbeat() async throws {
-        let client = QLabClient(preferences: Preferences(), log: ActivityLog())
+        let client = QLabClient(preferences: isolatedPreferences(), log: ActivityLog())
         var prompted = false
         client.onPasscodeRequired = { _ in prompted = true }
         await #expect(throws: QLabClient.RequestFailure.self) {
@@ -34,7 +38,7 @@ struct QLabSessionTests {
 
     @Test("Denied cue lists prompt before attempting to decode the error payload")
     func deniedCueLists() async throws {
-        let client = QLabClient(preferences: Preferences(), log: ActivityLog())
+        let client = QLabClient(preferences: isolatedPreferences(), log: ActivityLog())
         var prompted = false
         client.onPasscodeRequired = { _ in prompted = true }
         await #expect(throws: QLabClient.RequestFailure.self) {
@@ -51,7 +55,7 @@ struct QLabSessionTests {
 
     @Test("A second denial does not raise a second prompt")
     func repeatedDenialsPromptOnce() async throws {
-        let client = QLabClient(preferences: Preferences(), log: ActivityLog())
+        let client = QLabClient(preferences: isolatedPreferences(), log: ActivityLog())
         var prompts = 0
         client.onPasscodeRequired = { _ in prompts += 1 }
         for _ in 0..<3 {
@@ -69,7 +73,7 @@ struct QLabSessionTests {
     @Test("Failed setup requests cannot masquerade as successful empty replies",
           arguments: ["/updates", "/listen/playhead", "/workspace/W/cueLists"])
     func failedSetup(address: String) async {
-        let client = QLabClient(preferences: Preferences(), log: ActivityLog())
+        let client = QLabClient(preferences: isolatedPreferences(), log: ActivityLog())
         await #expect(throws: QLabClient.RequestFailure.self) {
             _ = try await client.validateSessionReply(
                 message(address, status: "error", data: "null"), as: QLabEmptyPayload.self
@@ -79,7 +83,7 @@ struct QLabSessionTests {
 
     @Test("An authorized empty cue list remains valid")
     func emptyCueLists() async throws {
-        let client = QLabClient(preferences: Preferences(), log: ActivityLog())
+        let client = QLabClient(preferences: isolatedPreferences(), log: ActivityLog())
         let reply = try await client.validateSessionReply(
             message("/workspace/W/cueLists", status: "ok", data: "[]"), as: [Cue].self
         )
@@ -145,7 +149,7 @@ struct QLabLiveAuthorizationTests {
         peer.denyCueLists = true
         defer { peer.stop() }
         let port = try await peer.start()
-        let client = QLabClient(preferences: Preferences(), log: ActivityLog())
+        let client = QLabClient(preferences: isolatedPreferences(), log: ActivityLog())
         defer { client.disconnect() }
         await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: "old")
         #expect(client.status == .needsPasscode(rejected: true))
@@ -160,7 +164,7 @@ struct QLabLiveAuthorizationTests {
         peer.denyCueLists = true
         defer { peer.stop() }
         let port = try await peer.start()
-        let client = QLabClient(preferences: Preferences(), log: ActivityLog())
+        let client = QLabClient(preferences: isolatedPreferences(), log: ActivityLog())
         defer { client.disconnect() }
 
         await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
@@ -174,6 +178,10 @@ struct QLabLiveAuthorizationTests {
 @Suite("Losing the connection", .serialized)
 @MainActor
 struct QLabDisconnectTests {
+    private func watchedCue(_ cueID: String, in client: QLabClient) -> Cue? {
+        client.watchedCueList?.children.firstCue(withID: cueID)
+    }
+
     private func makePreferences(requestTimeout: TimeInterval = 5) throws -> Preferences {
         let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
@@ -714,17 +722,17 @@ struct QLabDisconnectTests {
         try #require(client.currentPlayheadCueID == "C1")
 
         let deadline = ContinuousClock.now + .seconds(3)
-        while client.watchedGraph?.cue(withID: "C4")?.isLoaded == nil,
+        while watchedCue("C4", in: client)?.isLoaded == nil,
               ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
 
         // None of these cues has been fired; all of it is read ahead.
-        #expect(client.watchedGraph?.cue(withID: "C2")?.continueMode == .autoContinue)
-        #expect(client.watchedGraph?.cue(withID: "C3")?.continueMode == .autoFollow)
-        #expect(client.watchedGraph?.cue(withID: "C3")?.isBroken == true)
-        #expect(client.watchedGraph?.cue(withID: "C4")?.isLoaded == true)
-        #expect(client.watchedGraph?.cue(withID: "C2")?.isBroken == false)
+        #expect(watchedCue("C2", in: client)?.continueMode == .autoContinue)
+        #expect(watchedCue("C3", in: client)?.continueMode == .autoFollow)
+        #expect(watchedCue("C3", in: client)?.isBroken == true)
+        #expect(watchedCue("C4", in: client)?.isLoaded == true)
+        #expect(watchedCue("C2", in: client)?.isBroken == false)
     }
 
     @Test("Details already fetched are not fetched again on every playhead move")
@@ -758,7 +766,7 @@ struct QLabDisconnectTests {
 
         // A drawer two rows deep reads five cues ahead from the top of the list.
         let settled = ContinuousClock.now + .seconds(2)
-        while client.watchedGraph?.cue(withID: "C5")?.duration == nil,
+        while watchedCue("C5", in: client)?.duration == nil,
               ContinuousClock.now < settled {
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -774,7 +782,7 @@ struct QLabDisconnectTests {
         peer.push(OSCMessage("/update/workspace/W/cueList/L1/playbackPosition", [.string("C4")]))
 
         let moved = ContinuousClock.now + .seconds(2)
-        while client.watchedGraph?.cue(withID: "C6")?.duration == nil,
+        while watchedCue("C6", in: client)?.duration == nil,
               ContinuousClock.now < moved {
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -803,28 +811,28 @@ struct QLabDisconnectTests {
         let preferences = try makePreferences()
         preferences.showsDrawer = false
         preferences.drawerRowCount = 2
-        let model = AppModel(preferences: preferences)
+        let model = AppModel(preferences: preferences, passcodes: TestPasscodeStore())
         defer { model.client.disconnect() }
         await model.client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
 
         let standby = ContinuousClock.now + .seconds(2)
-        while model.client.watchedGraph?.cue(withID: "C1")?.duration == nil,
+        while watchedCue("C1", in: model.client)?.duration == nil,
               ContinuousClock.now < standby {
             try await Task.sleep(for: .milliseconds(20))
         }
-        try #require(model.client.watchedGraph?.cue(withID: "C1")?.duration != nil)
+        try #require(watchedCue("C1", in: model.client)?.duration != nil)
         // With the drawer hidden only the standby cue is on screen.
-        try #require(model.client.watchedGraph?.cue(withID: "C2")?.duration == nil)
+        try #require(watchedCue("C2", in: model.client)?.duration == nil)
 
         model.setShowsDrawer(true)
 
         let revealed = ContinuousClock.now + .seconds(2)
-        while model.client.watchedGraph?.cue(withID: "C3")?.duration == nil,
+        while watchedCue("C3", in: model.client)?.duration == nil,
               ContinuousClock.now < revealed {
             try await Task.sleep(for: .milliseconds(20))
         }
-        #expect(model.client.watchedGraph?.cue(withID: "C2")?.duration == 2)
-        #expect(model.client.watchedGraph?.cue(withID: "C3")?.duration == 3)
+        #expect(watchedCue("C2", in: model.client)?.duration == 2)
+        #expect(watchedCue("C3", in: model.client)?.duration == 3)
     }
 
     @Test("A consumer that stops reading overflows the buffer and is told what it lost")
@@ -883,7 +891,7 @@ struct QLabDisconnectTests {
         let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
         preferences.requestTimeout = 0.4
-        let model = AppModel(preferences: preferences)
+        let model = AppModel(preferences: preferences, passcodes: TestPasscodeStore())
         defer { model.disconnect() }
         let server = model.browser.addManualServer(host: "127.0.0.1", port: port)
         let target = WorkspaceSelection(serverID: server.id, workspaceID: "W")
@@ -916,7 +924,7 @@ struct QLabDisconnectTests {
         let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
         preferences.requestTimeout = 2
-        let model = AppModel(preferences: preferences)
+        let model = AppModel(preferences: preferences, passcodes: TestPasscodeStore())
         defer { model.disconnect() }
         let server = model.browser.addManualServer(host: "127.0.0.1", port: port)
 
@@ -948,7 +956,7 @@ struct QLabDisconnectTests {
         let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
         preferences.requestTimeout = 0.3
-        let model = AppModel(preferences: preferences)
+        let model = AppModel(preferences: preferences, passcodes: TestPasscodeStore())
         defer { model.disconnect() }
 
         let server = model.browser.addManualServer(host: "127.0.0.1", port: port)
@@ -984,7 +992,7 @@ struct QLabDisconnectTests {
 
         let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
-        let model = AppModel(preferences: preferences)
+        let model = AppModel(preferences: preferences, passcodes: TestPasscodeStore())
         defer { model.disconnect() }
 
         let server = model.browser.addManualServer(host: "127.0.0.1", port: port)
@@ -1014,7 +1022,7 @@ struct QLabDisconnectTests {
 
         let defaults = EphemeralDefaults()
         let preferences = Preferences(defaults: defaults)
-        let model = AppModel(preferences: preferences)
+        let model = AppModel(preferences: preferences, passcodes: TestPasscodeStore())
         defer { model.disconnect() }
 
         let server = model.browser.addManualServer(host: "127.0.0.1", port: port)
@@ -1227,7 +1235,7 @@ struct QLabDisconnectTests {
         let port = try await peer.start()
         let log = ActivityLog()
         let preferences = try makePreferences()
-        // Notes are only fetched while the pill that shows them is on.
+        // Notes are fetched for every cue because the drawer also shows them.
         preferences.enabledPills.insert(.notes)
         let client = QLabClient(preferences: preferences, log: log)
         defer { client.disconnect() }

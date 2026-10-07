@@ -64,7 +64,12 @@ private struct MainDetailView: View {
                             .transition(reduceMotion ? .identity : .move(edge: .bottom).combined(with: .opacity))
                         }
                 }
+#if os(macOS)
+                // The macOS window toolbar overlays the detail canvas. The
+                // iPad navigation bar owns its safe area, so content should
+                // be centered below it instead of behind it.
                 .ignoresSafeArea(.container, edges: .top)
+#endif
             case .list:
                 CueListView()
             }

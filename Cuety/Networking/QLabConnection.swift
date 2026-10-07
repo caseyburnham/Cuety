@@ -3,6 +3,29 @@ import Network
 import os
 import ShowControlCore
 
+/// Serializes request cancellation with the call that queues bytes on the socket.
+nonisolated final class QLabSendState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isCancelled = false
+    private var didQueueSend = false
+
+    func cancel() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        isCancelled = true
+        return didQueueSend
+    }
+
+    func enqueueIfActive(_ enqueue: () -> Void) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isCancelled else { return false }
+        didQueueSend = true
+        enqueue()
+        return true
+    }
+}
+
 /// `NWConnection` callbacks arrive on its queue; the actor isolates connection state.
 actor QLabConnection {
     enum Event: Sendable {
@@ -135,7 +158,7 @@ actor QLabConnection {
     }
 
     @discardableResult
-    func send(_ message: OSCMessage) async throws -> Int {
+    func send(_ message: OSCMessage, trackedBy sendState: QLabSendState? = nil) async throws -> Int {
         guard let connection, connection.state == .ready else {
             throw SendFailure.notConnected
         }
@@ -143,16 +166,27 @@ actor QLabConnection {
         let packet = try OSCCodec.encode(message)
 
         try await withCheckedThrowingContinuation { (resume: CheckedContinuation<Void, any Error>) in
-            connection.send(
-                content: packet,
-                completion: .contentProcessed { error in
-                    if let error {
-                        resume.resume(throwing: SendFailure.transport(error))
-                    } else {
-                        resume.resume()
+            let enqueue = {
+                connection.send(
+                    content: packet,
+                    completion: .contentProcessed { error in
+                        if let error {
+                            resume.resume(throwing: SendFailure.transport(error))
+                        } else {
+                            resume.resume()
+                        }
                     }
+                )
+            }
+
+            if let sendState {
+                guard sendState.enqueueIfActive(enqueue) else {
+                    resume.resume(throwing: CancellationError())
+                    return
                 }
-            )
+            } else {
+                enqueue()
+            }
         }
 
         return packet.count

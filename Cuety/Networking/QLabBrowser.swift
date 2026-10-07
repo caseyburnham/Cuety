@@ -53,12 +53,14 @@ final class QLabBrowser {
         )
         self.browser = browser
 
-        browser.stateUpdateHandler = { [weak self] state in
-            Task { @MainActor in self?.handleStateChange(state) }
+        browser.stateUpdateHandler = { [weak self, weak browser] state in
+            guard let browser else { return }
+            Task { @MainActor in self?.handleStateChange(state, from: browser) }
         }
 
-        browser.browseResultsChangedHandler = { [weak self] results, _ in
-            Task { @MainActor in self?.apply(results: results) }
+        browser.browseResultsChangedHandler = { [weak self, weak browser] results, _ in
+            guard let browser else { return }
+            Task { @MainActor in self?.apply(results: results, from: browser) }
         }
 
         browser.start(queue: .main)
@@ -90,20 +92,27 @@ final class QLabBrowser {
     }
 
     private func stop() {
-        browser?.stateUpdateHandler = nil
-        browser?.browseResultsChangedHandler = nil
-        browser?.cancel()
-        browser = nil
+        guard let browser else { return }
+        stop(browser)
     }
 
-    private func handleStateChange(_ state: NWBrowser.State) {
+    private func stop(_ browser: NWBrowser) {
+        guard self.browser === browser else { return }
+        browser.stateUpdateHandler = nil
+        browser.browseResultsChangedHandler = nil
+        browser.cancel()
+        self.browser = nil
+    }
+
+    private func handleStateChange(_ state: NWBrowser.State, from browser: NWBrowser) {
+        guard self.browser === browser else { return }
         switch state {
         case .ready:
             browseError = nil
         case .failed(let error):
             logger.error("Browse failed: \(error.localizedDescription, privacy: .public)")
             browseError = error.localizedDescription
-            stop()
+            stop(browser)
         case .waiting(let error):
             browseError = error.localizedDescription
         default:
@@ -111,7 +120,8 @@ final class QLabBrowser {
         }
     }
 
-    private func apply(results: Set<NWBrowser.Result>) {
+    private func apply(results: Set<NWBrowser.Result>, from browser: NWBrowser) {
+        guard self.browser === browser else { return }
         let discovered = results
             .compactMap { QLabServer.bonjour(endpoint: $0.endpoint) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }

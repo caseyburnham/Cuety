@@ -1,89 +1,102 @@
 import Foundation
 
+/// The stable shape of a cue list. Cue values stay in `QLabClient.cueLists`;
+/// the graph keeps only the paths needed to find them and display row order.
 nonisolated struct CueGraph: Sendable {
-    let rows: [Cue]
-
-    let cueNumbers: [String]
-
-    private let cuesByID: [String: Cue]
-
-    private let rowIndexByCueID: [String: Int]
+    let cueListID: String
+    let rowIDs: [String]
+    private let pathByCueID: [String: [Int]]
+    private var numberedCueIDs: [String]
+    private(set) var cueNumbers: [String]
 
     init(cueList: Cue) {
-        self.rows = cueList.children
+        cueListID = cueList.uniqueID
+        rowIDs = cueList.children.map(\.uniqueID)
 
-        var cues: [String: Cue] = [:]
-        var rowIndices: [String: Int] = [:]
+        var paths: [String: [Int]] = [:]
+        var numberedIDs: [String] = []
         var numbers: [String] = []
-        for (index, row) in cueList.children.enumerated() {
-            Self.index(
-                row, asRow: index, cues: &cues, rowIndices: &rowIndices, numbers: &numbers
-            )
+
+        func index(_ cues: [Cue], prefix: [Int]) {
+            for (rowIndex, cue) in cues.enumerated() {
+                let path = prefix + [rowIndex]
+                if paths[cue.uniqueID] == nil {
+                    paths[cue.uniqueID] = path
+                    if let number = cue.displayNumber {
+                        numberedIDs.append(cue.uniqueID)
+                        numbers.append(number)
+                    }
+                }
+                index(cue.children, prefix: path)
+            }
         }
-        self.cuesByID = cues
-        self.rowIndexByCueID = rowIndices
-        self.cueNumbers = numbers
+
+        index(cueList.children, prefix: [])
+        pathByCueID = paths
+        numberedCueIDs = numberedIDs
+        cueNumbers = numbers
     }
 
-    private static func index(
-        _ cue: Cue,
-        asRow rowIndex: Int,
-        cues: inout [String: Cue],
-        rowIndices: inout [String: Int],
-        numbers: inout [String]
-    ) {
-        if cues[cue.uniqueID] == nil {
-            cues[cue.uniqueID] = cue
-            rowIndices[cue.uniqueID] = rowIndex
-            if let number = cue.displayNumber { numbers.append(number) }
+    /// Resolves a path against the current value tree. The path is never used
+    /// as a retained cue snapshot, and stale paths fail closed on ID mismatch.
+    func cue(withID cueID: String, in currentList: Cue?) -> Cue? {
+        guard currentList?.uniqueID == cueListID,
+              let path = pathByCueID[cueID],
+              !path.isEmpty,
+              var cues = currentList?.children else { return nil }
+
+        var cue: Cue?
+        for (depth, index) in path.enumerated() {
+            guard cues.indices.contains(index) else { return nil }
+            cue = cues[index]
+            if depth < path.count - 1 {
+                cues = cue?.children ?? []
+            }
         }
-        for child in cue.children {
-            Self.index(
-                child, asRow: rowIndex, cues: &cues, rowIndices: &rowIndices, numbers: &numbers
-            )
-        }
+        guard cue?.uniqueID == cueID else { return nil }
+        return cue
     }
 
-    func cue(withID cueID: String) -> Cue? {
-        cuesByID[cueID]
+    func path(for cueID: String) -> [Int]? {
+        pathByCueID[cueID]
     }
 
-    /// The row a cue sits on: its own, or that of the group it is inside.
+    /// The top-level row containing a cue, or the cue's own row when it is
+    /// already at the top level.
     func rowIndex(of cueID: String) -> Int? {
-        rowIndexByCueID[cueID]
+        pathByCueID[cueID]?.first
     }
 
-    func containingRow(of cueID: String) -> Cue? {
-        guard let index = rowIndexByCueID[cueID],
-              rows[index].uniqueID != cueID
-        else { return nil }
-        return rows[index]
+    func containingRowID(of cueID: String) -> String? {
+        guard let path = pathByCueID[cueID], path.count > 1,
+              rowIDs.indices.contains(path[0]) else { return nil }
+        return rowIDs[path[0]]
     }
 
-    func rowsAbove(_ cueID: String, count: Int) -> [Cue] {
-        guard count > 0, let index = rowIndexByCueID[cueID] else { return [] }
+    func rowsAbove(_ cueID: String, count: Int) -> [String] {
+        guard count > 0, let index = rowIndex(of: cueID) else { return [] }
         let start = max(0, index - count)
         guard start < index else { return [] }
-        return Array(rows[start..<index])
+        return Array(rowIDs[start..<index])
     }
 
-    func rowsBelow(_ cueID: String, count: Int) -> [Cue] {
-        guard count > 0, let index = rowIndexByCueID[cueID] else { return [] }
+    func rowsBelow(_ cueID: String, count: Int) -> [String] {
+        guard count > 0, let index = rowIndex(of: cueID) else { return [] }
         let start = index + 1
-        guard start < rows.count else { return [] }
-        let end = min(rows.count, start + count)
-        return Array(rows[start..<end])
+        guard start < rowIDs.count else { return [] }
+        let end = min(rowIDs.count, start + count)
+        return Array(rowIDs[start..<end])
     }
 
     func neighbourhood(around cueID: String, above: Int, below: Int) -> Neighbourhood {
-        guard let index = rowIndexByCueID[cueID] else {
+        guard let index = rowIndex(of: cueID) else {
             return Neighbourhood(above: [], below: [])
         }
 
         let wantedAbove = max(0, above)
         let wantedBelow = max(0, below)
         let availableAbove = index
-        let availableBelow = rows.count - index - 1
+        let availableBelow = rowIDs.count - index - 1
 
         let fittedAbove = min(wantedAbove, availableAbove)
         let fittedBelow = min(wantedBelow, availableBelow)
@@ -100,18 +113,38 @@ nonisolated struct CueGraph: Sendable {
     }
 
     nonisolated struct Neighbourhood: Hashable, Sendable {
-        let above: [Cue]
-
-        let below: [Cue]
-
+        let above: [String]
+        let below: [String]
         var count: Int { above.count + below.count }
     }
 
     func isFirst(_ cueID: String) -> Bool {
-        rows.first?.uniqueID == cueID
+        rowIDs.first == cueID
     }
 
     func isLast(_ cueID: String) -> Bool {
-        rows.last?.uniqueID == cueID
+        rowIDs.last == cueID
+    }
+
+    /// Refreshes the number projection without rebuilding cue paths.
+    mutating func applyCueNumberUpdates(_ updates: [CueNumberUpdate]) {
+        for update in updates {
+            guard let path = pathByCueID[update.cueID] else { continue }
+            if let number = update.displayNumber {
+                if let currentIndex = numberedCueIDs.firstIndex(of: update.cueID) {
+                    cueNumbers[currentIndex] = number
+                    continue
+                }
+                let insertionIndex = numberedCueIDs.firstIndex { cueID in
+                    guard let otherPath = pathByCueID[cueID] else { return false }
+                    return otherPath.lexicographicallyPrecedes(path)
+                } ?? numberedCueIDs.endIndex
+                numberedCueIDs.insert(update.cueID, at: insertionIndex)
+                cueNumbers.insert(number, at: insertionIndex)
+            } else if let currentIndex = numberedCueIDs.firstIndex(of: update.cueID) {
+                numberedCueIDs.remove(at: currentIndex)
+                cueNumbers.remove(at: currentIndex)
+            }
+        }
     }
 }

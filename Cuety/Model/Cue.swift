@@ -132,6 +132,17 @@ nonisolated struct QLabCueValues: Decodable, Sendable {
     var isLoaded: Bool?
 }
 
+nonisolated struct CueNumberUpdate: Sendable {
+    let cueID: String
+    let displayNumber: String?
+}
+
+nonisolated struct CueValueChanges: Sendable {
+    let foundCueIDs: Set<String>
+    let changedCueIDs: Set<String>
+    let cueNumberUpdates: [CueNumberUpdate]
+}
+
 nonisolated extension Cue {
     /// The retained `/valuesForKeys` details that `incoming` left empty.
     /// Identity fields always arrive with `/cueLists`, and any detail that
@@ -184,21 +195,104 @@ nonisolated extension Array<Cue> {
     /// search of the tree per cue. Returns the IDs whose values changed.
     @discardableResult
     mutating func applyValues(_ valuesByID: [String: QLabCueValues]) -> Set<String> {
-        var changed = Set<String>()
-        guard !valuesByID.isEmpty else { return changed }
+        applyValuesAndFindCues(valuesByID, using: nil).changedCueIDs
+    }
 
-        func visit(_ cues: inout [Cue]) {
-            for index in cues.indices {
-                if let values = valuesByID[cues[index].uniqueID],
-                   cues[index].apply(values) {
-                    changed.insert(cues[index].uniqueID)
+    /// Uses the watched list's paths for the common case, then finds any
+    /// remaining IDs in one traversal of the current tree.
+    mutating func applyValuesAndFindCues(
+        _ valuesByID: [String: QLabCueValues], using graph: CueGraph?
+    ) -> CueValueChanges {
+        guard !valuesByID.isEmpty else {
+            return CueValueChanges(foundCueIDs: [], changedCueIDs: [], cueNumberUpdates: [])
+        }
+
+        var remaining = Set(valuesByID.keys)
+        var candidateCues: [String: Cue] = [:]
+        var candidatePaths: [String: [Int]] = [:]
+
+        if let graph, let listIndex = firstIndex(where: { $0.uniqueID == graph.cueListID }) {
+            for cueID in valuesByID.keys.sorted() where remaining.contains(cueID) {
+                guard let cuePath = graph.path(for: cueID) else { continue }
+                let path = [listIndex] + cuePath
+                guard let cue = Self.cue(at: path[...], in: self), cue.uniqueID == cueID else {
+                    continue
                 }
-                visit(&cues[index].children)
+                candidateCues[cueID] = cue
+                candidatePaths[cueID] = path
+                remaining.remove(cueID)
             }
         }
 
-        visit(&self)
-        return changed
+        if !remaining.isEmpty {
+            func visit(_ cues: [Cue], prefix: [Int]) {
+                guard !remaining.isEmpty else { return }
+                for (index, cue) in cues.enumerated() {
+                    let path = prefix + [index]
+                    if remaining.contains(cue.uniqueID) {
+                        candidateCues[cue.uniqueID] = cue
+                        candidatePaths[cue.uniqueID] = path
+                        remaining.remove(cue.uniqueID)
+                    }
+                    guard !remaining.isEmpty else { return }
+                    visit(cue.children, prefix: path)
+                }
+            }
+
+            visit(self, prefix: [])
+        }
+
+        var changedValues: [String: QLabCueValues] = [:]
+        var changed = Set<String>()
+        var numberUpdates: [CueNumberUpdate] = []
+
+        for cueID in candidateCues.keys.sorted() {
+            guard let values = valuesByID[cueID], var updatedCue = candidateCues[cueID],
+                  updatedCue.apply(values) else { continue }
+            changed.insert(cueID)
+            changedValues[cueID] = values
+            if candidateCues[cueID]?.displayNumber != updatedCue.displayNumber {
+                numberUpdates.append(
+                    CueNumberUpdate(cueID: cueID, displayNumber: updatedCue.displayNumber)
+                )
+            }
+        }
+
+        // Compare first so an identical reply never makes any nested cue array
+        // mutable. Only changed cue paths are written, and the root publishes
+        // once after the complete batch has been applied.
+        for cueID in changed.sorted() {
+            guard let path = candidatePaths[cueID], let values = changedValues[cueID] else {
+                continue
+            }
+            Self.apply(values, forCueID: cueID, at: path[...], in: &self)
+        }
+
+        return CueValueChanges(
+            foundCueIDs: Set(candidateCues.keys),
+            changedCueIDs: changed,
+            cueNumberUpdates: numberUpdates
+        )
+    }
+
+    private static func cue(at path: ArraySlice<Int>, in cues: [Cue]) -> Cue? {
+        guard let index = path.first, cues.indices.contains(index) else { return nil }
+        guard path.count > 1 else { return cues[index] }
+        return cue(at: path.dropFirst(), in: cues[index].children)
+    }
+
+    private static func apply(
+        _ values: QLabCueValues, forCueID cueID: String, at path: ArraySlice<Int>, in cues: inout [Cue]
+    ) {
+        guard let index = path.first, cues.indices.contains(index) else { return }
+        if path.count == 1 {
+            guard cues[index].uniqueID == cueID else { return }
+            _ = cues[index].apply(values)
+            return
+        }
+        apply(
+            values, forCueID: cueID, at: path.dropFirst(), in: &cues[index].children
+        )
     }
 
     /// Every cue among `ids`, gathered in one traversal.

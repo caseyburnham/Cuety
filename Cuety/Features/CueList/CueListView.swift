@@ -10,6 +10,7 @@ struct CueListView: View {
 
     var body: some View {
         if let graph = client.watchedGraph,
+           let cueList = client.watchedCueList,
            let standby = model.standbyCue,
            let index = graph.rowIndex(of: standby.uniqueID) {
             GeometryReader { proxy in
@@ -17,7 +18,12 @@ struct CueListView: View {
                     proxy.size.height - DrumMetrics.minimumCanvasHeight
                 ))
                 ScrollView(.vertical) {
-                    CueDrum(graph: graph, standby: standby, standbyIndex: index)
+                    CueDrum(
+                        graph: graph,
+                        rows: cueList.children,
+                        standby: standby,
+                        standbyIndex: index
+                    )
                         .frame(width: proxy.size.width, height: proxy.size.height + overflow)
                 }
                 .defaultScrollAnchor(.center)
@@ -42,6 +48,7 @@ struct CueListView: View {
 /// pills, the canvas tint — around the rows that move.
 private struct CueDrum: View {
     let graph: CueGraph
+    let rows: [Cue]
     let standby: Cue
     let standbyIndex: Int
 
@@ -77,7 +84,7 @@ private struct CueDrum: View {
             ZStack {
                 DrumRows(
                     offset: displayedOffset ?? Double(standbyIndex),
-                    rows: graph.rows,
+                    rows: rows,
                     standby: standby,
                     standbyIndex: standbyIndex,
                     metrics: metrics
@@ -115,6 +122,7 @@ private struct CueDrum: View {
         .background {
             (standby.color ?? .clear)
                 .opacity(CueDisplayView.canvasTintOpacity)
+                .ignoresSafeArea()
                 .animation(animatesShift ? Motion.listShift : nil, value: standby.uniqueID)
         }
         .onChange(of: standbyIndex, initial: true) { old, new in
@@ -170,11 +178,17 @@ private struct CueDrum: View {
         let numberWidth = max(0, size.width - Self.horizontalPadding * 2)
 
         let text = standby.displayNumber ?? "–"
-        let reference = headlineSizingCache.referenceNumber(
-            for: text,
-            cueNumbers: graph.cueNumbers,
-            typography: typography
-        )
+        let reference: String
+        if typography.cueNumberSizing == .fixed {
+            reference = headlineSizingCache.referenceNumber(
+                for: text,
+                cueNumbers: graph.cueNumbers,
+                typography: typography
+            )
+        } else {
+            headlineSizingCache.clear()
+            reference = text
+        }
         // Fit the number to the available height first. The arrow's size and
         // spacing scale with the number, so reserve that width algebraically
         // instead of subtracting space based on an already width-constrained fit.
@@ -596,9 +610,14 @@ private struct PlayheadArrowGlyph: View {
     }
     let graph = CueGraph(cueList: list)
 
-    return CueDrum(graph: graph, standby: graph.rows[playhead], standbyIndex: playhead)
+    return CueDrum(
+        graph: graph,
+        rows: list.children,
+        standby: list.children[playhead],
+        standbyIndex: playhead
+    )
         .overlay(alignment: .topTrailing) {
-            Button("GO") { playhead = (playhead + 1) % graph.rows.count }
+            Button("GO") { playhead = (playhead + 1) % graph.rowIDs.count }
                 .padding()
         }
         .frame(width: 900, height: 560)

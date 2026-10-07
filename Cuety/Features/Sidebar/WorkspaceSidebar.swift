@@ -3,6 +3,9 @@ import SwiftUI
 struct WorkspaceSidebar: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+#if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+#endif
 
     @State private var isConnecting = false
 
@@ -110,6 +113,13 @@ struct WorkspaceSidebar: View {
     }
 
     private func watch(cueListWithID id: String) {
+#if os(iOS)
+        // In a compact iPad window the sidebar is the whole navigation stack.
+        // Choosing a cue list is also the operator's return action to detail.
+        if horizontalSizeClass == .compact {
+            model.isSidebarVisible = false
+        }
+#endif
         guard id != model.client.watchedCueListID else { return }
         withAnimation(reduceMotion ? nil : Motion.cueChange) {
             model.client.watchedCueListID = id

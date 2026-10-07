@@ -30,6 +30,7 @@ struct CueDisplayView: View {
         .background {
             (canvasTint ?? .clear)
                 .opacity(Self.canvasTintOpacity)
+                .ignoresSafeArea()
         }
         // Performance mode disables the container animation; normal mode
         // retains the animated number transition and display resizing.
@@ -62,7 +63,7 @@ struct CueDisplayView: View {
 
     private func cueListName(containing cue: Cue) -> String? {
         if let watched = client.watchedCueList,
-           client.watchedGraph?.cue(withID: cue.uniqueID) != nil {
+           client.watchedGraph?.rowIndex(of: cue.uniqueID) != nil {
             return watched.displayName
         }
         return client.cueLists.cueList(containing: cue.uniqueID)?.displayName
@@ -154,7 +155,11 @@ struct CueDisplayView: View {
     }
 
     private func referenceNumber(for text: String) -> String {
-        headlineSizingCache.referenceNumber(
+        guard typography.cueNumberSizing == .fixed else {
+            headlineSizingCache.clear()
+            return text
+        }
+        return headlineSizingCache.referenceNumber(
             for: text,
             cueNumbers: client.watchedGraph?.cueNumbers ?? [],
             typography: typography
@@ -227,6 +232,12 @@ final class HeadlineSizingCache {
 
     private var inputs: Inputs?
     private var cachedListReference: String?
+
+    func clear() {
+        guard inputs != nil else { return }
+        inputs = nil
+        cachedListReference = nil
+    }
 
     func referenceNumber(for text: String, cueNumbers: [String], typography: Typography) -> String {
         let inputs = Inputs(

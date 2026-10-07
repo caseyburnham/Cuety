@@ -67,22 +67,6 @@ enum DetailPillKind: String, CaseIterable, Hashable, Sendable, Identifiable {
         }
     }
 
-    var qlabKey: String? {
-        switch self {
-        case .cueType: nil          // present in /cueLists
-        case .cueList: nil          // derived from the /cueLists tree
-        case .armed: nil            // present in /cueLists
-        case .flagged: nil          // present in /cueLists
-        case .duration: "duration"
-        case .preWait: "preWait"
-        case .postWait: "postWait"
-        case .continueMode: "continueMode"
-        case .notes: "notes"
-        case .broken: "isBroken"
-        case .loaded: "isLoaded"
-        }
-    }
-
     var settingsDescription: String {
         switch self {
         case .broken: "Always shown. QLab cannot fire this cue — a missing file, patch, or target."

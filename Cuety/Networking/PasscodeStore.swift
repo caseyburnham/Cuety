@@ -13,13 +13,6 @@ nonisolated protocol PasscodeStoring: Sendable {
     func removeAll() throws
 }
 
-nonisolated extension PasscodeStoring {
-    func hasPasscode(serverID: String, workspaceID: String) -> Bool {
-        let selection = WorkspaceSelection(serverID: serverID, workspaceID: workspaceID)
-        return selectionsWithPasscodes([selection]).contains(selection)
-    }
-}
-
 nonisolated struct PasscodeStore: PasscodeStoring {
     private let logger = Logger(category: "PasscodeStore")
 

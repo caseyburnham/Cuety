@@ -205,6 +205,7 @@ final class ActivityLog {
         storedCount += 1
         storedBytes += eventBytes
         mutationCount += 1
+        cachedEntries = nil
     }
 
     func record(_ event: OSCEvent) {
@@ -217,6 +218,7 @@ final class ActivityLog {
         storedCount = 0
         storedBytes = 0
         mutationCount += 1
+        cachedEntries = nil
         flush()
     }
 

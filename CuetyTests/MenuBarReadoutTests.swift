@@ -10,10 +10,6 @@ struct MenuBarReadoutTests {
         Preferences(defaults: EphemeralDefaults())
     }
 
-    private func makeModel() throws -> AppModel {
-        AppModel(preferences: try makePreferences())
-    }
-
     @Test("The menu bar readout is off until it is asked for")
     func readoutsAreOffByDefault() throws {
         let preferences = try makePreferences()

@@ -39,7 +39,6 @@ struct DetailPillSettingsView: View {
                 preferences.pillSize = .default
                 preferences.showsCueTypeLabel = true
                 preferences.showsCueName = true
-                refreshDetails()
             }
         }
         .formStyle(.grouped)
@@ -54,7 +53,6 @@ struct DetailPillSettingsView: View {
             } else {
                 preferences.enabledPills.remove(kind)
             }
-            refreshDetails()
         }) {
             Label {
                 Text(kind.title)
@@ -67,11 +65,6 @@ struct DetailPillSettingsView: View {
                     .frame(width: 20)
             }
         }
-    }
-
-    private func refreshDetails() {
-        let client = model.client
-        Task { await client.refreshPlayheadCueDetails(force: true) }
     }
 
 }
