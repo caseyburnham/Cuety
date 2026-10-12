@@ -37,6 +37,9 @@ final class QLabClient {
 
     private(set) var playheads: [String: PlayheadState] = [:]
     private var playheadRevisions: [String: UInt64] = [:]
+    @ObservationIgnored private var playheadRefreshGeneration: UInt64 = 0
+    @ObservationIgnored private var cueDetailInvalidationPending = false
+    @ObservationIgnored private var cueDetailInvalidationGeneration: UInt64 = 0
 
     var watchedCueListID: String? {
         didSet {
@@ -264,6 +267,8 @@ final class QLabClient {
         invalidateWatchedGraph()
         playheads = [:]
         playheadRevisions = [:]
+        cueDetailInvalidationPending = false
+        cueDetailInvalidationGeneration &+= 1
         watchedCueListID = nil
     }
 
@@ -517,11 +522,25 @@ final class QLabClient {
         _ message: OSCMessage,
         as payloadType: Payload.Type
     ) async throws -> (reply: QLabReply<Payload>, mayBeStale: Bool) {
-        guard let connection else { throw RequestFailure.disconnected }
-        let received = try await sendAndAwaitReply(message, over: connection)
-        guard self.connection === connection else { throw RequestFailure.disconnected }
+        guard let session = connection else { throw RequestFailure.disconnected }
+        let received = try await requestReceivedReply(message, on: session)
+        guard connection === session else { throw RequestFailure.disconnected }
         let reply = try await validateSessionReply(received.message, as: payloadType)
         return (reply, received.mayBeStale)
+    }
+
+    /// Returns correlation freshness before payload validation can apply
+    /// authorization or session-loss side effects to an older reply.
+    private func requestReceivedReply(
+        _ message: OSCMessage,
+        on expectedSession: QLabConnection
+    ) async throws -> ReceivedReply {
+        guard let connection, connection === expectedSession else {
+            throw RequestFailure.disconnected
+        }
+        let received = try await sendAndAwaitReply(message, over: connection)
+        guard self.connection === connection else { throw RequestFailure.disconnected }
+        return received
     }
 
     /// The single path from a raw reply to a validated payload.
@@ -972,11 +991,11 @@ final class QLabClient {
 
     private var cueListRefreshTask: Task<Void, Never>?
 
-    private func scheduleCueListRefresh() {
+    private func scheduleCueListRefresh(after delay: Duration = .milliseconds(250)) {
         guard let session = connection else { return }
         cueListRefreshTask?.cancel()
         cueListRefreshTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(250))
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self else { return }
             do {
                 try await self.refreshCueData()
@@ -993,30 +1012,68 @@ final class QLabClient {
         }
     }
 
-    private var cueDataGeneration = 0
+    private var cueDataGeneration: UInt64 = 0
+
+    private func requireCueDetailInvalidation() {
+        cueDetailInvalidationPending = true
+        cueDetailInvalidationGeneration &+= 1
+    }
 
     /// - Parameter invalidatingDetails: refetch every visible cue's details,
     ///   for when updates may have been missed. Retained values stay on
     ///   screen until the new replies land.
     func refreshCueData(invalidatingDetails: Bool = false) async throws {
-        let session = connection
-        cueDataGeneration += 1
+        guard let session = connection else { return }
+        if invalidatingDetails { requireCueDetailInvalidation() }
+        let invalidationGeneration = cueDetailInvalidationGeneration
+        let shouldInvalidateDetails = cueDetailInvalidationPending
+        cueDataGeneration &+= 1
         let generation = cueDataGeneration
 
-        try await refreshCueLists(invalidatingDetails: invalidatingDetails)
+        let refreshed = try await refreshCueLists(
+            invalidatingDetails: shouldInvalidateDetails, generation: generation, session: session
+        )
 
-        guard generation == cueDataGeneration, connection === session else { return }
+        guard refreshed, generation == cueDataGeneration,
+              connection === session, !Task.isCancelled else { return }
         await refreshPlayheadCueDetails()
+        if shouldInvalidateDetails,
+           invalidationGeneration == cueDetailInvalidationGeneration {
+            cueDetailInvalidationPending = false
+        }
     }
 
     func refreshCueLists(invalidatingDetails: Bool = false) async throws {
-        guard let workspaceID = workspace?.uniqueID, let session = connection else { return }
-        let reply = try await request(
-            OSCMessage("/workspace/\(workspaceID)/cueLists"),
-            as: [Cue].self
+        guard let session = connection else { return }
+        if invalidatingDetails { requireCueDetailInvalidation() }
+        let shouldInvalidateDetails = invalidatingDetails || cueDetailInvalidationPending
+        cueDataGeneration &+= 1
+        let generation = cueDataGeneration
+        _ = try await refreshCueLists(
+            invalidatingDetails: shouldInvalidateDetails, generation: generation, session: session
+        )
+    }
+
+    private func refreshCueLists(
+        invalidatingDetails: Bool,
+        generation: UInt64,
+        session: QLabConnection
+    ) async throws -> Bool {
+        guard let workspaceID = workspace?.uniqueID, connection === session else { return false }
+        let received = try await requestReceivedReply(
+            OSCMessage("/workspace/\(workspaceID)/cueLists"), on: session
         )
         guard connection === session else { throw RequestFailure.disconnected }
         try Task.checkCancellation()
+        guard generation == cueDataGeneration else { return false }
+        guard !received.mayBeStale else {
+            scheduleCueListRefresh(after: .seconds(preferences.requestTimeout))
+            return false
+        }
+        let reply = try await validateSessionReply(received.message, as: [Cue].self)
+        guard connection === session else { throw RequestFailure.disconnected }
+        try Task.checkCancellation()
+        guard generation == cueDataGeneration else { return false }
         var refreshed = reply.data ?? []
 
         // Carry the details already fetched onto the new tree. Without this
@@ -1044,6 +1101,7 @@ final class QLabClient {
         reconcileWatchedCueList()
 
         await refreshPlayheads()
+        return generation == cueDataGeneration && connection === session
     }
 
     private func reconcileWatchedCueList() {
@@ -1064,6 +1122,9 @@ final class QLabClient {
 
     func refreshPlayheads() async {
         guard let workspaceID = workspace?.uniqueID, let session = connection else { return }
+        playheadRefreshGeneration &+= 1
+        let refreshGeneration = playheadRefreshGeneration
+        let cueGeneration = cueDataGeneration
         // QLab returns an error for a cart's playback position.
         let listIDs = cueLists.filter { !$0.isCueCart }.map(\.uniqueID)
         let revisions = playheadRevisions
@@ -1072,47 +1133,65 @@ final class QLabClient {
         // each one as it lands would invalidate every view watching the
         // playheads once per cue list.
         var fetched: [String: PlayheadState] = [:]
+        var receivedStaleReply = false
 
         let completed = await withBoundedConcurrency(
             over: listIDs,
             limit: Self.maxConcurrentPlayheadRequests,
             while: { !Task.isCancelled && self.connection === session },
             run: { listID in
-                await self.fetchPlayhead(forCueListID: listID, workspaceID: workspaceID)
+                await self.fetchPlayhead(
+                    forCueListID: listID, workspaceID: workspaceID, session: session
+                )
             },
             collect: { result in
-                if let result { fetched[result.0] = result.1 }
+                guard let result else { return }
+                if result.mayBeStale {
+                    receivedStaleReply = true
+                } else {
+                    fetched[result.listID] = result.state
+                }
             }
         )
 
-        guard completed, !Task.isCancelled, connection === session else { return }
+        guard completed, !Task.isCancelled, connection === session,
+              cueGeneration == cueDataGeneration,
+              refreshGeneration == playheadRefreshGeneration else { return }
+        if receivedStaleReply {
+            scheduleCueListRefresh(after: .seconds(preferences.requestTimeout))
+        }
         let liveListIDs = Set(cueLists.map(\.uniqueID))
         fetched = fetched.filter {
             liveListIDs.contains($0.key) && playheadRevisions[$0.key] == revisions[$0.key]
         }
         guard !fetched.isEmpty else { return }
-        for listID in fetched.keys { playheadRevisions[listID, default: 0] &+= 1 }
         playheads.merge(fetched) { _, latest in latest }
     }
 
     private func fetchPlayhead(
         forCueListID listID: String,
-        workspaceID: String
-    ) async -> (String, PlayheadState)? {
+        workspaceID: String,
+        session: QLabConnection
+    ) async -> (listID: String, state: PlayheadState, mayBeStale: Bool)? {
         do {
-            let reply = try await request(
+            let received = try await requestReceivedReply(
                 OSCMessage(
                     "/workspace/\(workspaceID)/cue_id/\(listID)/playbackPositionID"
                 ),
-                as: String.self
+                on: session
             )
+            guard connection === session else { return nil }
+            guard !received.mayBeStale else { return (listID, .unset, true) }
+            let reply = try await validateSessionReply(received.message, as: String.self)
+            guard connection === session else { return nil }
 
-            let state: PlayheadState = if let cueID = reply.data, !cueID.isEmpty, cueID != "none" {
+            let state: PlayheadState = if let cueID = reply.data,
+                                           !cueID.isEmpty, cueID != "none" {
                 .cue(cueID)
             } else {
                 .unset
             }
-            return (listID, state)
+            return (listID, state, received.mayBeStale)
         } catch is CancellationError {
             return nil
         } catch {
@@ -1122,7 +1201,7 @@ final class QLabClient {
                 \(error.localizedDescription, privacy: .public)
                 """
             )
-            return (listID, .unknown(reason: error.localizedDescription))
+            return (listID, .unknown(reason: error.localizedDescription), false)
         }
     }
 
@@ -1257,7 +1336,8 @@ final class QLabClient {
                     for: cueID,
                     workspaceID: workspaceID,
                     keys: keysString,
-                    revision: revisions[cueID, default: 0]
+                    revision: revisions[cueID, default: 0],
+                    session: session
                 )
             },
             collect: { result in
@@ -1310,19 +1390,51 @@ final class QLabClient {
     }
 
     private func fetchCueDetails(
-        for cueID: String, workspaceID: String, keys: String, revision: UInt64
+        for cueID: String,
+        workspaceID: String,
+        keys: String,
+        revision: UInt64,
+        session: QLabConnection
     ) async -> FetchedCueDetails? {
         do {
-            let (reply, mayBeStale) = try await requestReportingFreshness(
+            let received = try await requestReceivedReply(
                 OSCMessage(
                     "/workspace/\(workspaceID)/cue_id/\(cueID)/valuesForKeys",
                     [.string(keys)]
                 ),
-                as: QLabCueValues.self
+                on: session
             )
+            guard connection === session else { return nil }
+            if received.mayBeStale {
+                let reply: QLabReply<QLabCueValues>
+                do {
+                    reply = try await parse(received.message, as: QLabCueValues.self)
+                } catch {
+                    try Task.checkCancellation()
+                    guard connection === session else { return nil }
+                    scheduleUnconfirmedDetailsRefetch([cueID])
+                    return nil
+                }
+                try Task.checkCancellation()
+                guard connection === session else { return nil }
+                guard reply.status.isSuccess else {
+                    scheduleUnconfirmedDetailsRefetch([cueID])
+                    return nil
+                }
+                guard let values = reply.data else {
+                    scheduleUnconfirmedDetailsRefetch([cueID])
+                    return nil
+                }
+                return FetchedCueDetails(
+                    cueID: cueID, values: values, revision: revision, isConfirmed: false
+                )
+            }
+
+            let reply = try await validateSessionReply(received.message, as: QLabCueValues.self)
+            guard connection === session else { return nil }
             guard let values = reply.data else { return nil }
             return FetchedCueDetails(
-                cueID: cueID, values: values, revision: revision, isConfirmed: !mayBeStale
+                cueID: cueID, values: values, revision: revision, isConfirmed: true
             )
         } catch {
             logger.debug("valuesForKeys failed: \(error.localizedDescription, privacy: .public)")

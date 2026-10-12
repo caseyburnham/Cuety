@@ -546,6 +546,104 @@ struct QLabDisconnectTests {
         #expect(started.duration(to: .now) < .seconds(1))
     }
 
+    @Test("An invalidating refresh survives a possibly stale cue-list reply")
+    func canceledCueListReplyDoesNotReplaceNewerTree() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = [
+            .init(id: "L1", name: "Main", cues: [
+                .init(id: "C1", number: "1", name: "One", duration: 1),
+            ], playheadCueID: "C1"),
+        ]
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let client = QLabClient(
+            preferences: try makePreferences(requestTimeout: 0.4), log: ActivityLog()
+        )
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.status == .connected)
+        try #require(client.cueLists.first?.children.map(\.uniqueID) == ["C1"])
+        try #require(client.cueLists.first?.children.first?.duration == 1)
+
+        peer.withholdRepliesTo = ["cueLists"]
+        let canceledRefresh = Task { try await client.refreshCueLists() }
+        let firstReplyDeadline = ContinuousClock.now + .seconds(2)
+        while peer.withheldReplyCount < 1, ContinuousClock.now < firstReplyDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(peer.withheldReplyCount == 1)
+        canceledRefresh.cancel()
+        await #expect(throws: CancellationError.self) { try await canceledRefresh.value }
+
+        peer.cueLists[0].cues[0].duration = 2
+        peer.cueLists[0].cues.append(.init(id: "C2", number: "2", name: "Two"))
+        let currentRefresh = Task { try await client.refreshCueData(invalidatingDetails: true) }
+        let secondReplyDeadline = ContinuousClock.now + .seconds(2)
+        while peer.withheldReplyCount < 2, ContinuousClock.now < secondReplyDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(peer.withheldReplyCount == 2)
+        peer.withholdRepliesTo = []
+        peer.releaseWithheldReplies()
+        try await currentRefresh.value
+
+        let treeDeadline = ContinuousClock.now + .seconds(3)
+        while client.cueLists.first?.children.map(\.uniqueID) != ["C1", "C2"],
+              ContinuousClock.now < treeDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(client.cueLists.first?.children.map(\.uniqueID) == ["C1", "C2"])
+        let detailDeadline = ContinuousClock.now + .seconds(2)
+        while client.cueLists.first?.children.first?.duration != 2,
+              ContinuousClock.now < detailDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(client.cueLists.first?.children.first?.duration == 2)
+        #expect(client.status == .connected)
+    }
+
+    @Test("A stale denied cue-list reply does not revoke the session")
+    func staleCueListDenialDoesNotRevokeSession() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = [
+            .init(id: "L1", name: "Main", cues: [
+                .init(id: "C1", number: "1", name: "One"),
+            ]),
+        ]
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let client = QLabClient(
+            preferences: try makePreferences(requestTimeout: 0.4), log: ActivityLog()
+        )
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.status == .connected)
+
+        peer.denyCueLists = true
+        peer.withholdRepliesTo = ["cueLists"]
+        let canceledRefresh = Task { try await client.refreshCueLists() }
+        let firstReplyDeadline = ContinuousClock.now + .seconds(2)
+        while peer.withheldReplyCount < 1, ContinuousClock.now < firstReplyDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(peer.withheldReplyCount == 1)
+        canceledRefresh.cancel()
+        await #expect(throws: CancellationError.self) { try await canceledRefresh.value }
+
+        peer.denyCueLists = false
+        let currentRefresh = Task { try await client.refreshCueLists() }
+        let secondReplyDeadline = ContinuousClock.now + .seconds(2)
+        while peer.withheldReplyCount < 2, ContinuousClock.now < secondReplyDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(peer.withheldReplyCount == 2)
+        peer.withholdRepliesTo = []
+        peer.releaseWithheldReplies()
+        try await currentRefresh.value
+
+        #expect(client.status == .connected)
+    }
+
     @Test("A reply arriving after its request timed out is counted as late")
     func lateReplyIsNotGivenToALaterRequest() async throws {
         let peer = try AuthorizationPeer()
@@ -1571,6 +1669,91 @@ struct QLabDisconnectTests {
         #expect(client.status == .connected)
     }
 
+    @Test("An older overlapping playhead poll cannot discard the newer poll")
+    func newerPlayheadPollWinsOverOlderPoll() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = [
+            .init(id: "L1", name: "Main", cues: [
+                .init(id: "C1", number: "1", name: "House"),
+                .init(id: "C2", number: "2", name: "Thunder"),
+                .init(id: "C3", number: "3", name: "Rain"),
+            ], playheadCueID: "C1"),
+            .init(id: "L2", name: "Effects", playheadCueID: "none"),
+        ]
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let log = ActivityLog()
+        let client = QLabClient(preferences: try makePreferences(), log: log)
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.currentPlayheadCueID == "C1")
+
+        peer.cueLists[0].playheadCueID = "C2"
+        peer.withholdRepliesTo = ["/cue_id/L2/playbackPositionID"]
+        let olderRefresh = Task { await client.refreshPlayheads() }
+        try await waitUntil {
+            peer.withheldReplyCount == 1 && log.entries.contains {
+                $0.direction == .inbound && $0.address == "/reply/workspace/W/cue_id/L1/playbackPositionID"
+            }
+        }
+
+        peer.cueLists[0].playheadCueID = "C3"
+        let newerRefresh = Task { await client.refreshPlayheads() }
+        try await waitUntil {
+            peer.withheldReplyCount == 2 && log.entries.filter {
+                $0.direction == .inbound && $0.address == "/reply/workspace/W/cue_id/L1/playbackPositionID"
+            }.count >= 2
+        }
+        peer.releaseNextWithheldReply()
+        await olderRefresh.value
+        peer.releaseNextWithheldReply()
+        peer.withholdRepliesTo = []
+        await newerRefresh.value
+
+        #expect(client.currentPlayheadCueID == "C3")
+        #expect(client.status == .connected)
+    }
+
+    @Test("A possibly stale playhead reply is ignored and fetched again")
+    func canceledPlayheadReplyIsNotPublished() async throws {
+        let peer = try AuthorizationPeer()
+        peer.cueLists = [
+            .init(id: "L1", name: "Main", cues: [
+                .init(id: "C1", number: "1", name: "House"),
+                .init(id: "C2", number: "2", name: "Thunder"),
+                .init(id: "C3", number: "3", name: "Rain"),
+            ], playheadCueID: "C1"),
+        ]
+        defer { peer.stop() }
+        let port = try await peer.start()
+        let client = QLabClient(
+            preferences: try makePreferences(requestTimeout: 0.4), log: ActivityLog()
+        )
+        defer { client.disconnect() }
+        await client.connect(to: .localhost(port: port), workspaceID: "W", passcode: nil)
+        try #require(client.currentPlayheadCueID == "C1")
+
+        let lateReplyCount = client.lateReplyCount
+        peer.withholdRepliesTo = ["/cue_id/L1/playbackPositionID"]
+        peer.cueLists[0].playheadCueID = "C2"
+        let canceledRefresh = Task { await client.refreshPlayheads() }
+        try await waitUntil { peer.withheldReplyCount == 1 }
+        canceledRefresh.cancel()
+        await canceledRefresh.value
+
+        peer.cueLists[0].playheadCueID = "C3"
+        let currentRefresh = Task { await client.refreshPlayheads() }
+        try await waitUntil { peer.withheldReplyCount == 2 }
+        peer.withholdRepliesTo = []
+        peer.releaseWithheldReplies()
+        await currentRefresh.value
+
+        #expect(client.currentPlayheadCueID == "C1")
+        try await waitUntil { client.lateReplyCount > lateReplyCount }
+        try await waitUntil { client.currentPlayheadCueID == "C3" }
+        #expect(client.status == .connected)
+    }
+
     @Test("A failed structural refresh hides live data and recovers automatically")
     func failedStructuralRefreshRecovers() async throws {
         let peer = try AuthorizationPeer()
@@ -1721,6 +1904,15 @@ private final class AuthorizationPeer {
         for held in queued {
             held.connection.send(content: held.packet, completion: .contentProcessed { _ in })
         }
+    }
+
+    func releaseNextWithheldReply() {
+        guard !withheldReplies.isEmpty else {
+            Issue.record("Mock peer has no withheld reply to release")
+            return
+        }
+        let held = withheldReplies.removeFirst()
+        held.connection.send(content: held.packet, completion: .contentProcessed { _ in })
     }
 
     init() throws {

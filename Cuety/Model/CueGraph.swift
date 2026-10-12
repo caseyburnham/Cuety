@@ -137,7 +137,7 @@ nonisolated struct CueGraph: Sendable {
                 }
                 let insertionIndex = numberedCueIDs.firstIndex { cueID in
                     guard let otherPath = pathByCueID[cueID] else { return false }
-                    return otherPath.lexicographicallyPrecedes(path)
+                    return path.lexicographicallyPrecedes(otherPath)
                 } ?? numberedCueIDs.endIndex
                 numberedCueIDs.insert(update.cueID, at: insertionIndex)
                 cueNumbers.insert(number, at: insertionIndex)

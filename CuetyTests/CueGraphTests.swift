@@ -259,4 +259,26 @@ struct CueGraphTests {
 
         #expect(graph.cueNumbers == ["1"])
     }
+
+    @Test("A cue gaining and losing its number keeps the projection in row order")
+    func cueNumberGainAndRemovalPreserveOrder() {
+        var middleCue = cue("2", "Two")
+        middleCue.number = nil
+        let graphCueList = cue("list", "Main", children: [
+            cue("1", "One"), middleCue, cue("3", "Three"),
+        ])
+        var graph = CueGraph(cueList: graphCueList)
+
+        #expect(graph.cueNumbers == ["1", "3"])
+
+        graph.applyCueNumberUpdates([
+            CueNumberUpdate(cueID: "2", displayNumber: "2"),
+        ])
+        #expect(graph.cueNumbers == ["1", "2", "3"])
+
+        graph.applyCueNumberUpdates([
+            CueNumberUpdate(cueID: "2", displayNumber: nil),
+        ])
+        #expect(graph.cueNumbers == ["1", "3"])
+    }
 }
