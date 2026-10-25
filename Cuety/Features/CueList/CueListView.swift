@@ -13,30 +13,15 @@ struct CueListView: View {
            let cueList = client.watchedCueList,
            let standby = model.standbyCue,
            let index = graph.rowIndex(of: standby.uniqueID) {
-            GeometryReader { proxy in
-                let overflow = min(DrumMetrics.rowPitch * 2, max(0,
-                    proxy.size.height - DrumMetrics.minimumCanvasHeight
-                ))
-                ScrollView(.vertical) {
-                    CueDrum(
-                        graph: graph,
-                        rows: cueList.children,
-                        standby: standby,
-                        standbyIndex: index
-                    )
-                        .frame(width: proxy.size.width, height: proxy.size.height + overflow)
-                }
-                .defaultScrollAnchor(.center)
-                .scrollDisabled(true)
-                .scrollIndicators(.hidden)
+            CueDrum(
+                graph: graph,
+                rows: cueList.children,
+                standby: standby,
+                standbyIndex: index
+            )
 #if os(macOS)
-                // The toolbar material supplies the blur over these rows.
-                .scrollEdgeEffectHidden(true, for: .top)
-                .ignoresSafeArea(.container, edges: .top)
-#else
-                .scrollEdgeEffectStyle(.soft, for: .top)
+            .ignoresSafeArea(.container, edges: .top)
 #endif
-            }
         } else {
             // Connection, empty and stale states read the same in either layout.
             CueDisplayView()
@@ -91,14 +76,11 @@ private struct CueDrum: View {
                 )
 
                 if model.preferences.showsPlayhead {
-                    PlayheadArrow(
-                        size: metrics.arrowSize,
-                        color: model.preferences.playheadAccent.color(for: standby)
-                    )
+                    Image(systemName: "arrowtriangle.right.fill")
+                        .font(.system(size: metrics.arrowSize))
+                        .foregroundStyle(model.preferences.playheadAccent.color(for: standby))
+                        .accessibilityHidden(true)
                         .position(x: metrics.arrowX, y: metrics.numberCenterY)
-                        // Keyed to the cue rather than the metrics, so the arrow
-                        // slides with the drum on a go but tracks window resizes
-                        // directly.
                         .animation(animatesShift ? Motion.listShift : nil, value: standby.uniqueID)
                 }
 
@@ -401,7 +383,6 @@ private struct DrumLabel: View {
     let nameOpacity: CGFloat
     let stacking: CGFloat
     let maxWidth: CGFloat
-    /// The sizes at the row and standby ends of the current move.
     let rowNumberSize: CGFloat
     let rowNameSize: CGFloat
     let standbyNumberSize: CGFloat
@@ -412,47 +393,61 @@ private struct DrumLabel: View {
     private var typography: Typography { Typography(preferences: model.preferences) }
 
     var body: some View {
+        let snappedNumberSize = max(1, numberSize.rounded())
+        let snappedNameSize = max(1, nameSize.rounded())
+
         DrumLabelLayout(
             stacking: stacking,
             maxWidth: maxWidth,
-            rowNumberScale: rowNumberSize / numberSize,
-            rowNameScale: rowNameSize / nameSize,
-            standbyNumberScale: standbyNumberSize / numberSize,
-            standbyNameScale: standbyNameSize / nameSize
+            rowNumberScale: rowNumberSize / snappedNumberSize,
+            rowNameScale: rowNameSize / snappedNameSize,
+            standbyNumberScale: standbyNumberSize / snappedNumberSize,
+            standbyNameScale: standbyNameSize / snappedNameSize
         ) {
             Text(cue.displayNumber ?? "–")
-                .font(typography.cueNumber(size: numberSize))
+                .font(typography.cueNumber(size: snappedNumberSize))
                 .monospacedDigit()
                 .foregroundStyle(cue.displayNumber == nil ? .tertiary : .primary)
                 .lineLimit(1)
                 .fixedSize()
 
-            // Rows tint the name with the cue color; the standby cue leaves
-            // that to the canvas. The two cross-fade as the cue turns.
-            ZStack {
-                Text(cue.displayName ?? "Untitled")
-                    .foregroundStyle(cue.displayName == nil ? .tertiary : .secondary)
-                    .opacity(stacking)
-                Text(cue.displayName ?? "Untitled")
-                    .foregroundStyle(rowNameStyle)
-                    .opacity(1 - stacking)
-            }
-            .font(typography.font(size: nameSize))
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .opacity(nameOpacity)
+            nameLabel
+                .font(typography.font(size: snappedNameSize))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .opacity(nameOpacity)
 
             CueIndicators(
                 cue: cue,
                 size: max(
                     CueRowView.Role.minimumIndicatorSize,
-                    min(numberSize, CueRowView.Role.largestRowFontSize) * CueRowView.Role.indicatorSizeRatio
+                    min(snappedNumberSize, CueRowView.Role.largestRowFontSize)
+                        * CueRowView.Role.indicatorSizeRatio
                 )
             )
             .opacity(1 - stacking)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityDescription)
+    }
+
+    @ViewBuilder
+    private var nameLabel: some View {
+        let title = Text(cue.displayName ?? "Untitled")
+        if stacking <= 0.001 {
+            title.foregroundStyle(rowNameStyle)
+        } else if stacking >= 0.999 || cue.color == nil {
+            title.foregroundStyle(cue.displayName == nil ? .tertiary : .secondary)
+        } else {
+            ZStack {
+                title
+                    .foregroundStyle(cue.displayName == nil ? .tertiary : .secondary)
+                    .opacity(stacking)
+                title
+                    .foregroundStyle(rowNameStyle)
+                    .opacity(1 - stacking)
+            }
+        }
     }
 
     private var rowNameStyle: AnyShapeStyle {
@@ -561,34 +556,6 @@ private struct DrumLabelLayout: Layout {
             anchor: .leading,
             proposal: .unspecified
         )
-    }
-}
-
-/// Resolves the accent so the glyph beneath can blend between colors, which
-/// a plain `Color` in `foregroundStyle` does not do on a symbol.
-private struct PlayheadArrow: View {
-    let size: CGFloat
-    let color: Color
-
-    @Environment(\.self) private var environment
-
-    var body: some View {
-        PlayheadArrowGlyph(size: size, color: color.resolve(in: environment))
-    }
-}
-
-/// Animatable so a change of size or color is redrawn at each in-between
-/// value, rather than snapping while the arrow slides to its new position.
-@Animatable
-private struct PlayheadArrowGlyph: View {
-    var size: CGFloat
-    var color: Color.Resolved
-
-    var body: some View {
-        Image(systemName: "arrowtriangle.right.fill")
-            .font(.system(size: size))
-            .foregroundStyle(Color(color))
-            .accessibilityHidden(true)
     }
 }
 

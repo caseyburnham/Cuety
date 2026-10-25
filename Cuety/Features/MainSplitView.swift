@@ -5,29 +5,42 @@ struct MainSplitView<Sidebar: View, Detail: View>: View {
     @ViewBuilder let sidebar: () -> Sidebar
     @ViewBuilder let detail: () -> Detail
 
-    @State private var sidebarVisibility: NavigationSplitViewVisibility
-    @State private var compactColumn: NavigationSplitViewColumn
+    private var columnVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding {
+            model.isSidebarVisible ? .all : .detailOnly
+        } set: { visibility in
+            let visible = visibility != .detailOnly
+            guard model.isSidebarVisible != visible else { return }
+            setSidebarVisible(visible)
+        }
+    }
 
-    init(
-        model: AppModel,
-        @ViewBuilder sidebar: @escaping () -> Sidebar,
-        @ViewBuilder detail: @escaping () -> Detail
-    ) {
-        self.model = model
-        self.sidebar = sidebar
-        self.detail = detail
-        _sidebarVisibility = State(
-            initialValue: model.isSidebarVisible ? .all : .detailOnly
-        )
-        _compactColumn = State(
-            initialValue: model.isSidebarVisible ? .sidebar : .detail
-        )
+    private var compactColumn: Binding<NavigationSplitViewColumn> {
+        Binding {
+            model.isSidebarVisible ? .sidebar : .detail
+        } set: { column in
+            let visible = column == .sidebar
+            guard model.isSidebarVisible != visible else { return }
+            setSidebarVisible(visible)
+        }
+    }
+
+    private func setSidebarVisible(_ visible: Bool) {
+#if os(macOS)
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            model.isSidebarVisible = visible
+        }
+#else
+        model.isSidebarVisible = visible
+#endif
     }
 
     var body: some View {
         NavigationSplitView(
-            columnVisibility: $sidebarVisibility,
-            preferredCompactColumn: $compactColumn
+            columnVisibility: columnVisibility,
+            preferredCompactColumn: compactColumn
         ) {
             sidebar()
                 .navigationTitle("Workspaces")
@@ -40,44 +53,5 @@ struct MainSplitView<Sidebar: View, Detail: View>: View {
             detail()
         }
         .navigationSplitViewStyle(.balanced)
-        .onChange(of: model.isSidebarVisible) { _, visible in
-            let visibility: NavigationSplitViewVisibility = visible ? .all : .detailOnly
-            let column: NavigationSplitViewColumn = visible ? .sidebar : .detail
-
-#if os(macOS)
-            // AppKit can cycle hosting constraints during animated panel
-            // resizing. Keep this suppression local to the split-view state
-            // update so detail content and its toolbar retain their motion.
-            var transaction = Transaction(animation: nil)
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                if sidebarVisibility != visibility {
-                    sidebarVisibility = visibility
-                }
-                if compactColumn != column {
-                    compactColumn = column
-                }
-            }
-#else
-            if sidebarVisibility != visibility {
-                sidebarVisibility = visibility
-            }
-            if compactColumn != column {
-                compactColumn = column
-            }
-#endif
-        }
-        .onChange(of: sidebarVisibility) { _, visibility in
-            let visible = visibility != .detailOnly
-            if model.isSidebarVisible != visible {
-                model.isSidebarVisible = visible
-            }
-        }
-        .onChange(of: compactColumn) { _, column in
-            let visible = column == .sidebar
-            if model.isSidebarVisible != visible {
-                model.isSidebarVisible = visible
-            }
-        }
     }
 }

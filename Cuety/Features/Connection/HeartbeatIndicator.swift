@@ -5,17 +5,17 @@ struct HeartbeatIndicator: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var client: QLabClient { model.client }
-
     private var isLive: Bool { client.status.hasLiveData }
+    private var animates: Bool { !reduceMotion && !model.preferences.performanceMode }
 
     var body: some View {
         Image(systemName: client.heartbeatSymbol)
             .foregroundStyle(client.heartbeatTint)
-            .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace.magic(fallback: .downUp)))
+            .contentTransition(animates ? .symbolEffect(.replace.magic(fallback: .downUp)) : .identity)
             .symbolEffect(
                 .bounce,
                 options: .nonRepeating,
-                value: reduceMotion ? 0 : client.heartbeatCount
+                value: animates ? client.heartbeatCount : 0
             )
             .motion(Motion.status, value: isLive)
     }

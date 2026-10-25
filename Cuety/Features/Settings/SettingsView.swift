@@ -2,35 +2,23 @@ import SwiftUI
 
 struct SettingsView: View {
     static let width: CGFloat = 540
-
-    private enum Pane: Hashable, CaseIterable {
-        case general, display, details, connection
-
-        static let shortest = [
-            GeneralSettingsView.settingsHeight,
-            DisplaySettingsView.settingsHeight,
-            DetailPillSettingsView.settingsHeight,
-            ConnectionSettingsView.settingsHeight
-        ].min() ?? 0
-    }
-
-    @State private var pane: Pane = .general
+    static let minHeight: CGFloat = GeneralSettingsView.settingsHeight
 
     var body: some View {
-        TabView(selection: $pane) {
-            Tab("General", systemImage: "gearshape", value: Pane.general) {
+        TabView {
+            Tab("General", systemImage: "gearshape") {
                 GeneralSettingsView()
             }
 
-            Tab("Display", systemImage: "textformat.size", value: Pane.display) {
+            Tab("Display", systemImage: "textformat.size") {
                 DisplaySettingsView()
             }
 
-            Tab("Details", systemImage: "capsule.on.rectangle", value: Pane.details) {
+            Tab("Details", systemImage: "capsule.on.rectangle") {
                 DetailPillSettingsView()
             }
 
-            Tab("Connection", systemImage: "network", value: Pane.connection) {
+            Tab("Connection", systemImage: "network") {
                 ConnectionSettingsView()
             }
         }
@@ -38,13 +26,13 @@ struct SettingsView: View {
         .frame(
             minWidth: Self.width,
             maxWidth: Self.width,
-            minHeight: Pane.shortest,
+            minHeight: Self.minHeight,
             maxHeight: .infinity
         )
 #else
         .frame(
             maxWidth: .infinity,
-            minHeight: Pane.shortest,
+            minHeight: Self.minHeight,
             maxHeight: .infinity
         )
 #endif
@@ -54,5 +42,5 @@ struct SettingsView: View {
 #Preview {
     SettingsView()
         .environment(AppModel.preview)
-        .frame(width: SettingsView.width, height: GeneralSettingsView.settingsHeight)
+        .frame(width: SettingsView.width, height: SettingsView.minHeight)
 }

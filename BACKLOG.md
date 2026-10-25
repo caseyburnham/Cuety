@@ -15,17 +15,6 @@ engineering audit of 2026-09-26 is implemented except where noted here.
   single-pass; benchmark nested shows of 1,000 / 5,000 / 10,000 cues with many visited
   cues (edits, deletes, nested membership) for main-thread time and allocations.
 
-## Protocol limitation (documented, not solved)
-
-- QLab replies echo only the request path. When a timed-out request's answer is still
-  owed, the next reply on that path may be either answer. Cue details treat such a reply
-  as unconfirmed and ask again after the timeout window; playhead, cue-list and heartbeat
-  replies do not, and rely on QLab's update stream and the next refresh.
-
-## Cleanup still to decide
-
-- Pointer hiding is duplicated with Viewtiful; a candidate for optional platform support,
-  not the Foundation-only `ShowControlCore`.
 
 ## Release verification
 

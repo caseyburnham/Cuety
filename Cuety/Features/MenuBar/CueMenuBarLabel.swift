@@ -51,7 +51,7 @@ struct CueMenuBarLabel: View {
         case .connectionStatus:
             "Cuety. \(client.status.title)."
         case .heartbeat:
-            "Cuety. \(client.heartbeatSummary)"
+            "Cuety. Heartbeat status."
         }
     }
 }

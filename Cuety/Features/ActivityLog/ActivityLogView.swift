@@ -145,6 +145,11 @@ struct ActivityLogView: View {
         // bar of its own for the toolbar and search field to live in.
         NavigationStack {
             activityContent
+                .safeAreaBar(edge: .top, spacing: 0) {
+                    modeControls
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                }
                 .navigationTitle("Activity Log")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -155,6 +160,11 @@ struct ActivityLogView: View {
         }
 #else
         activityContent
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    modeControls
+                }
+            }
 #endif
     }
 
@@ -232,19 +242,6 @@ struct ActivityLogView: View {
 #endif
         }
         .overlay { emptyState(for: snapshot) }
-#if os(iOS)
-        // A fixed-width segmented control can't overflow, so in the narrow
-        // iPad sheet it collided with the bar's buttons. It gets its own
-        // strip under the navigation bar instead.
-        .safeAreaBar(edge: .top, spacing: 0) {
-            VStack(spacing: 8) {
-                modePicker
-                directionPicker
-            }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-        }
-#endif
         .copyable(copyableLines(for: selection, in: snapshot.filteredEntries))
         .inspector(isPresented: $isShowingInspector) {
             messageInspector(for: snapshot)
@@ -254,17 +251,6 @@ struct ActivityLogView: View {
             statusBar(for: snapshot)
         }
         .toolbar {
-#if os(macOS)
-            ToolbarItem(placement: .principal) {
-                HStack(spacing: 12) {
-                    modePicker
-                    directionPicker
-                }
-            }
-            // The filter stays in the bar; the actions below give way to the
-            // overflow menu first when the bar runs out of room.
-            .visibilityPriority(.high)
-#endif
 
             ToolbarItem {
                 Button {
@@ -353,18 +339,40 @@ struct ActivityLogView: View {
                 ContentUnavailableView("No Events", systemImage: "clock.arrow.circlepath")
             }
         }
-#if os(iOS)
-        .safeAreaBar(edge: .top, spacing: 0) {
-            modePicker
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-        }
-#else
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                modePicker
+            ToolbarItem {
+                Button {
+                    history.clearRecentEvents()
+                } label: {
+                    Label("Clear", systemImage: "trash")
+                }
+                .disabled(history.recentEvents.isEmpty)
+                .help("Discard the recorded events.")
+            }
+            .visibilityPriority(.low)
+        }
+    }
+
+    @ViewBuilder
+    private var modeControls: some View {
+#if os(iOS)
+        VStack(spacing: 8) {
+            modePicker
+            if presenter.mode == .messages {
+                directionPicker
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
             }
         }
+            .animation(.easeInOut(duration: 0.2), value: presenter.mode)
+#else
+        HStack(spacing: 12) {
+            modePicker
+            if presenter.mode == .messages {
+                directionPicker
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .leading)))
+            }
+        }
+            .animation(.easeInOut(duration: 0.2), value: presenter.mode)
 #endif
     }
 

@@ -64,8 +64,6 @@ final class QLabClient {
     private(set) var heartbeatCount = 0
     private(set) var lastThumpDate: Date?
 
-    private(set) var nextThumpWindow: Range<Date>?
-
     private(set) var lastRoundTrip: TimeInterval?
     private(set) var meanRoundTrip: TimeInterval?
     private(set) var missedThumps = 0
@@ -211,7 +209,6 @@ final class QLabClient {
     private func cancelSessionTasks() {
         heartbeatTask?.cancel()
         heartbeatTask = nil
-        nextThumpWindow = nil
         cueListRefreshTask?.cancel()
         cueListRefreshTask = nil
         playheadDetailsTask?.cancel()
@@ -628,6 +625,7 @@ final class QLabClient {
             guard case .received(let incoming, let bytes) = event else { continue }
             log.record(
                 direction: .inbound, byteCount: bytes,
+                isHeartbeat: incoming.address.hasSuffix("/thump"),
                 event: OSCEvent(message: incoming, direction: .inbound, byteCount: bytes)
             )
 
@@ -656,7 +654,7 @@ final class QLabClient {
         let sendState = QLabSendState()
 
         return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<ReceivedReply, any Error>) in
                 guard !Task.isCancelled else {
                     continuation.resume(throwing: CancellationError())
                     return
@@ -774,6 +772,7 @@ final class QLabClient {
         case .received(let message, let byteCount):
             log.record(
                 direction: .inbound, byteCount: byteCount,
+                isHeartbeat: message.address.hasSuffix("/thump"),
                 event: OSCEvent(message: message, direction: .inbound, byteCount: byteCount)
             )
             route(message)
@@ -1499,8 +1498,6 @@ final class QLabClient {
             while !Task.isCancelled {
                 guard let self else { return }
                 let interval = self.preferences.heartbeatInterval
-                let start = Date()
-                self.nextThumpWindow = start..<start.addingTimeInterval(interval)
                 try? await Task.sleep(for: .seconds(interval))
                 guard !Task.isCancelled else { return }
                 await self.sendThump()
@@ -1557,7 +1554,6 @@ final class QLabClient {
     private func resetHeartbeatMetrics() {
         heartbeatCount = 0
         lastThumpDate = nil
-        nextThumpWindow = nil
         lastRoundTrip = nil
         meanRoundTrip = nil
         missedThumps = 0

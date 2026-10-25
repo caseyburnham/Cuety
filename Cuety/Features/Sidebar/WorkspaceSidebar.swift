@@ -247,7 +247,7 @@ struct WorkspaceSidebar: View {
 
     private func cueListRow(_ list: Cue) -> some View {
         let state = model.client.playheads[list.uniqueID]
-        let cue = state?.cueID.flatMap { list.children.firstCue(withID: $0) }
+        let cue = state?.cueID.flatMap { model.client.cueLists.firstCue(withID: $0) }
 
         let marker: String
         let description: String

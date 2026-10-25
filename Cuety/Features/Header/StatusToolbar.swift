@@ -87,8 +87,7 @@ private struct StatusToolbarActions: ViewModifier {
                         }
                     }
                     .labelStyle(.iconOnly)
-                    .accessibilityValue(model.client.heartbeatSummary)
-                    .help("Activity Log \(model.client.heartbeatSummary)")
+                    .help("Show Activity Log")
                 }
             }
 #if os(iOS)

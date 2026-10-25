@@ -208,90 +208,82 @@ nonisolated extension Array<Cue> {
         }
 
         var remaining = Set(valuesByID.keys)
-        var candidateCues: [String: Cue] = [:]
-        var candidatePaths: [String: [Int]] = [:]
-
-        if let graph, let listIndex = firstIndex(where: { $0.uniqueID == graph.cueListID }) {
-            for cueID in valuesByID.keys.sorted() where remaining.contains(cueID) {
-                guard let cuePath = graph.path(for: cueID) else { continue }
-                let path = [listIndex] + cuePath
-                guard let cue = Self.cue(at: path[...], in: self), cue.uniqueID == cueID else {
-                    continue
-                }
-                candidateCues[cueID] = cue
-                candidatePaths[cueID] = path
-                remaining.remove(cueID)
-            }
-        }
-
-        if !remaining.isEmpty {
-            func visit(_ cues: [Cue], prefix: [Int]) {
-                guard !remaining.isEmpty else { return }
-                for (index, cue) in cues.enumerated() {
-                    let path = prefix + [index]
-                    if remaining.contains(cue.uniqueID) {
-                        candidateCues[cue.uniqueID] = cue
-                        candidatePaths[cue.uniqueID] = path
-                        remaining.remove(cue.uniqueID)
-                    }
-                    guard !remaining.isEmpty else { return }
-                    visit(cue.children, prefix: path)
-                }
-            }
-
-            visit(self, prefix: [])
-        }
-
-        var changedValues: [String: QLabCueValues] = [:]
+        var found = Set<String>()
         var changed = Set<String>()
         var numberUpdates: [CueNumberUpdate] = []
 
-        for cueID in candidateCues.keys.sorted() {
-            guard let values = valuesByID[cueID], var updatedCue = candidateCues[cueID],
-                  updatedCue.apply(values) else { continue }
-            changed.insert(cueID)
-            changedValues[cueID] = values
-            if candidateCues[cueID]?.displayNumber != updatedCue.displayNumber {
+        func updateIfChanged(_ cue: inout Cue, with values: QLabCueValues) {
+            let oldNumber = cue.displayNumber
+            var updated = cue
+            guard updated.apply(values) else { return }
+            cue = updated
+            changed.insert(cue.uniqueID)
+            if oldNumber != updated.displayNumber {
                 numberUpdates.append(
-                    CueNumberUpdate(cueID: cueID, displayNumber: updatedCue.displayNumber)
+                    CueNumberUpdate(cueID: cue.uniqueID, displayNumber: updated.displayNumber)
                 )
             }
         }
 
-        // Compare first so an identical reply never makes any nested cue array
-        // mutable. Only changed cue paths are written, and the root publishes
-        // once after the complete batch has been applied.
-        for cueID in changed.sorted() {
-            guard let path = candidatePaths[cueID], let values = changedValues[cueID] else {
-                continue
+        // Fast path: resolve directly via the watched CueGraph's index path.
+        if let graph, let listIndex = firstIndex(where: { $0.uniqueID == graph.cueListID }) {
+            for (cueID, values) in valuesByID {
+                guard let cuePath = graph.path(for: cueID),
+                      Self.mutateCue(
+                          withID: cueID,
+                          at: ([listIndex] + cuePath)[...],
+                          in: &self,
+                          body: { updateIfChanged(&$0, with: values) }
+                      )
+                else { continue }
+                found.insert(cueID)
+                remaining.remove(cueID)
             }
-            Self.apply(values, forCueID: cueID, at: path[...], in: &self)
+        }
+
+        // Fallback: single traversal for any cues outside the watched graph.
+        if !remaining.isEmpty {
+            func visit(_ cues: inout [Cue]) {
+                guard !remaining.isEmpty else { return }
+                for index in cues.indices {
+                    let cueID = cues[index].uniqueID
+                    if remaining.remove(cueID) != nil, let values = valuesByID[cueID] {
+                        found.insert(cueID)
+                        updateIfChanged(&cues[index], with: values)
+                    }
+                    guard !remaining.isEmpty else { return }
+                    visit(&cues[index].children)
+                }
+            }
+            visit(&self)
         }
 
         return CueValueChanges(
-            foundCueIDs: Set(candidateCues.keys),
+            foundCueIDs: found,
             changedCueIDs: changed,
             cueNumberUpdates: numberUpdates
         )
     }
 
-    private static func cue(at path: ArraySlice<Int>, in cues: [Cue]) -> Cue? {
-        guard let index = path.first, cues.indices.contains(index) else { return nil }
-        guard path.count > 1 else { return cues[index] }
-        return cue(at: path.dropFirst(), in: cues[index].children)
-    }
-
-    private static func apply(
-        _ values: QLabCueValues, forCueID cueID: String, at path: ArraySlice<Int>, in cues: inout [Cue]
-    ) {
-        guard let index = path.first, cues.indices.contains(index) else { return }
+    /// Walks down the path and invokes body on the target cue if its ID matches.
+    /// Returns true if the cue was found at the path.
+    private static func mutateCue(
+        withID cueID: String,
+        at path: ArraySlice<Int>,
+        in cues: inout [Cue],
+        body: (inout Cue) -> Void
+    ) -> Bool {
+        guard let index = path.first, cues.indices.contains(index) else { return false }
         if path.count == 1 {
-            guard cues[index].uniqueID == cueID else { return }
-            _ = cues[index].apply(values)
-            return
+            guard cues[index].uniqueID == cueID else { return false }
+            body(&cues[index])
+            return true
         }
-        apply(
-            values, forCueID: cueID, at: path.dropFirst(), in: &cues[index].children
+        return mutateCue(
+            withID: cueID,
+            at: path.dropFirst(),
+            in: &cues[index].children,
+            body: body
         )
     }
 

@@ -118,6 +118,12 @@ struct ConnectionInspectorView: View {
                 .motion(Motion.status, value: client.usedPasscode)
             }
             LabeledContent("Access", value: client.accessLevel.title)
+            if let connectedSince = client.connectedSince {
+                LabeledContent("Connected") {
+                    Text(connectedSince, style: .relative)
+                        .monospacedDigit()
+                }
+            }
         }
     }
 
@@ -137,16 +143,6 @@ struct ConnectionInspectorView: View {
             LabeledContent("Heartbeat") {
                 HeartbeatIndicator()
                     .help(client.heartbeatSummary)
-            }
-
-            if let window = client.nextThumpWindow {
-                LabeledContent("Next Heartbeat") {
-                    Text(.currentDate, format: .timer(
-                        countingDownIn: window, showsHours: false, maxFieldCount: 2
-                    ))
-                    .monospacedDigit()
-                }
-                .help("Time until Cuety sends QLab its next heartbeat.")
             }
 
             if let round = client.lastRoundTrip {
@@ -193,19 +189,6 @@ struct ConnectionInspectorView: View {
                 """)
             }
 
-            if client.lateReplyCount > 0 {
-                LabeledContent("Late Replies") {
-                    Text(client.lateReplyCount.formatted())
-                        .foregroundStyle(.orange)
-                }
-                .help("""
-                QLab answered these after Cuety had stopped waiting. QLab \
-                replies name only the request, so when a later request asks \
-                the same thing, either answer may be the one Cuety uses; cue \
-                details are asked for again to confirm. A rising count means \
-                the request timeout is shorter than this QLab needs.
-                """)
-            }
         }
     }
 

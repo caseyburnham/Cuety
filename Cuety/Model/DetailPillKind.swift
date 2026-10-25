@@ -2,23 +2,20 @@ import SwiftUI
 
 enum DetailPillKind: String, CaseIterable, Hashable, Sendable, Identifiable {
     case broken
+    case flagged
+    case loaded
     case cueType
-    case duration
     case preWait
+    case duration
     case postWait
     case continueMode
     case cueList
     case armed
-    case loaded
-    case flagged
     case notes
 
     var id: String { rawValue }
 
-    static let defaultOrder: [DetailPillKind] = [
-        .broken, .flagged, .loaded, .cueType, .preWait, .duration, .postWait,
-        .continueMode, .cueList, .armed, .notes,
-    ]
+    static var defaultOrder: [DetailPillKind] { allCases }
 
     static let defaultEnabled: Set<DetailPillKind> = [
         .broken, .cueType, .duration, .preWait, .continueMode, .armed, .loaded, .flagged,
@@ -61,10 +58,7 @@ enum DetailPillKind: String, CaseIterable, Hashable, Sendable, Identifiable {
     }
 
     var glyphRotation: Angle {
-        switch self {
-        case .armed: .degrees(180)
-        default: .zero
-        }
+        self == .armed ? .degrees(180) : .zero
     }
 
     var settingsDescription: String {

@@ -19,6 +19,14 @@ struct Typography {
     let cueNumberSizing: CueNumberSizing
     private let measuringWeight: MeasuringFont.Weight
 
+    private struct FontKey: Hashable {
+        let size: CGFloat
+        let weight: MeasuringFont.Weight
+        let usesRounded: Bool
+    }
+
+    private static var fontCache: [FontKey: MeasuringFont] = [:]
+
     init(preferences: Preferences) {
         self.usesRounded = preferences.usesRoundedSystemFont
         self.cueNumberWeight = preferences.fontWeight.weight
@@ -92,17 +100,49 @@ struct Typography {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: measuringFont(size: Self.measuringPointSize)
         ]
-        var measured = Set<String>()
-        var widest: String?
-        var widestWidth: CGFloat = 0
+        let digitWidth = ("0" as NSString).size(withAttributes: attributes).width
 
-        for candidate in candidates where measured.insert(candidate).inserted {
+        var seen = Set<String>()
+        var nonDigitCandidates: [String] = []
+        var longestDigitCandidate: String?
+        var maxDigitCount = 0
+
+        for candidate in candidates where seen.insert(candidate).inserted {
+            guard !candidate.isEmpty else { continue }
+            if candidate.utf8.allSatisfy({ (0x30...0x39).contains($0) }) {
+                if candidate.count > maxDigitCount {
+                    maxDigitCount = candidate.count
+                    longestDigitCandidate = candidate
+                }
+            } else {
+                nonDigitCandidates.append(candidate)
+            }
+        }
+
+        var widest: String? = longestDigitCandidate
+        var widestWidth: CGFloat = CGFloat(maxDigitCount) * digitWidth
+
+        guard !nonDigitCandidates.isEmpty else {
+            return widest
+        }
+
+        // SF system font glyph advance ceiling for ASCII characters at 100pt.
+        let maxAsciiAdvance: CGFloat = 105
+        nonDigitCandidates.sort { $0.count > $1.count }
+
+        for candidate in nonDigitCandidates {
+            let isAscii = candidate.utf8.allSatisfy { $0 < 0x80 }
+            if isAscii && CGFloat(candidate.count) * maxAsciiAdvance <= widestWidth {
+                continue
+            }
+
             let width = (candidate as NSString).size(withAttributes: attributes).width
             if width > widestWidth {
                 widestWidth = width
                 widest = candidate
             }
         }
+
         return widest
     }
 
@@ -130,16 +170,25 @@ struct Typography {
     /// The platform font matching what `font(size:weight:)` renders once
     /// `.monospacedDigit()` is applied, including the rounded design.
     private func measuringFont(size: CGFloat, weight: MeasuringFont.Weight? = nil) -> MeasuringFont {
-        let font = MeasuringFont.monospacedDigitSystemFont(
-            ofSize: size, weight: weight ?? measuringWeight
-        )
-        guard usesRounded,
-              let rounded = font.fontDescriptor.withDesign(.rounded)
-        else { return font }
+        let resolvedWeight = weight ?? measuringWeight
+        let key = FontKey(size: size, weight: resolvedWeight, usesRounded: usesRounded)
+        if let cached = Self.fontCache[key] {
+            return cached
+        }
+
+        let base = MeasuringFont.monospacedDigitSystemFont(ofSize: size, weight: resolvedWeight)
+        let resolved: MeasuringFont
+        if usesRounded, let rounded = base.fontDescriptor.withDesign(.rounded) {
 #if os(macOS)
-        return MeasuringFont(descriptor: rounded, size: size) ?? font
+            resolved = MeasuringFont(descriptor: rounded, size: size) ?? base
 #else
-        return MeasuringFont(descriptor: rounded, size: size)
+            resolved = MeasuringFont(descriptor: rounded, size: size)
 #endif
+        } else {
+            resolved = base
+        }
+
+        Self.fontCache[key] = resolved
+        return resolved
     }
 }

@@ -6,16 +6,23 @@ nonisolated struct CueGraph: Sendable {
     let cueListID: String
     let rowIDs: [String]
     private let pathByCueID: [String: [Int]]
-    private var numberedCueIDs: [String]
-    private(set) var cueNumbers: [String]
+    private(set) var cueNumbersByID: [String: String]
+
+    var cueNumbers: [String] {
+        cueNumbersByID.keys
+            .sorted {
+                guard let lhs = pathByCueID[$0], let rhs = pathByCueID[$1] else { return false }
+                return lhs.lexicographicallyPrecedes(rhs)
+            }
+            .compactMap { cueNumbersByID[$0] }
+    }
 
     init(cueList: Cue) {
         cueListID = cueList.uniqueID
         rowIDs = cueList.children.map(\.uniqueID)
 
         var paths: [String: [Int]] = [:]
-        var numberedIDs: [String] = []
-        var numbers: [String] = []
+        var numbersByID: [String: String] = [:]
 
         func index(_ cues: [Cue], prefix: [Int]) {
             for (rowIndex, cue) in cues.enumerated() {
@@ -23,8 +30,7 @@ nonisolated struct CueGraph: Sendable {
                 if paths[cue.uniqueID] == nil {
                     paths[cue.uniqueID] = path
                     if let number = cue.displayNumber {
-                        numberedIDs.append(cue.uniqueID)
-                        numbers.append(number)
+                        numbersByID[cue.uniqueID] = number
                     }
                 }
                 index(cue.children, prefix: path)
@@ -33,8 +39,7 @@ nonisolated struct CueGraph: Sendable {
 
         index(cueList.children, prefix: [])
         pathByCueID = paths
-        numberedCueIDs = numberedIDs
-        cueNumbers = numbers
+        cueNumbersByID = numbersByID
     }
 
     /// Resolves a path against the current value tree. The path is never used
@@ -56,6 +61,8 @@ nonisolated struct CueGraph: Sendable {
         guard cue?.uniqueID == cueID else { return nil }
         return cue
     }
+
+    var allPaths: [String: [Int]] { pathByCueID }
 
     func path(for cueID: String) -> [Int]? {
         pathByCueID[cueID]
@@ -128,23 +135,56 @@ nonisolated struct CueGraph: Sendable {
 
     /// Refreshes the number projection without rebuilding cue paths.
     mutating func applyCueNumberUpdates(_ updates: [CueNumberUpdate]) {
-        for update in updates {
-            guard let path = pathByCueID[update.cueID] else { continue }
-            if let number = update.displayNumber {
-                if let currentIndex = numberedCueIDs.firstIndex(of: update.cueID) {
-                    cueNumbers[currentIndex] = number
-                    continue
-                }
-                let insertionIndex = numberedCueIDs.firstIndex { cueID in
-                    guard let otherPath = pathByCueID[cueID] else { return false }
-                    return path.lexicographicallyPrecedes(otherPath)
-                } ?? numberedCueIDs.endIndex
-                numberedCueIDs.insert(update.cueID, at: insertionIndex)
-                cueNumbers.insert(number, at: insertionIndex)
-            } else if let currentIndex = numberedCueIDs.firstIndex(of: update.cueID) {
-                numberedCueIDs.remove(at: currentIndex)
-                cueNumbers.remove(at: currentIndex)
+        for update in updates where pathByCueID[update.cueID] != nil {
+            cueNumbersByID[update.cueID] = update.displayNumber
+        }
+    }
+}
+nonisolated struct WorkspaceIndex: Sendable {
+    struct Location: Sendable {
+        let listIndex: Int
+        let cueListID: String
+        let path: [Int]
+    }
+
+    private(set) var locationsByCueID: [String: Location] = [:]
+    private(set) var graphsByListID: [String: CueGraph] = [:]
+
+    init(cueLists: [Cue]) {
+        for (listIndex, list) in cueLists.enumerated() {
+            let graph = CueGraph(cueList: list)
+            graphsByListID[list.uniqueID] = graph
+            for (cueID, path) in graph.allPaths where locationsByCueID[cueID] == nil {
+                locationsByCueID[cueID] = Location(
+                    listIndex: listIndex,
+                    cueListID: list.uniqueID,
+                    path: path
+                )
             }
+        }
+    }
+
+    func contains(_ cueID: String) -> Bool {
+        locationsByCueID[cueID] != nil
+    }
+
+    func cueListID(containing cueID: String) -> String? {
+        locationsByCueID[cueID]?.cueListID
+    }
+
+    func cue(withID cueID: String, in cueLists: [Cue]) -> Cue? {
+        guard let location = locationsByCueID[cueID],
+              cueLists.indices.contains(location.listIndex),
+              let graph = graphsByListID[location.cueListID]
+        else { return nil }
+        return graph.cue(withID: cueID, in: cueLists[location.listIndex])
+    }
+
+    mutating func applyCueNumberUpdates(_ updates: [CueNumberUpdate]) {
+        for listID in graphsByListID.keys {
+            guard var graph = graphsByListID[listID] else { continue }
+            graph.applyCueNumberUpdates(updates)
+            graphsByListID[listID] = graph
         }
     }
 }

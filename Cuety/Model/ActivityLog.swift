@@ -36,13 +36,32 @@ nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
     let timestamp: Date
     let direction: Direction
     let address: String
-    let arguments: String
+    private let rawArguments: [OSCValue]
+    private let explicitArguments: String?
     let byteCount: Int
 
-    /// Lowercased once here so filtering the log does not renormalise every
-    /// retained entry on each keystroke or each new message.
-    let searchableAddress: String
-    let searchableArguments: String
+    var arguments: String {
+        if let explicitArguments { return explicitArguments }
+        guard !rawArguments.isEmpty else { return "" }
+        return rawArguments.map(Self.render).joined(separator: " ")
+    }
+
+    private static func render(_ value: OSCValue) -> String {
+        switch value {
+        case .int32(let value): String(value)
+        case .int64(let value): String(value)
+        case .float32(let value): String(value)
+        case .double(let value): String(value)
+        case .string(let value), .symbol(let value): "\"\(value)\""
+        case .blob(let data): "<\(data.count) bytes>"
+        case .timeTag(let tag): tag.isImmediate ? "immediate" : String(tag.rawValue)
+        case .true: "true"
+        case .false: "false"
+        case .null: "nil"
+        case .impulse: "impulse"
+        case .array(let values): "[" + values.map(Self.render).joined(separator: " ") + "]"
+        }
+    }
 
     init(
         timestamp: Date = Date(),
@@ -54,33 +73,25 @@ nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
         self.timestamp = timestamp
         self.direction = direction
         self.address = address
-        self.arguments = arguments
+        self.rawArguments = []
+        self.explicitArguments = arguments
         self.byteCount = byteCount
-        searchableAddress = address.lowercased()
-        searchableArguments = arguments.lowercased()
     }
 
     init(message: OSCMessage, direction: Direction, byteCount: Int, timestamp: Date = Date()) {
         let safe = OSCRedaction.redacting(message)
-        let rendered = safe.description
-        let argumentText = rendered.hasPrefix(safe.address)
-            ? String(rendered.dropFirst(safe.address.count)).trimmingCharacters(in: .whitespaces)
-            : ""
-        self.init(
-            timestamp: timestamp,
-            direction: direction,
-            address: safe.address,
-            arguments: argumentText,
-            byteCount: byteCount
-        )
+        self.timestamp = timestamp
+        self.direction = direction
+        self.address = safe.address
+        self.rawArguments = safe.arguments
+        self.explicitArguments = nil
+        self.byteCount = byteCount
     }
 
-    /// `query` is expected to be lowercased already, so a filter pass
-    /// normalises the search text once rather than once per entry.
     func matches(lowercasedQuery query: String) -> Bool {
         query.isEmpty
-            || searchableAddress.contains(query)
-            || searchableArguments.contains(query)
+            || address.localizedStandardContains(query)
+            || arguments.localizedStandardContains(query)
     }
 
     var copyableDescription: String {
@@ -116,6 +127,7 @@ final class ActivityLog {
     private static let flushInterval = Duration.milliseconds(22)
 
     @ObservationIgnored private var flushTask: Task<Void, Never>?
+    @ObservationIgnored private var isObservedSinceLastFlush = false
 
     @ObservationIgnored private var storage: [OSCEvent?]
     @ObservationIgnored private var storageHead = 0
@@ -185,12 +197,14 @@ final class ActivityLog {
     func record(
         direction: OSCEvent.Direction,
         byteCount: Int,
+        isHeartbeat: Bool = false,
         event: @autoclosure () -> OSCEvent
     ) {
+        guard !isHeartbeat else { return }
+
         updateTotals(direction: direction, byteCount: byteCount)
         scheduleFlush()
         guard !isPaused, capacity > 0, byteCapacity > 0 else { return }
-
         let event = event()
         let eventBytes = retainedByteCount(of: event)
         guard eventBytes <= byteCapacity else { return }
@@ -226,6 +240,7 @@ final class ActivityLog {
     /// being read, so SwiftUI invalidates on the coalesced flush rather than
     /// on every recorded message.
     private func trackRevision() {
+        isObservedSinceLastFlush = true
         _ = revision
     }
 
@@ -238,16 +253,18 @@ final class ActivityLog {
     private func flush() {
         flushTask?.cancel()
         flushTask = nil
+        isObservedSinceLastFlush = false
         revision &+= 1
     }
 
     private func scheduleFlush() {
-        guard flushTask == nil else { return }
+        guard isObservedSinceLastFlush, flushTask == nil else { return }
         flushTask = Task { [weak self] in
             try? await Task.sleep(for: Self.flushInterval)
             guard let self, !Task.isCancelled else { return }
-            flushTask = nil
-            revision &+= 1
+            self.flushTask = nil
+            self.isObservedSinceLastFlush = false
+            self.revision &+= 1
         }
     }
 
@@ -276,8 +293,7 @@ final class ActivityLog {
     }
 
     /// An entry retains its text twice over — once as shown, once normalised
-    /// for searching — so the byte cap counts both and still bounds the log's
-    /// share of memory.
+    /// for searching — so the byte cap bounds the log's share of memory.
     private func retainedByteCount(of event: OSCEvent) -> Int {
         (event.address.utf8.count + event.arguments.utf8.count) * 2
     }

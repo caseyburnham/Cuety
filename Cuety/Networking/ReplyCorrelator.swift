@@ -1,22 +1,46 @@
 import Foundation
 
-/// Matches QLab replies to the requests waiting for them.
-///
-/// QLab echoes only the request's path, never an ID, so requests wait in a
-/// queue per correlation key and a reply goes to the oldest. A request that
-/// timed out still has its answer owed until a deadline; while one is owed, a
-/// reply on that key may be that older answer rather than the current one.
-///
-/// A plain value with the clock passed in, so the rules can be tested without
-/// a connection; the client owns the timers that drive it.
+/// Matches QLab replies to the requests waiting for them in FIFO order per path.
 nonisolated struct ReplyCorrelator<Waiter> {
     private var waiters: [UUID: (key: String, waiter: Waiter)] = [:]
     private var queuedIDs: [String: [UUID]] = [:]
-    private var owedUntil: [String: [ContinuousClock.Instant]] = [:]
+    private var abandonedDeadlines: [String: [ContinuousClock.Instant]] = [:]
 
     var waitingIDs: [UUID] { Array(waiters.keys) }
+    var hasOwedReplies: Bool { abandonedDeadlines.values.contains { !$0.isEmpty } }
 
-    var hasOwedReplies: Bool { !owedUntil.isEmpty }
+    mutating func recordAbandoned(key: String, until deadline: ContinuousClock.Instant) {
+        abandonedDeadlines[key, default: []].append(deadline)
+    }
+
+    mutating func forgetOwedReplies() {
+        abandonedDeadlines.removeAll()
+    }
+
+    mutating func pruneOwedReplies(at now: ContinuousClock.Instant) {
+        for key in abandonedDeadlines.keys {
+            abandonedDeadlines[key]?.removeAll { $0 <= now }
+            if abandonedDeadlines[key]?.isEmpty == true {
+                abandonedDeadlines.removeValue(forKey: key)
+            }
+        }
+    }
+
+    func mayBeStale(forKey key: String, at now: ContinuousClock.Instant) -> Bool {
+        abandonedDeadlines[key]?.contains { $0 > now } == true
+    }
+
+    mutating func consumeOwedReply(forKey key: String, at now: ContinuousClock.Instant) -> Bool {
+        pruneOwedReplies(at: now)
+        guard var deadlines = abandonedDeadlines[key], !deadlines.isEmpty else { return false }
+        deadlines.removeFirst()
+        if deadlines.isEmpty {
+            abandonedDeadlines.removeValue(forKey: key)
+        } else {
+            abandonedDeadlines[key] = deadlines
+        }
+        return true
+    }
 
     mutating func register(_ id: UUID, key: String, waiter: Waiter) {
         waiters[id] = (key, waiter)
@@ -39,41 +63,5 @@ nonisolated struct ReplyCorrelator<Waiter> {
             queuedIDs.removeValue(forKey: entry.key)
         }
         return entry
-    }
-
-    /// Records that a request on `key` gave up while its answer may still come.
-    mutating func recordAbandoned(key: String, until deadline: ContinuousClock.Instant) {
-        owedUntil[key, default: []].append(deadline)
-    }
-
-    /// Whether a reply on `key` arriving now might answer an abandoned request.
-    func mayBeStale(forKey key: String, at now: ContinuousClock.Instant) -> Bool {
-        owedUntil[key]?.contains { $0 >= now } ?? false
-    }
-
-    /// Accounts for a reply nobody is waiting for. Returns whether it was an
-    /// answer still owed to an abandoned request.
-    mutating func consumeOwedReply(forKey key: String, at now: ContinuousClock.Instant) -> Bool {
-        guard var deadlines = owedUntil[key] else { return false }
-        deadlines.removeAll { $0 < now }
-        defer { owedUntil[key] = deadlines.isEmpty ? nil : deadlines }
-
-        guard !deadlines.isEmpty else { return false }
-        deadlines.removeFirst()
-        return true
-    }
-
-    /// Drops answers whose deadlines have passed.
-    mutating func pruneOwedReplies(at now: ContinuousClock.Instant) {
-        for key in owedUntil.keys {
-            owedUntil[key]?.removeAll { $0 <= now }
-            if owedUntil[key]?.isEmpty == true {
-                owedUntil.removeValue(forKey: key)
-            }
-        }
-    }
-
-    mutating func forgetOwedReplies() {
-        owedUntil.removeAll()
     }
 }

@@ -227,11 +227,6 @@ final class Preferences {
 
     let defaults: UserDefaults
 
-    private var storedDrawerRowCount: Int
-    private var storedDefaultPort: Int
-    private var storedHeartbeatInterval: TimeInterval
-    private var storedRequestTimeout: TimeInterval
-
     var appearance: AppearanceMode {
         didSet { defaults.set(appearance.rawValue, forKey: Key.appearance) }
     }
@@ -272,15 +267,15 @@ final class Preferences {
     /// height follows from this, so it is set by dragging the drawer's handle
     /// rather than in Settings.
     var drawerRowCount: Int {
-        get { storedDrawerRowCount }
-        set {
-            storedDrawerRowCount = Limits.drawerRows.clamping(newValue)
-            defaults.set(storedDrawerRowCount, forKey: Key.drawerRowCount)
+        didSet {
+            let clamped = Limits.drawerRows.clamping(drawerRowCount)
+            if drawerRowCount != clamped { drawerRowCount = clamped }
+            defaults.set(drawerRowCount, forKey: Key.drawerRowCount)
         }
     }
 
     var enabledPills: Set<DetailPillKind> {
-        didSet { persistEnabledPills() }
+        didSet { defaults.set(enabledPills.map(\.rawValue), forKey: Key.enabledPills) }
     }
 
     var pillSize: PillSize {
@@ -292,7 +287,7 @@ final class Preferences {
     }
 
     var visiblePills: [DetailPillKind] {
-        DetailPillKind.defaultOrder.filter { enabledPills.contains($0) || $0.isAlwaysVisible }
+        DetailPillKind.allCases.filter { enabledPills.contains($0) || $0.isAlwaysVisible }
     }
 
     var showsMenuBarExtra: Bool {
@@ -312,26 +307,26 @@ final class Preferences {
     }
 
     var defaultPort: Int {
-        get { storedDefaultPort }
-        set {
-            storedDefaultPort = Limits.port.clamping(newValue)
-            defaults.set(storedDefaultPort, forKey: Key.defaultPort)
+        didSet {
+            let clamped = Limits.port.clamping(defaultPort)
+            if defaultPort != clamped { defaultPort = clamped }
+            defaults.set(defaultPort, forKey: Key.defaultPort)
         }
     }
 
     var heartbeatInterval: TimeInterval {
-        get { storedHeartbeatInterval }
-        set {
-            storedHeartbeatInterval = Limits.heartbeatInterval.clamping(newValue)
-            defaults.set(storedHeartbeatInterval, forKey: Key.heartbeatInterval)
+        didSet {
+            let clamped = Limits.heartbeatInterval.clamping(heartbeatInterval)
+            if heartbeatInterval != clamped { heartbeatInterval = clamped }
+            defaults.set(heartbeatInterval, forKey: Key.heartbeatInterval)
         }
     }
 
     var requestTimeout: TimeInterval {
-        get { storedRequestTimeout }
-        set {
-            storedRequestTimeout = Limits.requestTimeout.clamping(newValue)
-            defaults.set(storedRequestTimeout, forKey: Key.requestTimeout)
+        didSet {
+            let clamped = Limits.requestTimeout.clamping(requestTimeout)
+            if requestTimeout != clamped { requestTimeout = clamped }
+            defaults.set(requestTimeout, forKey: Key.requestTimeout)
         }
     }
 
@@ -348,29 +343,38 @@ final class Preferences {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        defaults.register(defaults: [
+            Key.usesRoundedSystemFont: true,
+            Key.showsCueName: true,
+            Key.showsPlayhead: true,
+            Key.showsDrawer: true,
+            Key.drawerRowCount: 3,
+            Key.showsCueTypeLabel: true,
+            Key.defaultPort: ShowControlDefaults.qlabTCPPort,
+            Key.heartbeatInterval: 5.0,
+            Key.requestTimeout: 5.0,
+        ])
 
         appearance = defaults.string(forKey: Key.appearance)
             .flatMap(AppearanceMode.init(rawValue:)) ?? .automatic
-        usesRoundedSystemFont = defaults.object(forKey: Key.usesRoundedSystemFont) as? Bool ?? true
+        usesRoundedSystemFont = defaults.bool(forKey: Key.usesRoundedSystemFont)
         fontWeight = defaults.string(forKey: Key.fontWeight)
             .flatMap(FontWeightChoice.init(rawValue:)) ?? .bold
         cueNumberSizing = defaults.string(forKey: Key.cueNumberSizing)
             .flatMap(CueNumberSizing.init(rawValue:)) ?? .fixed
-        showsCueName = defaults.object(forKey: Key.showsCueName) as? Bool ?? true
+        showsCueName = defaults.bool(forKey: Key.showsCueName)
         playheadAccent = defaults.string(forKey: Key.playheadAccent)
             .flatMap(PlayheadAccent.init(rawValue:)) ?? .systemBlue
-        showsPlayhead = defaults.object(forKey: Key.showsPlayhead) as? Bool ?? true
+        showsPlayhead = defaults.bool(forKey: Key.showsPlayhead)
         cueLayout = defaults.string(forKey: Key.cueLayout)
             .flatMap(CueLayout.init(rawValue:)) ?? .display
-        showsDrawer = defaults.object(forKey: Key.showsDrawer) as? Bool ?? true
-        storedDrawerRowCount = Limits.drawerRows.clamping(
-            defaults.object(forKey: Key.drawerRowCount) as? Int ?? 3
-        )
+        showsDrawer = defaults.bool(forKey: Key.showsDrawer)
+        drawerRowCount = Limits.drawerRows.clamping(defaults.integer(forKey: Key.drawerRowCount))
 
         enabledPills = Self.loadEnabledPills(from: defaults)
         pillSize = defaults.string(forKey: Key.pillSize)
             .flatMap(PillSize.init(rawValue:)) ?? .default
-        showsCueTypeLabel = defaults.object(forKey: Key.showsCueTypeLabel) as? Bool ?? true
+        showsCueTypeLabel = defaults.bool(forKey: Key.showsCueTypeLabel)
 
         showsMenuBarExtra = defaults.bool(forKey: Key.showsMenuBarExtra)
         menuBarReadout = defaults.string(forKey: Key.menuBarReadout)
@@ -378,16 +382,10 @@ final class Preferences {
         keepsDisplayAwake = defaults.bool(forKey: Key.keepsDisplayAwake)
         performanceMode = defaults.bool(forKey: Key.performanceMode)
 
-        storedDefaultPort = Limits.port.clamping(
-            defaults.object(forKey: Key.defaultPort) as? Int ?? ShowControlDefaults.qlabTCPPort
-        )
-        storedHeartbeatInterval = Limits.heartbeatInterval.clamping(
-            defaults.object(forKey: Key.heartbeatInterval) as? TimeInterval ?? 5
-        )
-        storedRequestTimeout = Limits.requestTimeout.clamping(
-            defaults.object(forKey: Key.requestTimeout) as? TimeInterval ?? 5
-        )
-        autoConnect = defaults.object(forKey: Key.autoConnect) as? Bool ?? false
+        defaultPort = Limits.port.clamping(defaults.integer(forKey: Key.defaultPort))
+        heartbeatInterval = Limits.heartbeatInterval.clamping(defaults.double(forKey: Key.heartbeatInterval))
+        requestTimeout = Limits.requestTimeout.clamping(defaults.double(forKey: Key.requestTimeout))
+        autoConnect = defaults.bool(forKey: Key.autoConnect)
 
         if let serverID = defaults.string(forKey: Key.lastServerID),
            let workspaceID = defaults.string(forKey: Key.lastWorkspaceID) {
@@ -403,10 +401,6 @@ final class Preferences {
         }
 
         return Set(stored.compactMap(DetailPillKind.init(rawValue:)))
-    }
-
-    private func persistEnabledPills() {
-        defaults.set(enabledPills.map(\.rawValue), forKey: Key.enabledPills)
     }
 
     private enum Key {

@@ -124,10 +124,6 @@ final class AppModel {
         }
     }
 
-    /// Counts trips to the background, so a foreground refresh that finishes
-    /// after the app has left again does not clear the newer stale label.
-    private var backgroundGeneration = 0
-
     /// Fed the app's aggregate scene phase, so one of several iPad scenes
     /// going to the background does not mark data another still shows.
     ///
@@ -139,21 +135,21 @@ final class AppModel {
         switch phase {
         case .active:
             guard isDataStale else { return }
-            let generation = backgroundGeneration
+            foregroundRefreshTask?.cancel()
             foregroundRefreshTask = Task { [weak self] in
                 guard let self else { return }
                 await self.confirmRetainedData()
+                guard !Task.isCancelled else { return }
                 // The stale label stays visible while the refresh is in
                 // flight. A failed refresh replaces it with the client's
                 // explicit error state instead of presenting retained data
                 // as current.
-                guard generation == self.backgroundGeneration else { return }
                 self.isDataStale = false
                 self.foregroundRefreshTask = nil
             }
         case .background:
             client.eventHistory.markIncomplete()
-            backgroundGeneration += 1
+            foregroundRefreshTask?.cancel()
             foregroundRefreshTask = nil
             if client.status.hasLiveData || selection != nil {
                 isDataStale = true
@@ -189,35 +185,27 @@ final class AppModel {
     func refresh() async {
         refreshTask?.cancel()
 
-        refreshGeneration += 1
-        let generation = refreshGeneration
         isRefreshing = true
-
         let task = Task { [weak self] in
             guard let self else { return }
-            await self.performRefresh(generation: generation)
+            await self.performRefresh()
         }
         refreshTask = task
         await task.value
+        if refreshTask == task {
+            isRefreshing = false
+        }
     }
 
-    private static let refreshDiscoveryPasses = 3
     private static let maxConcurrentProbes = 3
 
     private var refreshTask: Task<Void, Never>?
 
-    private var refreshGeneration = 0
-
-    private func performRefresh(generation: Int) async {
-        defer {
-            if generation == refreshGeneration { isRefreshing = false }
-        }
-
+    private func performRefresh() async {
         browser.restartBrowsing()
 
         var probed: Set<String> = []
-
-        for _ in 0..<Self.refreshDiscoveryPasses {
+        while !Task.isCancelled {
             let pending = browser.servers.filter { !probed.contains($0.id) }
             guard !pending.isEmpty else { break }
             probed.formUnion(pending.map(\.id))
@@ -225,8 +213,6 @@ final class AppModel {
             await withBoundedConcurrency(over: pending, limit: Self.maxConcurrentProbes) { target in
                 await self.probeWorkspaces(on: target)
             }
-
-            guard !Task.isCancelled else { return }
         }
 
         guard !Task.isCancelled else { return }
@@ -283,27 +269,24 @@ final class AppModel {
     private var autoConnectIsArmed = false
 
     /// Owns effects that follow an operator-selected connection attempt.
-    private var operatorAttemptGeneration: UInt64 = 0
+    private var operatorAttemptID = UUID()
 
-    private var passcodeScanGeneration: UInt64 = 0
+    private var passcodeScanTask: Task<Set<WorkspaceSelection>, Never>?
 
-    private func beginOperatorAttempt() -> UInt64 {
-        operatorAttemptGeneration &+= 1
-        return operatorAttemptGeneration
+    private func beginOperatorAttempt() -> UUID {
+        let id = UUID()
+        operatorAttemptID = id
+        return id
     }
 
     private func invalidateOperatorAttempt() {
-        operatorAttemptGeneration &+= 1
-    }
-
-    private func invalidatePasscodeScan() {
-        passcodeScanGeneration &+= 1
+        operatorAttemptID = UUID()
     }
 
     private func ownsLiveOperatorAttempt(
-        _ generation: UInt64, target: WorkspaceSelection
+        _ id: UUID, target: WorkspaceSelection
     ) -> Bool {
-        operatorAttemptGeneration == generation
+        operatorAttemptID == id
             && selection == target
             && client.hasLiveSession(for: target)
     }
@@ -346,7 +329,7 @@ final class AppModel {
     func connect(to selection: WorkspaceSelection, useSavedPasscode: Bool = false) async {
         guard let server = browser.server(withID: selection.serverID) else { return }
 
-        let generation = beginOperatorAttempt()
+        let attempt = beginOperatorAttempt()
         self.selection = selection
         passcodePrompt = nil
         let stored = useSavedPasscode ? passcodes.passcode(
@@ -359,7 +342,7 @@ final class AppModel {
             passcode: stored
         )
 
-        guard ownsLiveOperatorAttempt(generation, target: selection) else { return }
+        guard ownsLiveOperatorAttempt(attempt, target: selection) else { return }
         isDataStale = false
         preferences.lastWorkspace = selection
     }
@@ -370,14 +353,14 @@ final class AppModel {
         guard passcodePrompt == prompt,
               let server = browser.server(withID: prompt.serverID)
         else { return }
-        let generation = beginOperatorAttempt()
+        let attempt = beginOperatorAttempt()
         let target = WorkspaceSelection(
             serverID: prompt.serverID, workspaceID: prompt.workspaceID
         )
         selection = target
         await client.connect(to: server, workspaceID: prompt.workspaceID, passcode: passcode)
 
-        guard ownsLiveOperatorAttempt(generation, target: target) else { return }
+        guard ownsLiveOperatorAttempt(attempt, target: target) else { return }
 
         isDataStale = false
         preferences.lastWorkspace = target
@@ -386,7 +369,7 @@ final class AppModel {
         passcodePrompt = nil
 
         if remember {
-            invalidatePasscodeScan()
+            passcodeScanTask?.cancel()
             do {
                 try passcodes.save(
                     passcode, serverID: prompt.serverID, workspaceID: prompt.workspaceID
@@ -412,7 +395,7 @@ final class AppModel {
     }
 
     func forgetPasscode(for selection: WorkspaceSelection) throws(CredentialError) {
-        invalidatePasscodeScan()
+        passcodeScanTask?.cancel()
         do {
             try passcodes.remove(
                 serverID: selection.serverID, workspaceID: selection.workspaceID
@@ -427,7 +410,7 @@ final class AppModel {
     }
 
     func forgetAllPasscodes() throws(CredentialError) {
-        invalidatePasscodeScan()
+        passcodeScanTask?.cancel()
         do {
             try passcodes.removeAll()
             storedPasscodeSelections.removeAll()
@@ -440,8 +423,7 @@ final class AppModel {
     }
 
     func refreshStoredPasscodes() async {
-        passcodeScanGeneration &+= 1
-        let generation = passcodeScanGeneration
+        passcodeScanTask?.cancel()
 
         var selections: Set<WorkspaceSelection> = []
         for server in browser.servers {
@@ -451,11 +433,13 @@ final class AppModel {
         }
 
         let passcodes = self.passcodes
-        let found = await Task.detached(priority: .utility) {
-            passcodes.selectionsWithPasscodes(Set(selections))
-        }.value
+        let task = Task.detached(priority: .utility) {
+            passcodes.selectionsWithPasscodes(selections)
+        }
+        passcodeScanTask = task
+        let found = await task.value
 
-        guard !Task.isCancelled, generation == passcodeScanGeneration else { return }
+        guard !Task.isCancelled, !task.isCancelled else { return }
         storedPasscodeSelections = found
     }
 
