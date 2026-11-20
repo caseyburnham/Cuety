@@ -8,7 +8,7 @@ typealias MeasuringFont = UIFont
 #endif
 
 @MainActor
-struct Typography {
+struct Typography: Equatable {
     static let cueNumberBaseSize: CGFloat = 720
     static let cueNumberMinimumScale: CGFloat = 0.02
     static var cueNumberMinimumSize: CGFloat { cueNumberBaseSize * cueNumberMinimumScale }
@@ -16,7 +16,6 @@ struct Typography {
 
     let usesRounded: Bool
     let cueNumberWeight: Font.Weight
-    let cueNumberSizing: CueNumberSizing
     private let measuringWeight: MeasuringFont.Weight
 
     private struct FontKey: Hashable {
@@ -30,7 +29,6 @@ struct Typography {
     init(preferences: Preferences) {
         self.usesRounded = preferences.usesRoundedSystemFont
         self.cueNumberWeight = preferences.fontWeight.weight
-        self.cueNumberSizing = preferences.cueNumberSizing
         self.measuringWeight = Self.platformWeight(for: preferences.fontWeight.weight)
     }
 
@@ -64,18 +62,6 @@ struct Typography {
         let scale = min(space.width / measured.width, space.height / measured.height)
         let size = Self.measuringPointSize * scale
         return min(max(size, Self.cueNumberMinimumSize), Self.cueNumberBaseSize)
-    }
-
-    /// The size to draw the standby number `text` at, following the sizing
-    /// preference. `reference` is the widest number in the cue list, which
-    /// fixed sizing fits so every cue in the list is drawn at the same size.
-    func standbyNumberPointSize(for text: String, reference: String, in space: CGSize) -> CGFloat {
-        switch cueNumberSizing {
-        case .fixed:
-            cueNumberPointSize(fitting: reference, in: space)
-        case .dynamic:
-            cueNumberPointSize(fitting: text, in: space)
-        }
     }
 
     /// The height of one line of text at `size`, as `Text` lays it out. The

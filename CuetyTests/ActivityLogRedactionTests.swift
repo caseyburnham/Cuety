@@ -156,4 +156,25 @@ struct ActivityLogRedactionTests {
 
         #expect(log.entries.map(\.address) == ["/three", "/four"])
     }
+
+    @Test("Message events compute retained byte counts matching rendered arguments")
+    func messageRetainedByteCountMatchesRenderedText() {
+        let message = OSCMessage(
+            "/reply/cue",
+            [
+                .string("ok"),
+                .int32(-42),
+                .true,
+                .false,
+                .null,
+                .impulse,
+                .blob(Data([0x01, 0x02, 0x03])),
+                .array([.int64(100), .symbol("go")]),
+            ]
+        )
+        let event = OSCEvent(message: message, direction: .inbound, byteCount: 64)
+
+        let expected = (event.address.utf8.count + event.arguments.utf8.count) * 2
+        #expect(event.retainedByteCount == expected)
+    }
 }

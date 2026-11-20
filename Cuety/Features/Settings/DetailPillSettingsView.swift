@@ -12,14 +12,18 @@ struct DetailPillSettingsView: View {
             Section("Appearance") {
                 Toggle("Show the cue name", isOn: Bindable(preferences).showsCueName)
 
+                Toggle("Show detail pills", isOn: Bindable(preferences).showsDetailPills)
+
                 Toggle("Show the cue type name", isOn: Bindable(preferences).showsCueTypeLabel)
                     .help("With the name off, the cue type pill keeps its icon alone.")
+                    .disabled(!preferences.showsDetailPills)
 
                 Picker("Pill size", selection: Bindable(preferences).pillSize) {
                     ForEach(PillSize.allCases) { size in
                         Text(size.title).tag(size)
                     }
                 }
+                .disabled(!preferences.showsDetailPills)
             }
 
             Section {
@@ -29,12 +33,15 @@ struct DetailPillSettingsView: View {
             } header: {
                 Text("Pills")
             }
+            .disabled(!preferences.showsDetailPills)
 
             Section {
                 pillToggle(.notes)
             }
+            .disabled(!preferences.showsDetailPills)
 
             Button("Restore Defaults") {
+                preferences.showsDetailPills = true
                 preferences.enabledPills = DetailPillKind.defaultEnabled
                 preferences.pillSize = .default
                 preferences.showsCueTypeLabel = true

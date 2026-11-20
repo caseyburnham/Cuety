@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct DetailPill: View {
+struct DetailPill: View, Equatable {
     let kind: DetailPillKind
 
     /// Prepared by `DetailPill.entries(for:cue:cueListName:)` so the row can
@@ -13,24 +13,12 @@ struct DetailPill: View {
 
     var performanceMode = false
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var reducesMotion = false
 
     var body: some View {
-        if content.isFlexible {
-            ViewThatFits(in: .horizontal) {
-                capsule(for: content, hugsText: true)
-                capsule(for: content, hugsText: false)
-            }
-        } else {
-            capsule(for: content, hugsText: false)
-        }
-    }
-
-    @ViewBuilder
-    private func capsule(for content: Content, hugsText: Bool) -> some View {
         let contentView = label(for: content)
             .font(size.font)
-            .fixedSize(horizontal: hugsText || !content.isFlexible, vertical: false)
+            .fixedSize(horizontal: !content.isFlexible, vertical: false)
             .layoutPriority(content.isFlexible ? -1 : 0)
             .padding(.horizontal, size.horizontalPadding)
             .padding(.vertical, size.verticalPadding)
@@ -53,21 +41,16 @@ struct DetailPill: View {
     @ViewBuilder
     private func label(for content: Content) -> some View {
         let label = Label {
-            Text(content.text)
-                .fontWeight(.medium)
-                .monospacedDigit()
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .multilineTextAlignment(content.isCentred ? .center : .leading)
-                .frame(
-                    maxWidth: content.isFlexible ? Self.flexibleTextMaxWidth : nil,
-                    alignment: content.isCentred ? .center : .leading
-                )
+            pillText(for: content)
         } icon: {
             Image(systemName: content.systemImage)
                 .rotationEffect(content.glyphRotation)
                 .foregroundStyle(content.glyphTint ?? content.tint ?? .secondary)
-                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace.magic(fallback: .downUp)))
+                .contentTransition(
+                    performanceMode || reducesMotion
+                        ? .identity
+                        : .symbolEffect(.replace.magic(fallback: .downUp))
+                )
         }
 
         if content.hidesGlyph {
@@ -76,6 +59,26 @@ struct DetailPill: View {
             label.labelStyle(.titleAndIcon)
         } else {
             label.labelStyle(.iconOnly)
+        }
+    }
+
+    @ViewBuilder
+    private func pillText(for content: Content) -> some View {
+        let text = Text(content.text)
+            .fontWeight(.medium)
+            .monospacedDigit()
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .multilineTextAlignment(content.isCentred ? .center : .leading)
+
+        if content.isFlexible {
+            // Hug text width when shorter than the cap, and truncate cleanly
+            // without constructing two glass capsules via `ViewThatFits`.
+            CappedWidthLayout(maxWidth: Self.flexibleTextMaxWidth) {
+                text
+            }
+        } else {
+            text
         }
     }
 
@@ -92,7 +95,7 @@ struct DetailPill: View {
 
     /// A pill kind paired with the content it produced for a cue. Only kinds
     /// with something to say become entries.
-    struct Entry: Identifiable {
+    struct Entry: Identifiable, Equatable {
         let kind: DetailPillKind
         let content: Content
 
@@ -108,7 +111,7 @@ struct DetailPill: View {
         }
     }
 
-    struct Content {
+    struct Content: Equatable {
         let text: String
         let systemImage: String
         var tint: Color?
@@ -126,16 +129,17 @@ struct DetailPill: View {
         switch kind {
         case .cueType:
             guard let type = cue.type, !type.isEmpty else { return nil }
-            let colours = colours(forCueType: type, isGroup: cue.isGroup)
+            let lowercased = type.lowercased()
+            let colours = colours(forLowercasedCueType: lowercased, isGroup: cue.isGroup)
             return Content(
                 text: type,
-                systemImage: systemImage(forCueType: type),
+                systemImage: systemImage(forLowercasedCueType: lowercased),
                 tint: colours.pill,
                 glyphTint: colours.glyph,
                 help: cue.isGroup
                     ? "Group Cue"
                     : "\(type) cue",
-                glyphRotation: glyphRotation(forCueType: type)
+                glyphRotation: glyphRotation(forLowercasedCueType: lowercased)
             )
 
         case .duration:
@@ -200,7 +204,11 @@ struct DetailPill: View {
     }
 
     static func systemImage(forCueType type: String) -> String {
-        switch type.lowercased() {
+        systemImage(forLowercasedCueType: type.lowercased())
+    }
+
+    private static func systemImage(forLowercasedCueType lowercased: String) -> String {
+        switch lowercased {
         case "audio": "speaker.wave.2"
         case "mic": "mic"
         case "video": "film"
@@ -232,9 +240,15 @@ struct DetailPill: View {
     static func colours(
         forCueType type: String, isGroup: Bool
     ) -> (pill: Color?, glyph: Color?) {
+        colours(forLowercasedCueType: type.lowercased(), isGroup: isGroup)
+    }
+
+    private static func colours(
+        forLowercasedCueType lowercased: String, isGroup: Bool
+    ) -> (pill: Color?, glyph: Color?) {
         if isGroup { return (.green, nil) }
 
-        switch type.lowercased() {
+        switch lowercased {
         case "start", "go": return (.green, nil)
         case "stop", "hard stop": return (.red, nil)
         case "pause": return (.orange, nil)
@@ -246,7 +260,11 @@ struct DetailPill: View {
     }
 
     static func glyphRotation(forCueType type: String) -> Angle {
-        type.lowercased() == "disarm" ? .degrees(180) : .zero
+        glyphRotation(forLowercasedCueType: type.lowercased())
+    }
+
+    private static func glyphRotation(forLowercasedCueType lowercased: String) -> Angle {
+        lowercased == "disarm" ? .degrees(180) : .zero
     }
 }
 
@@ -351,6 +369,34 @@ struct WrappingPillLayout: Layout {
     }
 }
 
+/// Caps a flexible pill's text width at `maxWidth` while still hugging shorter
+/// text — avoiding the double-capsule `ViewThatFits` measurement.
+private struct CappedWidthLayout: Layout {
+    let maxWidth: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        let capped = ProposedViewSize(
+            width: min(proposal.width ?? maxWidth, maxWidth),
+            height: proposal.height
+        )
+        return subview.sizeThatFits(capped)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        guard let subview = subviews.first else { return }
+        subview.place(
+            at: CGPoint(x: bounds.midX, y: bounds.midY),
+            anchor: .center,
+            proposal: ProposedViewSize(bounds.size)
+        )
+    }
+}
+
 struct DetailPillsRow: View {
     let cue: Cue
     let kinds: [DetailPillKind]
@@ -425,8 +471,10 @@ struct DetailPillsRow: View {
             content: entry.content,
             size: size,
             showsCueTypeLabel: showsCueTypeLabel,
-            performanceMode: performanceMode
+            performanceMode: performanceMode,
+            reducesMotion: reduceMotion
         )
+        .equatable()
 
         if performanceMode {
             detailPill

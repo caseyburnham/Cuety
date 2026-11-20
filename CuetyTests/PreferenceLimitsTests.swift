@@ -109,6 +109,29 @@ struct PreferenceLimitsTests {
         #expect(preferences.requestTimeout == 5)
     }
 
+    @Test("Detail pills default to enabled, persist, and hide all pills when turned off")
+    func showsDetailPillsDefaultsPersistsAndGatesVisiblePills() throws {
+        let defaults = EphemeralDefaults()
+        let preferences = Preferences(defaults: defaults)
+
+        #expect(preferences.showsDetailPills)
+        #expect(!preferences.visiblePills.isEmpty)
+
+        preferences.enabledPills = [.duration, .notes]
+        preferences.showsDetailPills = false
+        #expect(preferences.visiblePills.isEmpty)
+
+        let reloaded = Preferences(defaults: defaults)
+        #expect(!reloaded.showsDetailPills)
+        #expect(reloaded.visiblePills.isEmpty)
+        #expect(reloaded.enabledPills == [.duration, .notes])
+
+        reloaded.showsDetailPills = true
+        #expect(reloaded.visiblePills.contains(.duration))
+        #expect(reloaded.visiblePills.contains(.notes))
+        #expect(reloaded.visiblePills.contains(.broken))
+    }
+
     @Test("Changing a clamped preference still notifies observers")
     func clampedPropertiesRemainObservable() async throws {
         let preferences = try preferences()

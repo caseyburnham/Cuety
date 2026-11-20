@@ -30,10 +30,7 @@ struct MainWindowView: View {
         MainDetailView()
             .statusToolbarActions()
 #if os(macOS)
-            // The status toolbar belongs to the detail column. Keep its native
-            // translucent surface stable while either detail layout changes.
-            .toolbarBackground(.ultraThinMaterial, for: .windowToolbar)
-            .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
+            .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
 #endif
 #if os(iOS)
             // The detail column owns this navigation bar. Keep its native
@@ -52,17 +49,49 @@ private struct MainDetailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+#if os(macOS)
+        GeometryReader { proxy in
+            content
+                .overlay(alignment: .top) {
+                    // This stationary canvas has no scroll view to supply the
+                    // toolbar's in-window blur. Sample the actual cue content.
+                    Rectangle()
+                        .fill(.ultraThinMaterial)
+                        .frame(height: proxy.safeAreaInsets.top)
+                        .offset(y: -proxy.safeAreaInsets.top)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+        }
+#else
+        content
+#endif
+    }
+
+    private var content: some View {
         Group {
             switch model.preferences.cueLayout {
             case .display:
                 GeometryReader { proxy in
-                    CueDisplayView()
-                        .safeAreaInset(edge: .bottom, spacing: 0) {
-                            CueDrawerView(
-                                availableHeight: proxy.size.height
-                            )
-                            .transition(reduceMotion ? .identity : .move(edge: .bottom).combined(with: .opacity))
-                        }
+                    let drawerHeight = CueDrawerView.viewportHeight(
+                        availableHeight: proxy.size.height,
+                        step: model.drawerStep
+                    )
+
+                    ZStack(alignment: .bottom) {
+                        CueDisplayView()
+                            .padding(.bottom, drawerHeight)
+
+                        CueDrawerView(
+                            availableHeight: proxy.size.height
+                        )
+                        .transition(
+                            reduceMotion
+                                ? .identity
+                                : .move(edge: .bottom).combined(with: .opacity)
+                        )
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
 #if os(macOS)
                 // The macOS window toolbar overlays the detail canvas. The

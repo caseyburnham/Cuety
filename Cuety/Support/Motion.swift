@@ -6,11 +6,17 @@ import UIKit
 #endif
 
 enum Motion {
-    static let cueChange = Animation.spring(response: 0.34, dampingFraction: 0.82)
+    /// Finite ease-out curve so cue changes settle in 200 ms instead of ticking
+    /// a long spring tail across dozens of frames of giant display text.
+    static let cueChange = Animation.easeOut(duration: 0.2)
 
     static let pill = Animation.spring(response: 0.42, dampingFraction: 0.78)
 
     static let chrome = Animation.spring(response: 0.50, dampingFraction: 0.86)
+
+    /// Display typography follows the window's continuous resize rather than
+    /// the spring used for discrete chrome changes.
+    static let displayResize = Animation.smooth(duration: 0.28)
 
     static let status = Animation.smooth(duration: 0.45)
 

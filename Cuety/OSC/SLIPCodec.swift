@@ -10,7 +10,7 @@ nonisolated enum SLIPCodec {
     static let escEnd: UInt8 = 0xDC
     static let escEsc: UInt8 = 0xDD
 
-    static func encode(_ payload: Data) -> Data {
+    static func encode(_ payload: some Collection<UInt8>) -> Data {
         var framed = Data()
         framed.reserveCapacity(payload.count + 2)
         framed.append(end)

@@ -454,7 +454,12 @@ final class AppModel {
     }
 
     func toggleSidebar() {
-        isSidebarVisible.toggle()
+        setSidebarVisible(!isSidebarVisible)
+    }
+
+    func setSidebarVisible(_ visible: Bool) {
+        guard isSidebarVisible != visible else { return }
+        isSidebarVisible = visible
     }
 
     func setCueLayout(_ layout: CueLayout) {

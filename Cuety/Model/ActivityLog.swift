@@ -39,6 +39,9 @@ nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
     private let rawArguments: [OSCValue]
     private let explicitArguments: String?
     let byteCount: Int
+    /// Estimated memory footprint in bytes (text plus search normalization),
+    /// precomputed without formatting ``rawArguments`` into a string.
+    let retainedByteCount: Int
 
     var arguments: String {
         if let explicitArguments { return explicitArguments }
@@ -63,6 +66,49 @@ nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
         }
     }
 
+    private static func estimatedRenderedUTF8Count(of values: [OSCValue]) -> Int {
+        guard !values.isEmpty else { return 0 }
+        var total = values.count - 1
+        for value in values {
+            total += estimatedRenderedUTF8Count(of: value)
+        }
+        return total
+    }
+
+    private static func estimatedRenderedUTF8Count(of value: OSCValue) -> Int {
+        switch value {
+        case .int32(let v): decimalByteCount(Int64(v))
+        case .int64(let v): decimalByteCount(v)
+        case .float32, .double: 12
+        case .string(let v), .symbol(let v): v.utf8.count + 2
+        case .blob(let data): 8 + decimalByteCount(Int64(data.count))
+        case .timeTag(let tag): tag.isImmediate ? 9 : decimalByteCount(tag.rawValue)
+        case .true: 4
+        case .false: 5
+        case .null: 3
+        case .impulse: 7
+        case .array(let values): 2 + estimatedRenderedUTF8Count(of: values)
+        }
+    }
+
+    private static func decimalByteCount(_ value: Int64) -> Int {
+        if value == 0 { return 1 }
+        let negative = value < 0
+        let magnitude = value.magnitude
+        return (negative ? 1 : 0) + decimalByteCount(magnitude)
+    }
+
+    private static func decimalByteCount(_ value: UInt64) -> Int {
+        if value < 10 { return 1 }
+        var count = 0
+        var n = value
+        while n > 0 {
+            n /= 10
+            count += 1
+        }
+        return count
+    }
+
     init(
         timestamp: Date = Date(),
         direction: Direction,
@@ -76,6 +122,7 @@ nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
         self.rawArguments = []
         self.explicitArguments = arguments
         self.byteCount = byteCount
+        self.retainedByteCount = (address.utf8.count + arguments.utf8.count) * 2
     }
 
     init(message: OSCMessage, direction: Direction, byteCount: Int, timestamp: Date = Date()) {
@@ -86,6 +133,9 @@ nonisolated struct OSCEvent: Identifiable, Hashable, Sendable {
         self.rawArguments = safe.arguments
         self.explicitArguments = nil
         self.byteCount = byteCount
+        self.retainedByteCount = (
+            safe.address.utf8.count + Self.estimatedRenderedUTF8Count(of: safe.arguments)
+        ) * 2
     }
 
     func matches(lowercasedQuery query: String) -> Bool {
@@ -206,7 +256,7 @@ final class ActivityLog {
         scheduleFlush()
         guard !isPaused, capacity > 0, byteCapacity > 0 else { return }
         let event = event()
-        let eventBytes = retainedByteCount(of: event)
+        let eventBytes = event.retainedByteCount
         guard eventBytes <= byteCapacity else { return }
 
         while storedCount > 0,
@@ -285,16 +335,10 @@ final class ActivityLog {
     private func removeOldest() {
         guard storedCount > 0, capacity > 0 else { return }
         if let event = storage[storageHead] {
-            storedBytes -= retainedByteCount(of: event)
+            storedBytes -= event.retainedByteCount
         }
         storage[storageHead] = nil
         storageHead = (storageHead + 1) % capacity
         storedCount -= 1
-    }
-
-    /// An entry retains its text twice over — once as shown, once normalised
-    /// for searching — so the byte cap bounds the log's share of memory.
-    private func retainedByteCount(of event: OSCEvent) -> Int {
-        (event.address.utf8.count + event.arguments.utf8.count) * 2
     }
 }

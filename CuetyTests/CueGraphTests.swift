@@ -281,4 +281,80 @@ struct CueGraphTests {
         ])
         #expect(graph.cueNumbers == ["1", "3"])
     }
+
+    @Test("WorkspaceIndex tracks counts, lookups, and per-list number versions")
+    func workspaceIndexLookupsAndNumberVersions() {
+        var lists = [
+            cue("list-a", "Main", children: [
+                cue("a1", "One"),
+                cue("a2", "Group", children: [cue("a2.1", "Nested")]),
+            ]),
+            cue("list-b", "B-List", children: [
+                cue("b1", "Other"),
+            ]),
+        ]
+
+        var index = WorkspaceIndex(cueLists: lists)
+        #expect(index.totalCueCount == 6)
+        #expect(index.contains("list-a"))
+        #expect(index.contains("a2.1"))
+        #expect(!index.contains("missing"))
+        #expect(index.cueListID(containing: "a2.1") == "list-a")
+        #expect(index.cueListID(containing: "list-a") == nil)
+        #expect(index.cue(withID: "a2.1", in: lists)?.uniqueID == "a2.1")
+        #expect(index.cue(withID: "list-b", in: lists)?.uniqueID == "list-b")
+        #expect(Set(index.cues(withIDs: ["a1", "b1", "missing"], in: lists).keys) == ["a1", "b1"])
+
+        let initialAVersion = index.graph(forListID: "list-a")?.numbersVersion
+        let initialBVersion = index.graph(forListID: "list-b")?.numbersVersion
+
+        let changes = lists.applyValuesAndFindCues(
+            ["b1": QLabCueValues(number: "99")],
+            using: index
+        )
+        #expect(changes.changedCueIDs == ["b1"])
+        index.applyCueNumberUpdates(changes.cueNumberUpdates)
+
+        #expect(index.graph(forListID: "list-a")?.numbersVersion == initialAVersion)
+        #expect(index.graph(forListID: "list-b")?.numbersVersion != initialBVersion)
+        #expect(index.graph(forListID: "list-b")?.cueNumbers == ["99"])
+
+        // No-op number update leaves numbersVersion unchanged.
+        let updatedBVersion = index.graph(forListID: "list-b")?.numbersVersion
+        index.applyCueNumberUpdates([CueNumberUpdate(cueID: "b1", displayNumber: "99")])
+        #expect(index.graph(forListID: "list-b")?.numbersVersion == updatedBVersion)
+    }
+
+    @Test("Rebuilding WorkspaceIndex preserves graph identity when structure is unchanged")
+    func workspaceIndexReusesStableGraphIdentity() {
+        let initialLists = [
+            cue("list-a", "Main", children: [
+                cue("a1", "One"),
+                cue("a2", "Two"),
+            ]),
+        ]
+        let firstIndex = WorkspaceIndex(cueLists: initialLists)
+        let firstGraph = firstIndex.graph(forListID: "list-a")
+
+        // Identical refresh keeps graphID and numbersVersion so downstream caches stay warm.
+        let sameIndex = WorkspaceIndex(cueLists: initialLists, reusing: firstIndex)
+        let sameGraph = sameIndex.graph(forListID: "list-a")
+        #expect(sameGraph?.graphID == firstGraph?.graphID)
+        #expect(sameGraph?.numbersVersion == firstGraph?.numbersVersion)
+
+        // Number-only change keeps graphID but bumps numbersVersion.
+        var renumberedLists = initialLists
+        renumberedLists[0].children[1].number = "200"
+        let renumberedIndex = WorkspaceIndex(cueLists: renumberedLists, reusing: sameIndex)
+        let renumberedGraph = renumberedIndex.graph(forListID: "list-a")
+        #expect(renumberedGraph?.graphID == firstGraph?.graphID)
+        #expect(renumberedGraph?.numbersVersion != firstGraph?.numbersVersion)
+
+        // Structural change allocates a fresh graphID.
+        var structuralLists = renumberedLists
+        structuralLists[0].children.append(cue("a3", "Three"))
+        let structuralIndex = WorkspaceIndex(cueLists: structuralLists, reusing: renumberedIndex)
+        let structuralGraph = structuralIndex.graph(forListID: "list-a")
+        #expect(structuralGraph?.graphID != firstGraph?.graphID)
+    }
 }

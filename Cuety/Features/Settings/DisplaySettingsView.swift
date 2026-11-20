@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct DisplaySettingsView: View {
-    static let settingsHeight: CGFloat = 650
+    static let settingsHeight: CGFloat = 590
 
     @Environment(AppModel.self) private var model
 
@@ -20,17 +20,6 @@ struct DisplaySettingsView: View {
                     .help("Switches the system font to its rounded design.")
 
                 sample
-            }
-
-            Section {
-                Picker("Size", selection: Bindable(preferences).cueNumberSizing) {
-                    ForEach(CueNumberSizing.allCases) { sizing in
-                        Text(sizing.title).tag(sizing)
-                    }
-                }
-
-            } header: {
-                Text("Cue Number Size")
             }
 
             Section {

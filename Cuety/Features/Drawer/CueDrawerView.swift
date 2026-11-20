@@ -7,6 +7,7 @@ struct CueDrawerView: View {
 
     @State private var dragStartStep = 0
     @State private var isResizing = false
+    @State private var numberWidthCache = DrawerNumberWidthCache()
 
     private var client: QLabClient { model.client }
 
@@ -31,6 +32,14 @@ struct CueDrawerView: View {
         )
     }
 
+    static func viewportHeight(availableHeight: CGFloat, step: Int) -> CGFloat {
+        guard step > 0 else { return handleHeight }
+        return min(
+            availableHeight * maxHeightShare,
+            height(atStep: step)
+        )
+    }
+
     private var maximumStep: Int {
         Self.stepsFitting(availableHeight)
     }
@@ -41,10 +50,13 @@ struct CueDrawerView: View {
     /// Without this, the inset is content-sized and the drag only changes how
     /// many rows fit inside a view that remains at its maximum height.
     private var drawerHeight: CGFloat {
-        guard !isCollapsed else { return Self.handleHeight }
-        return min(
-            availableHeight * Self.maxHeightShare,
-            Self.height(atStep: min(model.drawerStep, maximumStep))
+        // Keep the requested row stack alive outside the viewport. When a
+        // window is too short to show every row, clipping reveals the rows
+        // progressively as the window grows instead of changing the stack at
+        // a height threshold.
+        Self.viewportHeight(
+            availableHeight: availableHeight,
+            step: model.drawerStep
         )
     }
 
@@ -54,32 +66,38 @@ struct CueDrawerView: View {
 
     var body: some View {
         if model.hasCurrentCueData,
-           let graph = client.watchedGraph,
-           let cueList = client.watchedCueList,
-           let cueID = client.currentPlayheadCueID {
-            content(graph: graph, cueList: cueList, playheadID: cueID)
+           client.watchedGraph != nil,
+           client.currentPlayheadCueID != nil {
+            content
         }
     }
 
     @ViewBuilder
-    private func content(graph: CueGraph, cueList: Cue, playheadID: String) -> some View {
-        let step = min(model.drawerStep, maximumStep)
-        let neighbourhood = graph.neighbourhood(
-            around: playheadID,
-            above: step,
-            below: step
-        )
-        let above = neighbourhood.above.compactMap {
-            graph.cue(withID: $0, in: cueList)
-        }
-        let below = neighbourhood.below.compactMap {
-            graph.cue(withID: $0, in: cueList)
-        }
-
+    private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
             drawerHandle
 
-            if !isCollapsed {
+            if !isCollapsed,
+               let graph = client.watchedGraph,
+               let cueList = client.watchedCueList,
+               let playheadID = client.currentPlayheadCueID {
+                // Render the full requested neighbourhood even when the current
+                // window cannot display it all. The drawer's clipping viewport
+                // controls visibility, so rows can slide into view from beyond
+                // its edges during a resize.
+                let step = model.drawerStep
+                let neighbourhood = graph.neighbourhood(
+                    around: playheadID,
+                    above: step,
+                    below: step
+                )
+                let above = neighbourhood.above.compactMap {
+                    graph.cue(withID: $0, in: cueList)
+                }
+                let below = neighbourhood.below.compactMap {
+                    graph.cue(withID: $0, in: cueList)
+                }
+
                 rows(
                     graph: graph,
                     cueList: cueList,
@@ -162,38 +180,20 @@ struct CueDrawerView: View {
         }
     }
 
-    /// One width for every row's number, so the numbers line up. It is
-    /// measured from the rows on screen, with a floor that keeps short
-    /// numbers from shifting the names when the playhead moves.
-    private func numberColumnWidth(above: [Cue], below: [Cue]) -> CGFloat {
-        let typography = Typography(preferences: model.preferences)
-        var width = typography.drawerNumberWidth(
-            of: CueRowView.numberPlaceholder,
-            size: CueRowView.Role.largestRowFontSize,
-            weight: .semibold
-        )
-
-        func include(_ cue: Cue, as role: CueRowView.Role) {
-            guard let number = cue.displayNumber else { return }
-            width = max(width, typography.drawerNumberWidth(
-                of: number, size: role.fontSize, weight: role.weight
-            ))
-        }
-
-        for (offset, cue) in above.enumerated() {
-            include(cue, as: .above(distance: above.count - offset))
-        }
-        for (offset, cue) in below.enumerated() {
-            include(cue, as: .below(distance: offset + 1))
-        }
-        return width
-    }
-
     @ViewBuilder
     private func rows(
         graph: CueGraph, cueList: Cue, playheadID: String, above: [Cue], below: [Cue]
     ) -> some View {
-        let numberWidth = numberColumnWidth(above: above, below: below)
+        let typography = Typography(preferences: model.preferences)
+        let numberWidth = numberWidthCache.width(
+            graphID: graph.graphID,
+            numbersVersion: graph.numbersVersion,
+            playheadID: playheadID,
+            step: model.drawerStep,
+            above: above,
+            below: below,
+            typography: typography
+        )
         let containingGroup = graph.containingRowID(of: playheadID).flatMap {
             graph.cue(withID: $0, in: cueList)
         }
@@ -206,8 +206,10 @@ struct CueDrawerView: View {
                     CueRowView(
                         cue: cue,
                         role: .above(distance: above.count - offset),
+                        typography: typography,
                         numberColumnWidth: numberWidth
                     )
+                    .equatable()
                 }
             }
 
@@ -220,17 +222,22 @@ struct CueDrawerView: View {
                     CueRowView(
                         cue: cue,
                         role: .below(distance: offset + 1),
+                        typography: typography,
                         numberColumnWidth: numberWidth
                     )
+                    .equatable()
                 }
             }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
 
-        // Keep the rows intrinsic. The snapped step height above is
-        // deliberately conservative, so there is no scrolling fallback.
-        stack.fixedSize(horizontal: false, vertical: true)
+        // Keep the rows intrinsic, then center the full stack in the
+        // viewport. Rows that do not fit remain outside the clipped edges,
+        // while the playhead stays in a stable position.
+        stack
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxHeight: .infinity, alignment: .center)
     }
 
     private func playheadMarker(insideGroup group: Cue?) -> some View {
@@ -266,7 +273,7 @@ struct CueDrawerView: View {
     }
 }
 
-struct CueRowView: View {
+struct CueRowView: View, Equatable {
     enum Role: Hashable {
         case above(distance: Int)
         case below(distance: Int)
@@ -323,6 +330,7 @@ struct CueRowView: View {
 
     let cue: Cue
     let role: Role
+    let typography: Typography
 
     /// Shared by the rows beside this one; nil measures only this row.
     var numberColumnWidth: CGFloat?
@@ -331,11 +339,8 @@ struct CueRowView: View {
     /// pull the names left.
     static let numberPlaceholder = "000.0"
 
-    @Environment(AppModel.self) private var model
-
-    private var typography: Typography { Typography(preferences: model.preferences) }
-
     var body: some View {
+        let states = CueState.states(of: cue)
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             numberColumn
                 .foregroundStyle(cue.displayNumber == nil ? .tertiary : .primary)
@@ -351,7 +356,7 @@ struct CueRowView: View {
             Spacer(minLength: 0)
 
             CueIndicators(
-                cue: cue,
+                states: states,
                 size: max(Role.minimumIndicatorSize, role.fontSize * Role.indicatorSizeRatio)
             )
         }
@@ -359,7 +364,7 @@ struct CueRowView: View {
         .contentTransition(.identity)
         .padding(.vertical, role.isFocalRow ? 3 : 1)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityDescription)
+        .accessibilityLabel(accessibilityDescription(states: states))
     }
 
     private var nameStyle: AnyShapeStyle {
@@ -388,19 +393,29 @@ struct CueRowView: View {
         return max(placeholder, own)
     }
 
-    private var accessibilityDescription: String {
+    private func accessibilityDescription(states: [CueState]) -> String {
         var parts = [role.accessibilityPrefix]
         if let number = cue.displayNumber { parts.append("cue \(number)") }
         if let name = cue.displayName { parts.append(name) }
-        parts.append(contentsOf: CueIndicators.accessibilityParts(for: cue))
+        parts.append(contentsOf: states.map(\.spokenDescription))
         return parts.joined(separator: ", ")
     }
 }
 
 /// The glyphs a cue row shows for a cue QLab will treat specially.
-struct CueIndicators: View {
-    let cue: Cue
+struct CueIndicators: View, Equatable {
+    let states: [CueState]
     let size: CGFloat
+
+    init(states: [CueState], size: CGFloat) {
+        self.states = states
+        self.size = size
+    }
+
+    init(cue: Cue, size: CGFloat) {
+        self.states = CueState.states(of: cue)
+        self.size = size
+    }
 
     static func accessibilityParts(for cue: Cue) -> [String] {
         CueState.states(of: cue).map(\.spokenDescription)
@@ -408,7 +423,7 @@ struct CueIndicators: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            ForEach(CueState.states(of: cue)) { state in
+            ForEach(states) { state in
                 Image(systemName: state.systemImage)
                     .rotationEffect(state.rotation)
                     .foregroundStyle(state.tint)
@@ -435,6 +450,7 @@ struct CueIndicators: View {
 
     let height: CGFloat = 560
     let step = CueDrawerView.stepsFitting(height)
+    let typography = Typography(preferences: AppModel.preview.preferences)
 
     return VStack(spacing: 0) {
         Text("42")
@@ -446,12 +462,20 @@ struct CueIndicators: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(1...step, id: \.self) {
-                    CueRowView(cue: cue($0), role: .above(distance: step + 1 - $0))
+                    CueRowView(
+                        cue: cue($0),
+                        role: .above(distance: step + 1 - $0),
+                        typography: typography
+                    )
                 }
                 Rectangle().fill(.tint.opacity(0.5))
                     .frame(height: 1).padding(.vertical, 5)
                 ForEach(1...step, id: \.self) {
-                    CueRowView(cue: cue($0 + step), role: .below(distance: $0))
+                    CueRowView(
+                        cue: cue($0 + step),
+                        role: .below(distance: $0),
+                        typography: typography
+                    )
                 }
             }
             .padding(.horizontal, 20)
@@ -466,16 +490,111 @@ struct CueIndicators: View {
 
 #Preview("Awkward cue numbers") {
     let numbers = ["1", "12.5", "100.25", "A12", "1.1.1", "SQ-104"]
+    let typography = Typography(preferences: AppModel.preview.preferences)
 
     return VStack(alignment: .leading, spacing: 2) {
         ForEach(Array(numbers.enumerated()), id: \.offset) { offset, number in
             var cue = Cue(uniqueID: number)
             cue.number = number
             cue.name = "Cue named \(number)"
-            return CueRowView(cue: cue, role: .below(distance: offset + 1))
+            return CueRowView(cue: cue, role: .below(distance: offset + 1), typography: typography)
         }
     }
     .padding(20)
     .frame(width: 420)
     .environment(AppModel.preview)
+}
+
+@MainActor
+private final class DrawerNumberWidthCache {
+    private struct Key: Equatable {
+        let graphID: UUID
+        let numbersVersion: UInt64
+        let playheadID: String
+        let step: Int
+        let usesRounded: Bool
+    }
+
+    private struct MeasurementKey: Hashable {
+        let text: String
+        let size: CGFloat
+        let weight: Font.Weight
+    }
+
+    private static let maxMeasuredWidthEntries = 2048
+
+    private var cachedKey: Key?
+    private var cachedWidth: CGFloat?
+    private var measurementUsesRounded: Bool?
+    private var measuredWidths: [MeasurementKey: CGFloat] = [:]
+
+    func width(
+        graphID: UUID,
+        numbersVersion: UInt64,
+        playheadID: String,
+        step: Int,
+        above: [Cue],
+        below: [Cue],
+        typography: Typography
+    ) -> CGFloat {
+        let key = Key(
+            graphID: graphID,
+            numbersVersion: numbersVersion,
+            playheadID: playheadID,
+            step: step,
+            usesRounded: typography.usesRounded
+        )
+        if cachedKey == key, let cachedWidth {
+            return cachedWidth
+        }
+
+        var measured = measuredWidth(
+            of: CueRowView.numberPlaceholder,
+            size: CueRowView.Role.largestRowFontSize,
+            weight: .semibold,
+            typography: typography
+        )
+
+        func include(_ cue: Cue, as role: CueRowView.Role) {
+            guard let number = cue.displayNumber else { return }
+            measured = max(measured, measuredWidth(
+                of: number, size: role.fontSize, weight: role.weight, typography: typography
+            ))
+        }
+
+        for (offset, cue) in above.enumerated() {
+            include(cue, as: .above(distance: above.count - offset))
+        }
+        for (offset, cue) in below.enumerated() {
+            include(cue, as: .below(distance: offset + 1))
+        }
+
+        cachedKey = key
+        cachedWidth = measured
+        return measured
+    }
+
+    private func measuredWidth(
+        of text: String,
+        size: CGFloat,
+        weight: Font.Weight,
+        typography: Typography
+    ) -> CGFloat {
+        if measurementUsesRounded != typography.usesRounded {
+            measuredWidths.removeAll(keepingCapacity: true)
+            measurementUsesRounded = typography.usesRounded
+        }
+
+        let key = MeasurementKey(text: text, size: size, weight: weight)
+        if let cached = measuredWidths[key] {
+            return cached
+        }
+
+        if measuredWidths.count >= Self.maxMeasuredWidthEntries {
+            measuredWidths.removeAll(keepingCapacity: true)
+        }
+        let width = typography.drawerNumberWidth(of: text, size: size, weight: weight)
+        measuredWidths[key] = width
+        return width
+    }
 }

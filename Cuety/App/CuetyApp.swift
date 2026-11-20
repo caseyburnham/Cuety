@@ -36,8 +36,10 @@ struct CuetyApp: App {
         Window("Cuety", id: WindowID.main.rawValue) {
             CuetyHostedContent(model: model) {
                 MainWindowView()
+                    // Let the split view determine its minimum width so its
+                    // detail column can resize throughout sidebar expansion.
                     .frame(
-                        minWidth: 640, maxWidth: .infinity,
+                        maxWidth: .infinity,
                         minHeight: 400, maxHeight: .infinity
                     )
             }

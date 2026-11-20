@@ -117,7 +117,7 @@ struct WorkspaceSidebar: View {
         // In a compact iPad window the sidebar is the whole navigation stack.
         // Choosing a cue list is also the operator's return action to detail.
         if horizontalSizeClass == .compact {
-            model.isSidebarVisible = false
+            model.setSidebarVisible(false)
         }
 #endif
         guard id != model.client.watchedCueListID else { return }
@@ -135,14 +135,14 @@ struct WorkspaceSidebar: View {
 
         if model.selection == selection && model.client.status.hasLiveData {
             DisclosureGroup(isExpanded: isExpanded(selection)) {
-                ForEach(model.client.cueLists) { list in
+                ForEach(model.client.cueListSummaries) { list in
                     if list.isCueCart {
                         cueCartRow(list)
                     } else {
                         cueListRow(list)
                     }
                 }
-                if model.client.cueLists.isEmpty {
+                if model.client.cueListSummaries.isEmpty {
                     Text("No Cue Lists")
                         .foregroundStyle(.secondary)
                         .selectionDisabled()
@@ -245,18 +245,59 @@ struct WorkspaceSidebar: View {
         }
     }
 
-    private func cueListRow(_ list: Cue) -> some View {
-        let state = model.client.playheads[list.uniqueID]
-        let cue = state?.cueID.flatMap { model.client.cueLists.firstCue(withID: $0) }
+    private func cueListRow(_ list: QLabClient.CueListSummary) -> some View {
+        Label {
+            HStack {
+                Text(list.displayName ?? "Untitled Cue List")
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                CueListPlayheadReadout(client: model.client, listID: list.id)
+            }
+        } icon: {
+            Image(systemName: "text.line.first.and.arrowtriangle.forward")
+        }
+        .tag(Selection.cueList(list.id))
+        .help(list.displayName ?? "Untitled Cue List")
+        .accessibilityHint("Watches this cue list's playhead")
+    }
+
+    /// A cart has no playhead, so there is nothing to stand by and the row
+    /// is shown for completeness but cannot be watched.
+    private func cueCartRow(_ cart: QLabClient.CueListSummary) -> some View {
+        Label {
+            Text(cart.displayName ?? "Untitled Cue Cart")
+                .lineLimit(1)
+        } icon: {
+            Image(systemName: "square.grid.3x3")
+        }
+        .foregroundStyle(.secondary)
+        .selectionDisabled()
+        .help("Cue carts have no playhead to watch")
+        .accessibilityHint("A cue cart. Cue carts have no playhead to watch.")
+    }
+
+    private func probeWorkspaces(on server: QLabServer) {
+        Task { await model.refreshWorkspaces(onServerWithID: server.id) }
+    }
+}
+
+/// Isolated playhead readout for a single sidebar cue list row so playhead
+/// changes never invalidate `WorkspaceSidebar`'s `List` diffing.
+private struct CueListPlayheadReadout: View {
+    let client: QLabClient
+    let listID: String
+
+    var body: some View {
+        let summary = client.playheadSummaries[listID]
 
         let marker: String
         let description: String
-        switch state {
-        case .cue where cue != nil:
-            marker = cue?.displayNumber ?? "•"
+        switch summary?.state {
+        case .cue where summary?.hasCue == true:
+            marker = summary?.cueDisplayNumber ?? "•"
             description = """
-                Standing by: \(cue?.displayNumber ?? "Unnumbered cue"), \
-                \(cue?.displayName ?? "Untitled")
+                Standing by: \(summary?.cueDisplayNumber ?? "Unnumbered cue"), \
+                \(summary?.cueDisplayName ?? "Untitled")
                 """
         case .cue:
             marker = "?"
@@ -272,42 +313,11 @@ struct WorkspaceSidebar: View {
             description = "Cuety has not read this cue list's playhead yet"
         }
 
-        return Label {
-            HStack {
-                Text(list.displayName ?? "Untitled Cue List")
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Text(marker)
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(state?.isKnown == false ? .orange : .secondary)
-                    .help(description)
-                    .accessibilityLabel(description)
-            }
-        } icon: {
-            Image(systemName: "text.line.first.and.arrowtriangle.forward")
-        }
-        .tag(Selection.cueList(list.uniqueID))
-        .help(list.displayName ?? "Untitled Cue List")
-        .accessibilityHint("Watches this cue list's playhead")
-    }
-
-    /// A cart has no playhead, so there is nothing to stand by and the row
-    /// is shown for completeness but cannot be watched.
-    private func cueCartRow(_ cart: Cue) -> some View {
-        Label {
-            Text(cart.displayName ?? "Untitled Cue Cart")
-                .lineLimit(1)
-        } icon: {
-            Image(systemName: "square.grid.3x3")
-        }
-        .foregroundStyle(.secondary)
-        .selectionDisabled()
-        .help("Cue carts have no playhead to watch")
-        .accessibilityHint("A cue cart. Cue carts have no playhead to watch.")
-    }
-
-    private func probeWorkspaces(on server: QLabServer) {
-        Task { await model.refreshWorkspaces(onServerWithID: server.id) }
+        return Text(marker)
+            .font(.caption)
+            .monospacedDigit()
+            .foregroundStyle(summary?.state.isKnown == false ? .orange : .secondary)
+            .help(description)
+            .accessibilityLabel(description)
     }
 }

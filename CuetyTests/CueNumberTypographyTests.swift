@@ -4,9 +4,9 @@ import Testing
 
 @testable import Cuety
 
-@Suite("Cue number sizing")
+@Suite("Cue number typography")
 @MainActor
-struct CueNumberSizingTests {
+struct CueNumberTypographyTests {
     private func typography() throws -> Typography {
         Typography(
             preferences: Preferences(
@@ -91,29 +91,4 @@ struct CueNumberSizingTests {
 
         #expect(size == Typography.cueNumberBaseSize)
     }
-
-    private func typography(sizing: CueNumberSizing) throws -> Typography {
-        let preferences = Preferences(
-            defaults: EphemeralDefaults()
-        )
-        preferences.cueNumberSizing = sizing
-        return Typography(preferences: preferences)
-    }
-
-    @Test("Fixed sizing fits the list's widest number, not the standby one")
-    func fixedSizingFitsTheReference() throws {
-        let typography = try typography(sizing: .fixed)
-
-        #expect(typography.standbyNumberPointSize(for: "1", reference: "127.5", in: space)
-            == typography.cueNumberPointSize(fitting: "127.5", in: space))
-    }
-
-    @Test("Dynamic sizing fits the standby number alone")
-    func dynamicSizingFitsTheNumber() throws {
-        let typography = try typography(sizing: .dynamic)
-
-        #expect(typography.standbyNumberPointSize(for: "1", reference: "127.5", in: space)
-            == typography.cueNumberPointSize(fitting: "1", in: space))
-    }
-
 }

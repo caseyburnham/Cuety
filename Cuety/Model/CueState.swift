@@ -3,7 +3,7 @@ import SwiftUI
 /// A state that changes what QLab does on a GO — broken, disarmed, loaded,
 /// flagged, or continuing — with how every surface shows it. The detail
 /// pills, the drawer's glyphs and their VoiceOver text all read from here.
-struct CueState: Identifiable {
+struct CueState: Identifiable, Equatable {
     let kind: DetailPillKind
     let title: String
     let systemImage: String

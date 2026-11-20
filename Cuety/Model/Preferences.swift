@@ -152,24 +152,6 @@ enum PillSize: String, CaseIterable, Hashable, Sendable, Identifiable {
     var glassSpacing: CGFloat { spacing + 4 }
 }
 
-/// How the standby display sizes the cue number.
-enum CueNumberSizing: String, CaseIterable, Hashable, Sendable, Identifiable {
-    /// Sized to fit the widest number in the cue list, so every cue in the
-    /// list is drawn at the same size.
-    case fixed
-    /// Each number as large as it can be drawn in the space available.
-    case dynamic
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .fixed: "Fixed"
-        case .dynamic: "Dynamic"
-        }
-    }
-}
-
 /// The color of the cue list layout's playhead arrow. Stored by raw value,
 /// which for a cue color is QLab's own name for it.
 enum PlayheadAccent: RawRepresentable, Hashable, Sendable, Identifiable {
@@ -201,7 +183,7 @@ enum PlayheadAccent: RawRepresentable, Hashable, Sendable, Identifiable {
 
     var title: String {
         switch self {
-        case .systemBlue: "System Blue"
+        case .systemBlue: "System"
         case .standbyCue: "Standby Cue"
         case .cue(let color): color.title
         }
@@ -209,7 +191,7 @@ enum PlayheadAccent: RawRepresentable, Hashable, Sendable, Identifiable {
 
     func color(for standbyCue: Cue?) -> Color {
         switch self {
-        case .systemBlue: .blue
+        case .systemBlue: .accentColor
         case .standbyCue: standbyCue?.color ?? .blue
         case .cue(let color): color.color
         }
@@ -237,10 +219,6 @@ final class Preferences {
 
     var fontWeight: FontWeightChoice {
         didSet { defaults.set(fontWeight.rawValue, forKey: Key.fontWeight) }
-    }
-
-    var cueNumberSizing: CueNumberSizing {
-        didSet { defaults.set(cueNumberSizing.rawValue, forKey: Key.cueNumberSizing) }
     }
 
     var showsCueName: Bool {
@@ -274,6 +252,10 @@ final class Preferences {
         }
     }
 
+    var showsDetailPills: Bool {
+        didSet { defaults.set(showsDetailPills, forKey: Key.showsDetailPills) }
+    }
+
     var enabledPills: Set<DetailPillKind> {
         didSet { defaults.set(enabledPills.map(\.rawValue), forKey: Key.enabledPills) }
     }
@@ -287,7 +269,8 @@ final class Preferences {
     }
 
     var visiblePills: [DetailPillKind] {
-        DetailPillKind.allCases.filter { enabledPills.contains($0) || $0.isAlwaysVisible }
+        guard showsDetailPills else { return [] }
+        return DetailPillKind.allCases.filter { enabledPills.contains($0) || $0.isAlwaysVisible }
     }
 
     var showsMenuBarExtra: Bool {
@@ -349,6 +332,7 @@ final class Preferences {
             Key.showsPlayhead: true,
             Key.showsDrawer: true,
             Key.drawerRowCount: 3,
+            Key.showsDetailPills: true,
             Key.showsCueTypeLabel: true,
             Key.defaultPort: ShowControlDefaults.qlabTCPPort,
             Key.heartbeatInterval: 5.0,
@@ -360,8 +344,6 @@ final class Preferences {
         usesRoundedSystemFont = defaults.bool(forKey: Key.usesRoundedSystemFont)
         fontWeight = defaults.string(forKey: Key.fontWeight)
             .flatMap(FontWeightChoice.init(rawValue:)) ?? .bold
-        cueNumberSizing = defaults.string(forKey: Key.cueNumberSizing)
-            .flatMap(CueNumberSizing.init(rawValue:)) ?? .fixed
         showsCueName = defaults.bool(forKey: Key.showsCueName)
         playheadAccent = defaults.string(forKey: Key.playheadAccent)
             .flatMap(PlayheadAccent.init(rawValue:)) ?? .systemBlue
@@ -371,6 +353,7 @@ final class Preferences {
         showsDrawer = defaults.bool(forKey: Key.showsDrawer)
         drawerRowCount = Limits.drawerRows.clamping(defaults.integer(forKey: Key.drawerRowCount))
 
+        showsDetailPills = defaults.bool(forKey: Key.showsDetailPills)
         enabledPills = Self.loadEnabledPills(from: defaults)
         pillSize = defaults.string(forKey: Key.pillSize)
             .flatMap(PillSize.init(rawValue:)) ?? .default
@@ -407,13 +390,13 @@ final class Preferences {
         static let appearance = "appearance"
         static let usesRoundedSystemFont = "usesRoundedSystemFont"
         static let fontWeight = "fontWeight"
-        static let cueNumberSizing = "cueNumberSizing"
         static let showsCueName = "showsCueName"
         static let playheadAccent = "playheadAccent"
         static let showsPlayhead = "showsPlayhead"
         static let cueLayout = "cueLayout"
         static let showsDrawer = "showsDrawer"
         static let drawerRowCount = "drawerRowCount"
+        static let showsDetailPills = "showsDetailPills"
         static let enabledPills = "enabledPills"
         static let pillSize = "pillSize"
         static let showsCueTypeLabel = "showsCueTypeLabel"

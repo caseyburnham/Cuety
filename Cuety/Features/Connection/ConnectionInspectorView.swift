@@ -130,9 +130,9 @@ struct ConnectionInspectorView: View {
     private var qlabSection: some View {
         Section("QLab") {
             LabeledContent("Version", value: client.workspace?.version ?? "Unknown")
-            LabeledContent("Cue Lists", value: client.cueLists.count.formatted())
+            LabeledContent("Cue Lists", value: client.cueListSummaries.count.formatted())
             LabeledContent("Cues", value: client.totalCueCount.formatted())
-            if let watched = client.watchedCueList?.displayName {
+            if let watched = client.watchedCueListName {
                 LabeledContent("Watching", value: watched)
             }
         }

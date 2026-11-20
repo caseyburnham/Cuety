@@ -55,8 +55,7 @@ nonisolated struct Cue: Hashable, Sendable, Identifiable {
     }
 
     var displayNumber: String? {
-        guard let number, !number.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-        return number
+        Self.trimmedNonEmpty(number)
     }
 
     var displayName: String? {
@@ -64,13 +63,17 @@ nonisolated struct Cue: Hashable, Sendable, Identifiable {
     }
 
     private static func trimmedNonEmpty(_ value: String?) -> String? {
-        guard let value, !value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        guard let value, value.contains(where: { !$0.isWhitespace }) else { return nil }
         return value
     }
 
     var color: Color? {
-        guard let colorName = colorName?.lowercased(),
-              let qlabColor = QLabCueColor(rawValue: colorName) else {
+        guard let colorName, !colorName.isEmpty else { return nil }
+        if let qlabColor = QLabCueColor(rawValue: colorName) {
+            return qlabColor.color
+        }
+        guard colorName.utf8.contains(where: { $0 >= 0x41 && $0 <= 0x5A }),
+              let qlabColor = QLabCueColor(rawValue: colorName.lowercased()) else {
             return nil
         }
         return qlabColor.color
@@ -198,10 +201,55 @@ nonisolated extension Array<Cue> {
         applyValuesAndFindCues(valuesByID, using: nil).changedCueIDs
     }
 
+    /// Uses the workspace index's paths for O(1) cue resolution across every
+    /// cue list, then falls back to a single traversal for any unindexed IDs.
+    mutating func applyValuesAndFindCues(
+        _ valuesByID: [String: QLabCueValues], using index: WorkspaceIndex
+    ) -> CueValueChanges {
+        applyValuesAndFindCues(valuesByID) { cueID, lists, body in
+            if let location = index.locationsByCueID[cueID],
+               lists.indices.contains(location.listIndex),
+               lists[location.listIndex].uniqueID == location.cueListID {
+                return Self.mutateCue(
+                    withID: cueID,
+                    at: location.path[...],
+                    in: &lists[location.listIndex].children,
+                    body: body
+                )
+            }
+            if let listIndex = index.listIndicesByID[cueID],
+               lists.indices.contains(listIndex),
+               lists[listIndex].uniqueID == cueID {
+                body(&lists[listIndex])
+                return true
+            }
+            return false
+        }
+    }
+
     /// Uses the watched list's paths for the common case, then finds any
     /// remaining IDs in one traversal of the current tree.
     mutating func applyValuesAndFindCues(
         _ valuesByID: [String: QLabCueValues], using graph: CueGraph?
+    ) -> CueValueChanges {
+        let listIndex = graph.flatMap { graph in
+            firstIndex(where: { $0.uniqueID == graph.cueListID })
+        }
+        return applyValuesAndFindCues(valuesByID) { cueID, lists, body in
+            guard let graph, let listIndex,
+                  let cuePath = graph.path(for: cueID) else { return false }
+            return Self.mutateCue(
+                withID: cueID,
+                at: cuePath[...],
+                in: &lists[listIndex].children,
+                body: body
+            )
+        }
+    }
+
+    private mutating func applyValuesAndFindCues(
+        _ valuesByID: [String: QLabCueValues],
+        fastPath: (String, inout [Cue], (inout Cue) -> Void) -> Bool
     ) -> CueValueChanges {
         guard !valuesByID.isEmpty else {
             return CueValueChanges(foundCueIDs: [], changedCueIDs: [], cueNumberUpdates: [])
@@ -225,23 +273,15 @@ nonisolated extension Array<Cue> {
             }
         }
 
-        // Fast path: resolve directly via the watched CueGraph's index path.
-        if let graph, let listIndex = firstIndex(where: { $0.uniqueID == graph.cueListID }) {
-            for (cueID, values) in valuesByID {
-                guard let cuePath = graph.path(for: cueID),
-                      Self.mutateCue(
-                          withID: cueID,
-                          at: ([listIndex] + cuePath)[...],
-                          in: &self,
-                          body: { updateIfChanged(&$0, with: values) }
-                      )
-                else { continue }
-                found.insert(cueID)
-                remaining.remove(cueID)
+        for (cueID, values) in valuesByID {
+            guard fastPath(cueID, &self, { updateIfChanged(&$0, with: values) }) else {
+                continue
             }
+            found.insert(cueID)
+            remaining.remove(cueID)
         }
 
-        // Fallback: single traversal for any cues outside the watched graph.
+        // Fallback: single traversal for any cues whose paths changed or were unindexed.
         if !remaining.isEmpty {
             func visit(_ cues: inout [Cue]) {
                 guard !remaining.isEmpty else { return }

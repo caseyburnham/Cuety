@@ -12,6 +12,7 @@ struct CueDisplayView: View {
 
     private var client: QLabClient { model.client }
     private var typography: Typography { Typography(preferences: model.preferences) }
+    private var animatesCueChange: Bool { !model.preferences.performanceMode && !reduceMotion }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,21 +26,14 @@ struct CueDisplayView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Washing the cue color across the canvas keeps it readable even when
-        // the cue name is hidden. Clear stands in for "no color" so the tint
-        // cross-fades with the cue change instead of popping in and out.
+        // the cue name is hidden. Updating it immediately avoids forcing the
+        // translucent toolbar overlay and Liquid Glass pills to resample an
+        // animating full-window backdrop across frames.
         .background {
             (canvasTint ?? .clear)
                 .opacity(Self.canvasTintOpacity)
                 .ignoresSafeArea()
         }
-        // Performance mode disables the container animation; normal mode
-        // retains the animated number transition and display resizing.
-        .motion(
-            Motion.cueChange,
-            value: model.preferences.performanceMode
-                ? nil
-                : client.currentPlayheadCueID
-        )
     }
 
     private var staleDataState: some View {
@@ -62,11 +56,10 @@ struct CueDisplayView: View {
     }
 
     private func cueListName(containing cue: Cue) -> String? {
-        if let watched = client.watchedCueList,
-           client.watchedGraph?.rowIndex(of: cue.uniqueID) != nil {
-            return watched.displayName
+        if client.watchedGraph?.rowIndex(of: cue.uniqueID) != nil {
+            return client.watchedCueListName
         }
-        return client.cueLists.cueList(containing: cue.uniqueID)?.displayName
+        return client.cueListName(containing: cue.uniqueID)
     }
 
     @ViewBuilder
@@ -87,18 +80,18 @@ struct CueDisplayView: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.5)
-                    .transition(reduceMotion ? .identity : .opacity)
-                    .id(cue.uniqueID)
             }
 
-            DetailPillsRow(
-                cue: cue,
-                kinds: model.preferences.visiblePills,
-                cueListName: cueListName(containing: cue),
-                size: detailPillSize,
-                showsCueTypeLabel: model.preferences.showsCueTypeLabel,
-                performanceMode: model.preferences.performanceMode
-            )
+            if model.preferences.showsDetailPills {
+                DetailPillsRow(
+                    cue: cue,
+                    kinds: model.preferences.visiblePills,
+                    cueListName: cueListName(containing: cue),
+                    size: detailPillSize,
+                    showsCueTypeLabel: model.preferences.showsCueTypeLabel,
+                    performanceMode: model.preferences.performanceMode
+                )
+            }
         }
         .padding(.horizontal, 32)
         .padding(.vertical, 24)
@@ -107,61 +100,63 @@ struct CueDisplayView: View {
 
     @ViewBuilder
     private func numberOrName(_ cue: Cue) -> some View {
-        if let number = cue.displayNumber {
-            headline(number)
-                // Keep the native numeric transition, but composite it on the GPU.
-                .environment(\.contentTransitionAddsDrawingGroup, true)
-                .monospacedDigit()
-                .foregroundStyle(.primary)
-                .contentTransition(
-                    model.preferences.performanceMode || reduceMotion ? .identity : .numericText()
-                )
-                .accessibilityLabel("Cue number \(number)")
-        } else if let name = cue.displayName {
-            VStack(spacing: 6) {
-                Text(name)
-                    .font(typography.cueNumber)
-                    .minimumScaleFactor(Typography.cueNumberMinimumScale)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
+        Group {
+            if let number = cue.displayNumber {
+                headline(number, animatesNumericTransition: animatesCueChange)
                     .foregroundStyle(.primary)
-                    .transition(reduceMotion ? .identity : .opacity)
+                    .accessibilityLabel("Cue number \(number)")
+            } else if let name = cue.displayName {
+                VStack(spacing: 6) {
+                    Text(name)
+                        .font(typography.cueNumber)
+                        .minimumScaleFactor(Typography.cueNumberMinimumScale)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.primary)
 
-                caption("Unnumbered")
+                    caption("Unnumbered")
+                        .foregroundStyle(.tertiary)
+                }
+                .accessibilityLabel("Unnumbered cue, \(name)")
+            } else {
+                headline("—")
                     .foregroundStyle(.tertiary)
+                    .accessibilityLabel("Cue with no number or name")
             }
-            .accessibilityLabel("Unnumbered cue, \(name)")
-        } else {
-            headline("—")
-                .foregroundStyle(.tertiary)
-                .accessibilityLabel("Cue with no number or name")
         }
+        .animation(animatesCueChange ? Motion.cueChange : nil, value: cue.displayNumber == nil)
     }
 
-    private func headline(_ text: String) -> some View {
+    private func headline(_ text: String, animatesNumericTransition: Bool = false) -> some View {
         let reference = referenceNumber(for: text)
 
         return GeometryReader { geometry in
+            let pointSize = headlineSizingCache.pointSize(
+                for: reference,
+                in: geometry.size,
+                typography: typography
+            )
             Text(text)
-                .font(typography.cueNumber(
-                    size: typography.standbyNumberPointSize(
-                        for: text, reference: reference, in: geometry.size
-                    )
+                .modifier(AnimatedCueNumberFont(
+                    typography: typography,
+                    pointSize: pointSize
                 ))
-                .minimumScaleFactor(0.5)
+                .monospacedDigit()
                 .lineLimit(1)
+                // Keep the native numeric transition GPU-accelerated so giant
+                // display numerals don't re-rasterize on the CPU each frame.
+                .environment(\.contentTransitionAddsDrawingGroup, animatesNumericTransition)
+                .contentTransition(animatesNumericTransition ? .numericText() : .identity)
+                .animation(reduceMotion ? nil : Motion.displayResize, value: pointSize)
+                .animation(animatesNumericTransition ? Motion.cueChange : nil, value: text)
                 .frame(width: geometry.size.width, height: geometry.size.height)
         }
     }
 
     private func referenceNumber(for text: String) -> String {
-        guard typography.cueNumberSizing == .fixed else {
-            headlineSizingCache.clear()
-            return text
-        }
-        return headlineSizingCache.referenceNumber(
+        headlineSizingCache.referenceNumber(
             for: text,
-            cueNumbers: client.watchedGraph?.cueNumbers ?? [],
+            graph: client.watchedGraph,
             typography: typography
         )
     }
@@ -181,7 +176,7 @@ struct CueDisplayView: View {
             } description: {
                 Text(client.status.detail)
             }
-        } else if client.cueLists.isEmpty {
+        } else if client.cueListSummaries.isEmpty {
             ContentUnavailableView {
                 Label("No Cue Lists", systemImage: "list.bullet.rectangle")
             } description: {
@@ -223,36 +218,102 @@ struct CueDisplayView: View {
 }
 
 @MainActor
+private struct AnimatedCueNumberFont: AnimatableModifier {
+    let typography: Typography
+    var pointSize: CGFloat
+
+    var animatableData: CGFloat {
+        get { pointSize }
+        set { pointSize = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        content.font(typography.cueNumber(size: pointSize))
+    }
+}
+
+@MainActor
 final class HeadlineSizingCache {
-    private struct Inputs: Equatable {
-        let cueNumbers: [String]
+    private struct GraphInputs: Equatable {
+        let graphID: UUID?
+        let numbersVersion: UInt64
         let usesRounded: Bool
         let fontWeight: Font.Weight
     }
 
-    private var inputs: Inputs?
-    private var cachedListReference: String?
-
-    func clear() {
-        guard inputs != nil else { return }
-        inputs = nil
-        cachedListReference = nil
+    private struct SizeInputs: Equatable {
+        let text: String
+        let space: CGSize
+        let usesRounded: Bool
+        let fontWeight: Font.Weight
     }
 
-    func referenceNumber(for text: String, cueNumbers: [String], typography: Typography) -> String {
-        let inputs = Inputs(
-            cueNumbers: cueNumbers,
+    private var graphInputs: GraphInputs?
+    private var cachedListReference: String?
+    private var cachedCueNumbers: Set<String> = []
+    private var lastReferenceText: String?
+    private var lastResolvedReference: String?
+
+    private var lastSizeInputs: SizeInputs?
+    private var lastPointSize: CGFloat?
+
+    func pointSize(for text: String, in space: CGSize, typography: Typography) -> CGFloat {
+        guard space.width > 0, space.height > 0, !text.isEmpty else {
+            // Split-view transitions can briefly provide invalid geometry. Keep
+            // the last stable size instead of falling to Typography's minimum.
+            return lastPointSize ?? Typography.cueNumberBaseSize
+        }
+
+        let sizeInputs = SizeInputs(
+            text: text,
+            space: space,
+            usesRounded: typography.usesRounded,
+            fontWeight: typography.cueNumberWeight
+        )
+        if lastSizeInputs == sizeInputs, let lastPointSize {
+            return lastPointSize
+        }
+
+        let pointSize = typography.cueNumberPointSize(fitting: text, in: space)
+        lastSizeInputs = sizeInputs
+        lastPointSize = pointSize
+        return pointSize
+    }
+
+    func referenceNumber(for text: String, graph: CueGraph?, typography: Typography) -> String {
+        let inputs = GraphInputs(
+            graphID: graph?.graphID,
+            numbersVersion: graph?.numbersVersion ?? 0,
             usesRounded: typography.usesRounded,
             fontWeight: typography.cueNumberWeight
         )
 
-        if self.inputs != inputs {
-            cachedListReference = typography.widestCueNumber(among: cueNumbers)
-            self.inputs = inputs
+        if graphInputs != inputs {
+            cachedListReference = graph.flatMap { typography.widestCueNumber(among: $0.cueNumbers) }
+            cachedCueNumbers = graph.map { Set($0.cueNumbers) } ?? []
+            graphInputs = inputs
+            lastReferenceText = nil
+            lastResolvedReference = nil
         }
 
-        guard let cachedListReference else { return text }
-        return typography.widestCueNumber(among: [cachedListReference, text]) ?? text
+        if lastReferenceText == text, let lastResolvedReference {
+            return lastResolvedReference
+        }
+
+        let resolved: String
+        if let cachedListReference {
+            if cachedListReference == text || cachedCueNumbers.contains(text) {
+                resolved = cachedListReference
+            } else {
+                resolved = typography.widestCueNumber(among: [cachedListReference, text]) ?? text
+            }
+        } else {
+            resolved = text
+        }
+
+        lastReferenceText = text
+        lastResolvedReference = resolved
+        return resolved
     }
 }
 

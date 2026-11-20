@@ -1,12 +1,16 @@
 import SwiftUI
 
 struct HeartbeatIndicator: View {
+    var allowsAnimation = true
+
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var client: QLabClient { model.client }
     private var isLive: Bool { client.status.hasLiveData }
-    private var animates: Bool { !reduceMotion && !model.preferences.performanceMode }
+    private var animates: Bool {
+        allowsAnimation && !reduceMotion && !model.preferences.performanceMode
+    }
 
     var body: some View {
         Image(systemName: client.heartbeatSymbol)
@@ -17,7 +21,11 @@ struct HeartbeatIndicator: View {
                 options: .nonRepeating,
                 value: animates ? client.heartbeatCount : 0
             )
-            .motion(Motion.status, value: isLive)
+            .motion(Motion.status, value: animates ? isLive : nil)
+            // Lock intrinsic bounds so `.symbolEffect(.bounce)` never shifts
+            // `RBSymbolAnimator.alignmentRect` and triggers AppKit toolbar
+            // AutoLayout passes (`NSToolbarItemViewer _layoutSubtreeWithOldSize:`).
+            .frame(width: 18, height: 18)
     }
 }
 

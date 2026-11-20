@@ -2,7 +2,6 @@ import SwiftUI
 
 struct CueMenuBarLabel: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var client: QLabClient { model.client }
 
@@ -16,16 +15,18 @@ struct CueMenuBarLabel: View {
         switch model.preferences.menuBarReadout {
         case .cueNumber: cueNumber
         case .connectionStatus: statusGlyph
-        case .heartbeat: HeartbeatIndicator()
+        case .heartbeat: HeartbeatIndicator(allowsAnimation: false)
         }
     }
 
     @ViewBuilder
     private var cueNumber: some View {
+        // MenuBarExtra renders into an NSStatusItem button, which cannot
+        // visually interpolate SwiftUI text animations and would otherwise
+        // redraw the status item across animation ticks on every cue change.
         if let number = model.standbyCue?.displayNumber {
             Text(number)
                 .monospacedDigit()
-                .motion(Motion.status, value: number)
         } else {
             statusGlyph
         }
@@ -34,10 +35,6 @@ struct CueMenuBarLabel: View {
     private var statusGlyph: some View {
         Image(systemName: client.status.systemImage)
             .foregroundStyle(client.status.tint)
-            .contentTransition(
-                reduceMotion ? .identity : .symbolEffect(.replace.magic(fallback: .downUp))
-            )
-            .motion(Motion.status, value: client.status)
     }
 
     private var accessibilityLabel: String {

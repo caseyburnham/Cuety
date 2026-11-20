@@ -17,38 +17,60 @@ final class QLabClient {
 
     private(set) var cueLists: [Cue] = []
 
-    /// Detail replies preserve topology, so this cache changes only on structural replacements.
-    @ObservationIgnored private var cachedTotalCueCount: Int?
+    /// O(1) lookup index over `cueLists`, rebuilt off the main actor on each
+    /// structural refresh.
+    @ObservationIgnored private var workspaceIndex = WorkspaceIndex(cueLists: [])
 
-    /// Every cue in every list, counted once per structural snapshot. The
-    /// inspector shows it beside values that change on each heartbeat, so the
-    /// traversal would otherwise repeat several times a second.
-    var totalCueCount: Int {
-        if let cachedTotalCueCount { return cachedTotalCueCount }
-
-        func count(_ cues: [Cue]) -> Int {
-            cues.reduce(0) { $0 + 1 + count($1.children) }
-        }
-
-        let total = count(cueLists)
-        cachedTotalCueCount = total
-        return total
-    }
+    /// Every cue in every list, counted once per structural snapshot.
+    private(set) var totalCueCount = 0
 
     private(set) var playheads: [String: PlayheadState] = [:]
-    private var playheadRevisions: [String: UInt64] = [:]
+    @ObservationIgnored private var playheadRevisions: [String: UInt64] = [:]
     @ObservationIgnored private var playheadRefreshGeneration: UInt64 = 0
     @ObservationIgnored private var cueDetailInvalidationPending = false
     @ObservationIgnored private var cueDetailInvalidationGeneration: UInt64 = 0
 
-    var watchedCueListID: String? {
-        didSet {
-            if let watchedCueListID { preferredCueListID = watchedCueListID }
-            invalidateWatchedGraph()
+    /// Lightweight sidebar metadata for a top-level cue list or cart. Kept
+    /// separate from `cueLists` so detail refreshes on individual cues never
+    /// force the sidebar `List` to diff or copy full `Cue` subtrees.
+    struct CueListSummary: Identifiable, Equatable, Sendable {
+        let id: String
+        let displayName: String?
+        let isCueCart: Bool
+
+        init(list: Cue) {
+            self.id = list.uniqueID
+            self.displayName = list.displayName
+            self.isCueCart = list.isCueCart
         }
     }
 
-    private var watchedGraphCache: (cueListID: String, graph: CueGraph)?
+    /// Sidebar playhead readout for a single cue list, updated only when that
+    /// list's playhead state or standing-by cue number/name changes.
+    struct PlayheadSummary: Equatable, Sendable {
+        let state: PlayheadState
+        let cueDisplayNumber: String?
+        let cueDisplayName: String?
+        let hasCue: Bool
+    }
+
+    /// Derived state for the watched cue list, kept in sync only when its own
+    /// values change so updates to unrelated cue lists or off-standby cues do
+    /// not invalidate display views.
+    private(set) var cueListSummaries: [CueListSummary] = []
+    private(set) var playheadSummaries: [String: PlayheadSummary] = [:]
+    private(set) var watchedPlayhead: PlayheadState?
+    private(set) var watchedGraph: CueGraph?
+    private(set) var playheadCue: Cue?
+    private(set) var watchedCueListName: String?
+    private(set) var isWatchingCueCart = false
+
+    var watchedCueListID: String? {
+        didSet {
+            if let watchedCueListID { preferredCueListID = watchedCueListID }
+            syncWatchedState()
+        }
+    }
 
     private(set) var connectedSince: Date?
     private(set) var usedPasscode = false
@@ -67,7 +89,7 @@ final class QLabClient {
     private(set) var lastRoundTrip: TimeInterval?
     private(set) var meanRoundTrip: TimeInterval?
     private(set) var missedThumps = 0
-    private var roundTripSamples: [TimeInterval] = []
+    @ObservationIgnored private var roundTripSamples: [TimeInterval] = []
 
     var onPasscodeRequired: ((Bool) -> Void)?
 
@@ -89,21 +111,21 @@ final class QLabClient {
         return true
     }
 
-    private var connection: QLabConnection?
-    private var eventTask: Task<Void, Never>?
-    private var heartbeatTask: Task<Void, Never>?
-    private var reconnectTask: Task<Void, Never>?
+    @ObservationIgnored private var connection: QLabConnection?
+    @ObservationIgnored private var eventTask: Task<Void, Never>?
+    @ObservationIgnored private var heartbeatTask: Task<Void, Never>?
+    @ObservationIgnored private var reconnectTask: Task<Void, Never>?
 
-    private var replies = ReplyCorrelator<CheckedContinuation<ReceivedReply, any Error>>()
-    private var timeoutTasks: [UUID: Task<Void, Never>] = [:]
-    private var requestSendStates: [UUID: QLabSendState] = [:]
-    private var abandonedReplyPruneTask: Task<Void, Never>?
+    @ObservationIgnored private var replies = ReplyCorrelator<CheckedContinuation<ReceivedReply, any Error>>()
+    @ObservationIgnored private var timeoutTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var requestSendStates: [UUID: QLabSendState] = [:]
+    @ObservationIgnored private var abandonedReplyPruneTask: Task<Void, Never>?
 
     private var currentTarget: (server: QLabServer, workspaceID: String, passcode: String?)?
 
-    private var preferredCueListID: String?
+    @ObservationIgnored private var preferredCueListID: String?
 
-    private var backoffAttempt = 0
+    @ObservationIgnored private var backoffAttempt = 0
 
     init(preferences: Preferences, log: ActivityLog) {
         self.preferences = preferences
@@ -256,17 +278,18 @@ final class QLabClient {
     private func invalidateLiveSessionData() {
         connectedSince = nil
         cueLists = []
-        cachedTotalCueCount = nil
+        workspaceIndex = WorkspaceIndex(cueLists: [])
+        totalCueCount = 0
         cuesWithLoadedDetails.removeAll()
         pendingCueDetailIDs.removeAll()
         cueDetailRevisions.removeAll()
         activeCueDetailIDs.removeAll()
-        invalidateWatchedGraph()
         playheads = [:]
         playheadRevisions = [:]
         cueDetailInvalidationPending = false
         cueDetailInvalidationGeneration &+= 1
         watchedCueListID = nil
+        syncWatchedState()
     }
 
     private func handleSessionLost(reason: String) {
@@ -298,9 +321,9 @@ final class QLabClient {
         return .rebuildSession
     }
 
-    private var lastOverflowRecovery: ContinuousClock.Instant?
+    @ObservationIgnored private var lastOverflowRecovery: ContinuousClock.Instant?
 
-    private var overflowRecoveryTask: Task<Void, Never>?
+    @ObservationIgnored private var overflowRecoveryTask: Task<Void, Never>?
 
     private func handleEventsDropped(_ lost: Int, on connection: QLabConnection) {
         guard self.connection === connection else { return }
@@ -864,7 +887,7 @@ final class QLabClient {
               let cueID = message.arguments[2].stringValue
         else { return }
 
-        guard let listID = cueLists.cueList(containing: cueID)?.uniqueID else {
+        guard let listID = workspaceIndex.cueListID(containing: cueID) else {
             logger.info(
                 """
                 Broadcast playhead names cue \(cueID, privacy: .public), which is in no \
@@ -885,17 +908,17 @@ final class QLabClient {
 
     private static let playheadDetailsDebounce: Duration = .milliseconds(60)
 
-    private var playheadDetailsTask: Task<Void, Never>?
+    @ObservationIgnored private var playheadDetailsTask: Task<Void, Never>?
 
-    private var pendingCueDetailIDs = Set<String>()
+    @ObservationIgnored private var pendingCueDetailIDs = Set<String>()
 
     /// Invalidates a sleeping debounce without canceling an active request batch.
-    private var pendingCueDetailsRevision: UInt64 = 0
+    @ObservationIgnored private var pendingCueDetailsRevision: UInt64 = 0
 
     /// Associates each reply with the edit that queued it, so older details cannot win.
-    private var cueDetailRevisions: [String: UInt64] = [:]
+    @ObservationIgnored private var cueDetailRevisions: [String: UInt64] = [:]
 
-    private var activeCueDetailIDs = Set<String>()
+    @ObservationIgnored private var activeCueDetailIDs = Set<String>()
 
     private func schedulePlayheadDetailsRefresh() {
         pendingCueDetailIDs.formUnion(visibleCueIDs())
@@ -968,7 +991,7 @@ final class QLabClient {
             }
 
             let cueID = tail[1]
-            if cueLists.firstCue(withID: cueID) == nil {
+            if !workspaceIndex.contains(cueID) {
                 scheduleCueListRefresh()
             } else {
                 scheduleCueDetailsRefresh(for: cueID)
@@ -988,7 +1011,7 @@ final class QLabClient {
         }
     }
 
-    private var cueListRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var cueListRefreshTask: Task<Void, Never>?
 
     private func scheduleCueListRefresh(after delay: Duration = .milliseconds(250)) {
         guard let session = connection else { return }
@@ -1011,7 +1034,7 @@ final class QLabClient {
         }
     }
 
-    private var cueDataGeneration: UInt64 = 0
+    @ObservationIgnored private var cueDataGeneration: UInt64 = 0
 
     private func requireCueDetailInvalidation() {
         cueDetailInvalidationPending = true
@@ -1073,15 +1096,29 @@ final class QLabClient {
         guard connection === session else { throw RequestFailure.disconnected }
         try Task.checkCancellation()
         guard generation == cueDataGeneration else { return false }
-        var refreshed = reply.data ?? []
+        let refreshed = reply.data ?? []
 
-        // Carry the details already fetched onto the new tree. Without this
-        // every cue on screen would blank its pills and drawer markers until
-        // its reply came back. Carrying a value for display is separate from
-        // trusting it: after lost events the cues are refetched regardless.
-        // One pass over each tree, however many cues have been visited.
-        let previous = cueLists.cues(withIDs: cuesWithLoadedDetails)
-        let carried = refreshed.carryDetails(from: previous)
+        // Carry the details already fetched onto the new tree and build the
+        // workspace index off the main actor so large cue lists do not block
+        // UI rendering. Carrying a value for display is separate from trusting
+        // it: after lost events the cues are refetched regardless.
+        let loadedBeforePrepare = cuesWithLoadedDetails
+        let previous = workspaceIndex.cues(withIDs: loadedBeforePrepare, in: cueLists)
+        let previousIndex = workspaceIndex
+        let prepared = await prepareRefreshedCueLists(
+            refreshed, carrying: previous, reusing: previousIndex
+        )
+        guard connection === session else { throw RequestFailure.disconnected }
+        try Task.checkCancellation()
+        guard generation == cueDataGeneration else { return false }
+
+        var nextCueLists = prepared.cueLists
+        var carried = prepared.carried
+        let newlyLoaded = cuesWithLoadedDetails.subtracting(loadedBeforePrepare)
+        if !newlyLoaded.isEmpty {
+            let deltaPrevious = workspaceIndex.cues(withIDs: newlyLoaded, in: cueLists)
+            carried.formUnion(nextCueLists.carryDetails(from: deltaPrevious))
+        }
         if invalidatingDetails {
             for cueID in activeCueDetailIDs {
                 cueDetailRevisions[cueID, default: 0] &+= 1
@@ -1089,18 +1126,37 @@ final class QLabClient {
         }
         cuesWithLoadedDetails = invalidatingDetails ? [] : carried
 
-        cueLists = refreshed
-        cachedTotalCueCount = nil
-        invalidateWatchedGraph()
+        if cueLists != nextCueLists {
+            cueLists = nextCueLists
+        }
+        workspaceIndex = prepared.index
+        if totalCueCount != workspaceIndex.totalCueCount {
+            totalCueCount = workspaceIndex.totalCueCount
+        }
 
         let liveListIDs = Set(cueLists.map(\.uniqueID))
-        playheads = playheads.filter { liveListIDs.contains($0.key) }
+        if !playheads.keys.allSatisfy({ liveListIDs.contains($0) }) {
+            playheads = playheads.filter { liveListIDs.contains($0.key) }
+        }
         playheadRevisions = playheadRevisions.filter { liveListIDs.contains($0.key) }
 
         reconcileWatchedCueList()
+        syncWatchedState()
 
         await refreshPlayheads()
         return generation == cueDataGeneration && connection === session
+    }
+
+    @concurrent
+    private nonisolated func prepareRefreshedCueLists(
+        _ cueLists: [Cue],
+        carrying previous: [String: Cue],
+        reusing previousIndex: WorkspaceIndex
+    ) async -> (cueLists: [Cue], carried: Set<String>, index: WorkspaceIndex) {
+        var refreshed = cueLists
+        let carried = refreshed.carryDetails(from: previous)
+        let index = WorkspaceIndex(cueLists: refreshed, reusing: previousIndex)
+        return (refreshed, carried, index)
     }
 
     private func reconcileWatchedCueList() {
@@ -1165,6 +1221,7 @@ final class QLabClient {
         }
         guard !fetched.isEmpty else { return }
         playheads.merge(fetched) { _, latest in latest }
+        syncWatchedState()
     }
 
     private func fetchPlayhead(
@@ -1208,57 +1265,114 @@ final class QLabClient {
         // A repeated notification still confirms a position more recently than
         // any snapshot already in flight.
         playheadRevisions[listID, default: 0] &+= 1
-        guard let cueID, !cueID.isEmpty, cueID != "none" else {
-            playheads[listID] = .unset
-            return
+        let nextState: PlayheadState = if let cueID, !cueID.isEmpty, cueID != "none" {
+            .cue(cueID)
+        } else {
+            .unset
         }
-        let nextState = PlayheadState.cue(cueID)
         guard playheads[listID] != nextState else { return }
         playheads[listID] = nextState
-    }
-
-    var watchedPlayhead: PlayheadState? {
-        guard let watchedCueListID else { return nil }
-        return playheads[watchedCueListID]
+        let nextSummary = makePlayheadSummary(for: nextState)
+        if playheadSummaries[listID] != nextSummary {
+            playheadSummaries[listID] = nextSummary
+        }
+        if listID == watchedCueListID {
+            syncWatchedState()
+        }
     }
 
     /// The cue list being watched, as it is in the current tree.
     var watchedCueList: Cue? {
         guard let watchedCueListID else { return nil }
-        return cueLists.first { $0.uniqueID == watchedCueListID }
-    }
-
-    var isWatchingCueCart: Bool {
-        watchedCueList?.isCueCart == true
+        return workspaceIndex.cueList(withID: watchedCueListID, in: cueLists)
     }
 
     var currentPlayheadCueID: String? {
         watchedPlayhead?.cueID
     }
 
-    var watchedGraph: CueGraph? {
-        guard let watchedCueListID else { return nil }
+    func cue(withID cueID: String) -> Cue? {
+        workspaceIndex.cue(withID: cueID, in: cueLists)
+    }
 
-        if let cached = watchedGraphCache,
-           cached.cueListID == watchedCueListID {
-            return cached.graph
+    func cueListName(containing cueID: String) -> String? {
+        guard let listID = workspaceIndex.cueListID(containing: cueID) else { return nil }
+        if listID == watchedCueListID {
+            return watchedCueListName
+        }
+        return workspaceIndex.cueList(withID: listID, in: cueLists)?.displayName
+    }
+
+    private func syncWatchedState() {
+        let nextPlayhead = watchedCueListID.flatMap { playheads[$0] }
+        if watchedPlayhead != nextPlayhead {
+            watchedPlayhead = nextPlayhead
         }
 
-        guard let list = watchedCueList else { return nil }
+        let nextGraph = watchedCueListID.flatMap { workspaceIndex.graph(forListID: $0) }
+        if watchedGraph?.graphID != nextGraph?.graphID
+            || watchedGraph?.numbersVersion != nextGraph?.numbersVersion {
+            watchedGraph = nextGraph
+        }
 
-        let graph = CueGraph(cueList: list)
-        watchedGraphCache = (cueListID: watchedCueListID, graph: graph)
-        return graph
+        let watchedList = watchedCueListID.flatMap {
+            workspaceIndex.cueList(withID: $0, in: cueLists)
+        }
+        let nextListName = watchedList?.displayName
+        if watchedCueListName != nextListName {
+            watchedCueListName = nextListName
+        }
+
+        let nextIsCart = watchedList?.isCueCart == true
+        if isWatchingCueCart != nextIsCart {
+            isWatchingCueCart = nextIsCart
+        }
+
+        let nextCue: Cue? = if let cueID = nextPlayhead?.cueID {
+            nextGraph?.cue(withID: cueID, in: watchedList)
+                ?? workspaceIndex.cue(withID: cueID, in: cueLists)
+        } else {
+            nil
+        }
+        if playheadCue != nextCue {
+            playheadCue = nextCue
+        }
+
+        syncSidebarState()
     }
 
-    private func invalidateWatchedGraph() {
-        watchedGraphCache = nil
+    private func makePlayheadSummary(for state: PlayheadState) -> PlayheadSummary {
+        guard case .cue(let cueID) = state else {
+            return PlayheadSummary(
+                state: state,
+                cueDisplayNumber: nil,
+                cueDisplayName: nil,
+                hasCue: false
+            )
+        }
+        let cue = workspaceIndex.cue(withID: cueID, in: cueLists)
+        return PlayheadSummary(
+            state: state,
+            cueDisplayNumber: cue?.displayNumber,
+            cueDisplayName: cue?.displayName,
+            hasCue: cue != nil
+        )
     }
 
-    var playheadCue: Cue? {
-        guard let cueID = currentPlayheadCueID else { return nil }
-        return watchedGraph?.cue(withID: cueID, in: watchedCueList)
-            ?? cueLists.firstCue(withID: cueID)
+    private func syncSidebarState() {
+        let nextSummaries = cueLists.map(CueListSummary.init(list:))
+        if cueListSummaries != nextSummaries {
+            cueListSummaries = nextSummaries
+        }
+
+        var nextPlayheads: [String: PlayheadSummary] = [:]
+        nextPlayheads.reserveCapacity(playheads.count)
+        for (listID, state) in playheads {
+            nextPlayheads[listID] = makePlayheadSummary(for: state)
+        }
+        if playheadSummaries != nextPlayheads {
+            playheadSummaries = nextPlayheads
+        }
     }
 
     /// The cues on screen: the one standing by, plus the drawer rows either
@@ -1293,7 +1407,7 @@ final class QLabClient {
     /// Details only change when QLab says so, so a cue is fetched once and
     /// then left alone until it is edited or events are lost. Rebuilt lists
     /// keep the set for cues still present.
-    private var cuesWithLoadedDetails = Set<String>()
+    @ObservationIgnored private var cuesWithLoadedDetails = Set<String>()
 
     func refreshPlayheadCueDetails() async {
         let visible = visibleCueIDs()
@@ -1366,7 +1480,7 @@ final class QLabClient {
             valuesByID[result.cueID] = result.values
         }
         let changes = updated.applyValuesAndFindCues(
-            valuesByID, using: watchedGraphCache?.graph
+            valuesByID, using: workspaceIndex
         )
 
         var unconfirmed = Set<String>()
@@ -1382,10 +1496,10 @@ final class QLabClient {
         guard !changes.changedCueIDs.isEmpty else { return }
         cueLists = updated
 
-        if !changes.cueNumberUpdates.isEmpty, var cached = watchedGraphCache {
-            cached.graph.applyCueNumberUpdates(changes.cueNumberUpdates)
-            watchedGraphCache = cached
+        if !changes.cueNumberUpdates.isEmpty {
+            workspaceIndex.applyCueNumberUpdates(changes.cueNumberUpdates)
         }
+        syncWatchedState()
     }
 
     private func fetchCueDetails(
@@ -1441,8 +1555,8 @@ final class QLabClient {
         }
     }
 
-    private var unconfirmedDetailIDs = Set<String>()
-    private var unconfirmedDetailsTask: Task<Void, Never>?
+    @ObservationIgnored private var unconfirmedDetailIDs = Set<String>()
+    @ObservationIgnored private var unconfirmedDetailsTask: Task<Void, Never>?
 
     /// Asks again once every answer still owed to a timed-out request has
     /// either arrived or expired, so the retry cannot be ambiguous for the

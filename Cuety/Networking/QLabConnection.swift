@@ -6,7 +6,7 @@ import ShowControlCore
 /// Tracks whether a send has begun so cancellation can distinguish an unsent
 /// request from one that may already be in flight.
 final class QLabSendState: @unchecked Sendable {
-    nonisolated(unsafe) private let lock = NSLock()
+    private let lock = NSLock()
     nonisolated(unsafe) private var hasStarted = false
     nonisolated(unsafe) private var wasCancelled = false
 
@@ -200,40 +200,86 @@ actor QLabConnection {
     }
 
     private func receiveNextMessage(on connection: NWConnection) {
-        connection.receiveMessage { [weak self] content, _, isComplete, error in
-            guard let self else { return }
+        guard let continuation else { return }
+        Self.receiveNextMessage(on: connection, continuation: continuation, owner: self)
+    }
 
-            Task {
-                if let content, !content.isEmpty {
-                    await self.handleReceived(content)
+    private nonisolated static func receiveNextMessage(
+        on connection: NWConnection,
+        continuation: AsyncStream<Event>.Continuation,
+        owner: QLabConnection
+    ) {
+        connection.receiveMessage { [weak owner] content, _, isComplete, error in
+            var droppedCount = 0
+            var malformedError: String?
+
+            if let content, !content.isEmpty {
+                for event in Self.events(forPacket: content) {
+                    if case .receiveFailed(let decodeError, _) = event {
+                        malformedError = decodeError.description
+                    }
+                    switch continuation.yield(event) {
+                    case .dropped:
+                        droppedCount += 1
+                    case .terminated:
+                        return
+                    default:
+                        break
+                    }
                 }
-
-                if let error {
-                    await self.yield(.stateChanged(.failed(error)))
-                    return
-                }
-
-                if isComplete, content?.isEmpty ?? true {
-                    await self.yield(.stateChanged(.cancelled))
-                    return
-                }
-
-                await self.rearmReceive()
             }
+
+            if let error {
+                if case .dropped = continuation.yield(.stateChanged(.failed(error))) {
+                    droppedCount += 1
+                }
+                if droppedCount > 0 || malformedError != nil, let owner {
+                    Task {
+                        await owner.handleReceiveDiagnostics(
+                            droppedCount: droppedCount,
+                            malformedError: malformedError
+                        )
+                    }
+                }
+                return
+            }
+
+            if isComplete, content?.isEmpty ?? true {
+                if case .dropped = continuation.yield(.stateChanged(.cancelled)) {
+                    droppedCount += 1
+                }
+                if droppedCount > 0 || malformedError != nil, let owner {
+                    Task {
+                        await owner.handleReceiveDiagnostics(
+                            droppedCount: droppedCount,
+                            malformedError: malformedError
+                        )
+                    }
+                }
+                return
+            }
+
+            if droppedCount > 0 || malformedError != nil, let owner {
+                Task {
+                    await owner.handleReceiveDiagnostics(
+                        droppedCount: droppedCount,
+                        malformedError: malformedError
+                    )
+                }
+            }
+
+            guard let owner, connection.state == .ready else { return }
+            Self.receiveNextMessage(on: connection, continuation: continuation, owner: owner)
         }
     }
 
-    private func rearmReceive() {
-        guard let connection, connection.state == .ready else { return }
-        receiveNextMessage(on: connection)
-    }
-
-    private func handleReceived(_ data: Data) {
-        for event in Self.events(forPacket: data) {
-            if case .receiveFailed(let error, _) = event {
-                logger.warning("Dropped malformed OSC packet: \(error.description, privacy: .public)")
-            }
-            yield(event)
+    private func handleReceiveDiagnostics(droppedCount: Int, malformedError: String?) {
+        if let malformedError {
+            logger.warning("Dropped malformed OSC packet: \(malformedError, privacy: .public)")
+        }
+        if droppedCount > 0 {
+            droppedEventCount += droppedCount
+            notifyEventsDropped()
         }
     }
 

@@ -19,6 +19,7 @@ struct CueListView: View {
                 standby: standby,
                 standbyIndex: index
             )
+            .id(graph.cueListID)
 #if os(macOS)
             .ignoresSafeArea(.container, edges: .top)
 #endif
@@ -42,6 +43,7 @@ private struct CueDrum: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var headlineSizingCache = HeadlineSizingCache()
+    @State private var metricsCache = DrumMetricsCache()
 
     /// The row index the drum is turned to. It trails `standbyIndex` so the
     /// change can be animated, and is nil until the drum first appears.
@@ -64,7 +66,8 @@ private struct CueDrum: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let metrics = metrics(in: proxy.size)
+            let typography = self.typography
+            let metrics = metrics(in: proxy.size, typography: typography)
 
             ZStack {
                 DrumRows(
@@ -72,32 +75,36 @@ private struct CueDrum: View {
                     rows: rows,
                     standby: standby,
                     standbyIndex: standbyIndex,
-                    metrics: metrics
+                    metrics: metrics,
+                    typography: typography
                 )
 
                 if model.preferences.showsPlayhead {
+                    let accent = model.preferences.playheadAccent.color(for: standby)
                     Image(systemName: "arrowtriangle.right.fill")
                         .font(.system(size: metrics.arrowSize))
-                        .foregroundStyle(model.preferences.playheadAccent.color(for: standby))
+                        .foregroundStyle(accent)
                         .accessibilityHidden(true)
                         .position(x: metrics.arrowX, y: metrics.numberCenterY)
-                        .animation(animatesShift ? Motion.listShift : nil, value: standby.uniqueID)
+                        .animation(animatesShift ? Motion.listShift : nil, value: accent)
                 }
 
                 // The pills hang from just below the standby name, so a
                 // note or a wrapped row grows them downward without
                 // moving the number, name or arrow.
-                DetailPillsRow(
-                    cue: standby,
-                    kinds: model.preferences.visiblePills,
-                    cueListName: model.client.watchedCueList?.displayName,
-                    size: pillSize,
-                    showsCueTypeLabel: model.preferences.showsCueTypeLabel,
-                    performanceMode: model.preferences.performanceMode
-                )
-                .padding(.horizontal, Self.horizontalPadding)
-                .padding(.top, metrics.pillsTop)
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+                if model.preferences.showsDetailPills {
+                    DetailPillsRow(
+                        cue: standby,
+                        kinds: model.preferences.visiblePills,
+                        cueListName: model.client.watchedCueListName,
+                        size: pillSize,
+                        showsCueTypeLabel: model.preferences.showsCueTypeLabel,
+                        performanceMode: model.preferences.performanceMode
+                    )
+                    .padding(.horizontal, Self.horizontalPadding)
+                    .padding(.top, metrics.pillsTop)
+                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+                }
             }
         }
         .clipped()
@@ -105,7 +112,7 @@ private struct CueDrum: View {
             (standby.color ?? .clear)
                 .opacity(CueDisplayView.canvasTintOpacity)
                 .ignoresSafeArea()
-                .animation(animatesShift ? Motion.listShift : nil, value: standby.uniqueID)
+                .animation(animatesShift ? Motion.listShift : nil, value: standby.color)
         }
         .onChange(of: standbyIndex, initial: true) { old, new in
             let target = Double(new)
@@ -129,6 +136,7 @@ private struct CueDrum: View {
     /// height is deliberately not used: feeding it back into the layout moved
     /// every cue on the drum while the pills were still animating.
     private var pillsHeight: CGFloat {
+        guard model.preferences.showsDetailPills else { return 0 }
         let rows: CGFloat = model.preferences.visiblePills.contains(.notes) ? 2 : 1
         return pillSize.height * rows + pillSize.spacing * (rows - 1)
     }
@@ -140,105 +148,147 @@ private struct CueDrum: View {
     /// Lays the standby position out the way the display does: the number
     /// fills what the name and pills leave, and the arrow sits beside the
     /// widest number in the list so it never has to move between cues.
-    private func metrics(in size: CGSize) -> DrumMetrics {
+    private func metrics(in size: CGSize, typography: Typography) -> DrumMetrics {
         let showsName = model.preferences.showsCueName
-        let nameSize: CGFloat = min(28, max(17, size.height / 12))
-        let padding = DrumMetrics.contentPadding
-        let rowRadius = min(CueLayout.listRowRadius, max(1, Int(
-            (size.height - DrumMetrics.minimumStandbyHeight - padding * 2 - DrumMetrics.bandPadding * 4)
-                / (DrumMetrics.rowPitch * 2)
-        )))
-        let bandPadding: CGFloat = rowRadius == 1 ? 0 : DrumMetrics.bandPadding
-        let bandHeight = CGFloat(rowRadius) * DrumMetrics.rowPitch + bandPadding * 2
-
-        let nameBlock = showsName
-            ? typography.lineHeight(size: nameSize) + DrumLabelLayout.stackedSpacing
-            : 0
-        let pillBlock = Self.pillsSpacing + pillsHeight
-        let available = max(0, size.height - bandHeight * 2 - padding * 2)
-        let numberHeight = max(0, available - nameBlock - pillBlock)
-        let numberWidth = max(0, size.width - Self.horizontalPadding * 2)
-
+        let showsPlayhead = model.preferences.showsPlayhead
+        let pillsHeight = self.pillsHeight
         let text = standby.displayNumber ?? "–"
-        let reference: String
-        if typography.cueNumberSizing == .fixed {
-            reference = headlineSizingCache.referenceNumber(
-                for: text,
-                cueNumbers: graph.cueNumbers,
-                typography: typography
-            )
-        } else {
-            headlineSizingCache.clear()
-            reference = text
-        }
-        // Fit the number to the available height first. The arrow's size and
-        // spacing scale with the number, so reserve that width algebraically
-        // instead of subtracting space based on an already width-constrained fit.
-        let firstFit = max(1, typography.standbyNumberPointSize(
-            for: text, reference: reference,
-            in: CGSize(width: numberWidth, height: numberHeight)
-        ))
-
-        // Fixed sizing keeps the arrow beside the widest number so it holds
-        // still; the other sizings draw each number at its own size, so the
-        // arrow follows the standby number instead.
-        let arrowText = typography.cueNumberSizing == .fixed ? reference : text
-        let widthPerPoint = typography.cueNumberWidth(of: arrowText, size: firstFit) / firstFit
-        let widthLimitedSize = model.preferences.showsPlayhead
-            ? numberWidth / (
-                widthPerPoint + 2 * (Self.arrowSizeRatio + Self.arrowSpacingRatio)
-            )
-            : numberWidth / widthPerPoint
-        let numberSize = max(1, min(firstFit, widthLimitedSize))
-        let arrowSize = numberSize * Self.arrowSizeRatio
-        let referenceWidth = typography.cueNumberWidth(of: arrowText, size: numberSize)
-        let arrowX = max(
-            Self.horizontalPadding / 2 + arrowSize / 2,
-            size.width / 2 - referenceWidth / 2 - numberSize * Self.arrowSpacingRatio - arrowSize / 2
+        let reference = headlineSizingCache.referenceNumber(
+            for: text,
+            graph: graph,
+            typography: typography
         )
 
-        // The number, name and pills are centred as one block, so the pills
-        // sit under the name rather than against the cues below.
-        let numberLineHeight = typography.lineHeight(size: numberSize)
-        let blockHeight = numberLineHeight + nameBlock + pillBlock
-        let blockTop = bandHeight + padding + max(0, available - blockHeight) / 2
-
-        return DrumMetrics(
+        return metricsCache.metrics(
             size: size,
-            rowRadius: rowRadius,
-            verticalBandPadding: bandPadding,
-            standbyNumberSize: numberSize,
-            standbyNameSize: nameSize,
-            showsStandbyName: showsName,
-            numberCenterY: blockTop + numberLineHeight / 2,
-            arrowSize: arrowSize,
-            arrowX: arrowX,
-            pillsTop: blockTop + numberLineHeight + nameBlock + Self.pillsSpacing
+            reference: reference,
+            typography: typography,
+            showsName: showsName,
+            showsPlayhead: showsPlayhead,
+            pillsHeight: pillsHeight
+        ) {
+            let nameSize: CGFloat = min(28, max(17, size.height / 12))
+            let padding = DrumMetrics.contentPadding
+            let bandHeight = DrumMetrics.bandHeight(for: size.height)
+
+            let nameBlock = showsName
+                ? typography.lineHeight(size: nameSize) + DrumLabelLayout.stackedSpacing
+                : 0
+            let pillBlock = pillsHeight > 0 ? Self.pillsSpacing + pillsHeight : 0
+            let available = max(0, size.height - bandHeight * 2 - DrumMetrics.previousCueExtraHeight - padding * 2)
+            let numberHeight = max(0, available - nameBlock - pillBlock)
+            let numberWidth = max(0, size.width - Self.horizontalPadding * 2)
+
+            // Fit the number to the available height first. The arrow's size and
+            // spacing scale with the number, so reserve that width algebraically
+            // instead of subtracting space based on an already width-constrained fit.
+            let firstFit = max(1, typography.cueNumberPointSize(
+                fitting: reference,
+                in: CGSize(width: numberWidth, height: numberHeight)
+            ))
+
+            // The arrow stays beside the widest cue number, so it holds still
+            // as the playhead moves through the list.
+            let arrowText = reference
+            let widthPerPoint = typography.cueNumberWidth(of: arrowText, size: firstFit) / firstFit
+            let widthLimitedSize = showsPlayhead
+                ? numberWidth / (
+                    widthPerPoint + 2 * (Self.arrowSizeRatio + Self.arrowSpacingRatio)
+                )
+                : numberWidth / widthPerPoint
+            let numberSize = max(1, min(firstFit, widthLimitedSize))
+            let arrowSize = numberSize * Self.arrowSizeRatio
+            let referenceWidth = typography.cueNumberWidth(of: arrowText, size: numberSize)
+            let arrowX = max(
+                Self.horizontalPadding / 2 + arrowSize / 2,
+                size.width / 2 - referenceWidth / 2 - numberSize * Self.arrowSpacingRatio - arrowSize / 2
+            )
+
+            // The number, name and pills are centred as one block, so the pills
+            // sit under the name rather than against the cues below.
+            let numberLineHeight = typography.lineHeight(size: numberSize)
+            let blockHeight = numberLineHeight + nameBlock + pillBlock
+            let blockTop = bandHeight + DrumMetrics.previousCueExtraHeight + padding + max(0, available - blockHeight) / 2
+
+            return DrumMetrics(
+                size: size,
+                bandHeight: bandHeight,
+                standbyNumberSize: numberSize,
+                standbyNameSize: nameSize,
+                showsStandbyName: showsName,
+                numberCenterY: blockTop + numberLineHeight / 2,
+                arrowSize: arrowSize,
+                arrowX: arrowX,
+                pillsTop: blockTop + numberLineHeight + nameBlock + Self.pillsSpacing
+            )
+        }
+    }
+}
+
+@MainActor
+private final class DrumMetricsCache {
+    private struct Key: Equatable {
+        let size: CGSize
+        let reference: String
+        let usesRounded: Bool
+        let fontWeight: Font.Weight
+        let showsName: Bool
+        let showsPlayhead: Bool
+        let pillsHeight: CGFloat
+    }
+
+    private var cachedKey: Key?
+    private var cachedMetrics: DrumMetrics?
+
+    func metrics(
+        size: CGSize,
+        reference: String,
+        typography: Typography,
+        showsName: Bool,
+        showsPlayhead: Bool,
+        pillsHeight: CGFloat,
+        compute: () -> DrumMetrics
+    ) -> DrumMetrics {
+        let key = Key(
+            size: size,
+            reference: reference,
+            usesRounded: typography.usesRounded,
+            fontWeight: typography.cueNumberWeight,
+            showsName: showsName,
+            showsPlayhead: showsPlayhead,
+            pillsHeight: pillsHeight
         )
+        if cachedKey == key, let cachedMetrics {
+            return cachedMetrics
+        }
+        let result = compute()
+        cachedKey = key
+        cachedMetrics = result
+        return result
     }
 }
 
 /// Where and how large each position on the drum draws its cue. Position
 /// zero is standby; negative positions are earlier cues, positive later.
-private struct DrumMetrics {
+struct DrumMetrics {
     static let rowPitch: CGFloat = 34
     static let bandPadding: CGFloat = 12
+    static let previousCueExtraHeight: CGFloat = rowPitch
     static let contentPadding: CGFloat = 16
     static let minimumStandbyHeight: CGFloat = 160
-    static var minimumCanvasHeight: CGFloat {
-        minimumStandbyHeight + contentPadding * 2 + bandPadding * 4 + rowPitch * 2
+    // Keep the neighbourhood alive beyond the viewport. Its visible row
+    // count must never feed back into the space reserved for the main cue.
+    static func bandHeight(for canvasHeight: CGFloat) -> CGFloat {
+        min(
+            CGFloat(CueLayout.listRowRadius) * rowPitch + bandPadding * 2,
+            max(0, canvasHeight - minimumStandbyHeight - contentPadding * 2) / 4
+        )
     }
-    /// Positions past this are off the drum: faded out beyond each band.
-    var lastPosition: Int { rowRadius + 1 }
 
-    /// Both bands share one height so the standby cue sits in the middle.
-    var bandHeight: CGFloat {
-        CGFloat(rowRadius) * Self.rowPitch + verticalBandPadding * 2
-    }
+    var lastPosition: Int { CueLayout.listRowRadius + 2 }
 
     let size: CGSize
-    let rowRadius: Int
-    let verticalBandPadding: CGFloat
+    let bandHeight: CGFloat
     let standbyNumberSize: CGFloat
     let standbyNameSize: CGFloat
     let showsStandbyName: Bool
@@ -257,9 +307,9 @@ private struct DrumMetrics {
             if position == 0 {
                 return numberCenterY
             } else if position < 0 {
-                return bandHeight - verticalBandPadding - distance * Self.rowPitch
+                return bandHeight + Self.previousCueExtraHeight - Self.bandPadding - distance * Self.rowPitch
             } else {
-                return size.height - bandHeight + verticalBandPadding + distance * Self.rowPitch
+                return size.height - bandHeight + Self.bandPadding + distance * Self.rowPitch
             }
         }
     }
@@ -281,7 +331,7 @@ private struct DrumMetrics {
     func opacity(at position: Double) -> CGFloat {
         interpolate(position) { position in
             if position == 0 { return 1 }
-            if abs(position) >= lastPosition { return 0 }
+            if position <= -lastPosition || position >= CueLayout.listRowRadius + 1 { return 0 }
             return Self.role(at: position).opacity
         }
     }
@@ -325,19 +375,26 @@ private struct DrumRows: View {
     @AnimatableIgnored var standby: Cue
     @AnimatableIgnored var standbyIndex: Int
     @AnimatableIgnored var metrics: DrumMetrics
+    @AnimatableIgnored var typography: Typography
 
     var body: some View {
         let reach = Double(metrics.lastPosition)
-        let first = max(-1, Int((offset - reach).rounded(.down)))
-        let last = min(rows.count, Int((offset + reach).rounded(.up)))
+        let first = max(-1, min(rows.count, Int((offset - reach).rounded(.down))))
+        let last = max(-1, min(rows.count, Int((offset + reach).rounded(.up))))
 
         ZStack {
-            ForEach(Array(first...last), id: \.self) { index in
-                let position = Double(index) - offset
-                item(at: index, position: position)
-                    .position(x: metrics.size.width / 2, y: metrics.y(at: position))
-                    .opacity(metrics.opacity(at: position))
-                    .accessibilityHidden(abs(position) > Double(metrics.rowRadius) + 0.5)
+            if first <= last {
+                ForEach(first...last, id: \.self) { index in
+                    let position = Double(index) - offset
+                    let y = metrics.y(at: position)
+                    let opacity = metrics.opacity(at: position)
+                    item(at: index, position: position)
+                        .position(x: metrics.size.width / 2, y: y)
+                        .opacity(opacity)
+                        .accessibilityHidden(
+                            y < 0 || y > metrics.size.height || opacity == 0
+                        )
+                }
             }
         }
         .frame(width: metrics.size.width, height: metrics.size.height)
@@ -357,11 +414,20 @@ private struct DrumRows: View {
             // further out the cue is only ever a row, so it is its own row end.
             let rowEnd = abs(position) < 1 ? (position < 0 ? -1.0 : 1.0) : position
 
+            // Render text at the larger adjacent integer step's font size and
+            // scale down smoothly on the GPU during fractional transitions so
+            // CoreText never rasterizes intermediate font sizes per frame,
+            // while resting integer positions render natively at 1:1 scale.
+            let basePosition = trunc(position)
+
             // A standby cue inside a group stands in for the group's row.
             DrumLabel(
                 cue: index == standbyIndex ? standby : rows[index],
+                typography: typography,
                 numberSize: metrics.numberSize(at: position),
                 nameSize: metrics.nameSize(at: position),
+                baseNumberSize: metrics.numberSize(at: basePosition),
+                baseNameSize: metrics.nameSize(at: basePosition),
                 nameOpacity: metrics.nameOpacity(at: position),
                 stacking: metrics.stacking(at: position),
                 maxWidth: metrics.size.width - CueDrum.horizontalPadding * 2,
@@ -378,8 +444,11 @@ private struct DrumRows: View {
 /// standby cue, or anywhere in between.
 private struct DrumLabel: View {
     let cue: Cue
+    let typography: Typography
     let numberSize: CGFloat
     let nameSize: CGFloat
+    let baseNumberSize: CGFloat
+    let baseNameSize: CGFloat
     let nameOpacity: CGFloat
     let stacking: CGFloat
     let maxWidth: CGFloat
@@ -388,44 +457,52 @@ private struct DrumLabel: View {
     let standbyNumberSize: CGFloat
     let standbyNameSize: CGFloat
 
-    @Environment(AppModel.self) private var model
-
-    private var typography: Typography { Typography(preferences: model.preferences) }
-
     var body: some View {
-        let snappedNumberSize = max(1, numberSize.rounded())
-        let snappedNameSize = max(1, nameSize.rounded())
+        let resolvedNumberSize = max(1, numberSize)
+        let resolvedNameSize = max(1, nameSize)
+        let resolvedBaseNumberSize = max(1, baseNumberSize)
+        let resolvedBaseNameSize = max(1, baseNameSize)
+        let numberVisualScale = resolvedNumberSize / resolvedBaseNumberSize
+        let nameVisualScale = resolvedNameSize / resolvedBaseNameSize
+
+        let baseIndicatorSize = max(
+            CueRowView.Role.minimumIndicatorSize,
+            min(resolvedBaseNumberSize, CueRowView.Role.largestRowFontSize)
+                * CueRowView.Role.indicatorSizeRatio
+        )
+        let targetIndicatorSize = max(
+            CueRowView.Role.minimumIndicatorSize,
+            min(resolvedNumberSize, CueRowView.Role.largestRowFontSize)
+                * CueRowView.Role.indicatorSizeRatio
+        )
 
         DrumLabelLayout(
             stacking: stacking,
             maxWidth: maxWidth,
-            rowNumberScale: rowNumberSize / snappedNumberSize,
-            rowNameScale: rowNameSize / snappedNameSize,
-            standbyNumberScale: standbyNumberSize / snappedNumberSize,
-            standbyNameScale: standbyNameSize / snappedNameSize
+            rowNumberScale: rowNumberSize / resolvedBaseNumberSize,
+            rowNameScale: rowNameSize / resolvedBaseNameSize,
+            standbyNumberScale: standbyNumberSize / resolvedBaseNumberSize,
+            standbyNameScale: standbyNameSize / resolvedBaseNameSize,
+            nameVisualScale: nameVisualScale
         ) {
             Text(cue.displayNumber ?? "–")
-                .font(typography.cueNumber(size: snappedNumberSize))
+                .font(typography.cueNumber(size: resolvedBaseNumberSize))
                 .monospacedDigit()
                 .foregroundStyle(cue.displayNumber == nil ? .tertiary : .primary)
                 .lineLimit(1)
                 .fixedSize()
+                .scaleEffect(numberVisualScale)
 
             nameLabel
-                .font(typography.font(size: snappedNameSize))
+                .font(typography.font(size: resolvedBaseNameSize))
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .scaleEffect(nameVisualScale)
                 .opacity(nameOpacity)
 
-            CueIndicators(
-                cue: cue,
-                size: max(
-                    CueRowView.Role.minimumIndicatorSize,
-                    min(snappedNumberSize, CueRowView.Role.largestRowFontSize)
-                        * CueRowView.Role.indicatorSizeRatio
-                )
-            )
-            .opacity(1 - stacking)
+            CueIndicators(cue: cue, size: baseIndicatorSize)
+                .scaleEffect(targetIndicatorSize / baseIndicatorSize)
+                .opacity(1 - stacking)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityDescription)
@@ -433,27 +510,20 @@ private struct DrumLabel: View {
 
     @ViewBuilder
     private var nameLabel: some View {
-        let title = Text(cue.displayName ?? "Untitled")
-        if stacking <= 0.001 {
-            title.foregroundStyle(rowNameStyle)
-        } else if stacking >= 0.999 || cue.color == nil {
-            title.foregroundStyle(cue.displayName == nil ? .tertiary : .secondary)
-        } else {
+        let displayName = cue.displayName
+        let title = Text(displayName ?? "Untitled")
+        if let color = cue.color, displayName != nil {
             ZStack {
                 title
-                    .foregroundStyle(cue.displayName == nil ? .tertiary : .secondary)
+                    .foregroundStyle(.secondary)
                     .opacity(stacking)
                 title
-                    .foregroundStyle(rowNameStyle)
+                    .foregroundStyle(color)
                     .opacity(1 - stacking)
             }
+        } else {
+            title.foregroundStyle(displayName == nil ? .tertiary : .secondary)
         }
-    }
-
-    private var rowNameStyle: AnyShapeStyle {
-        guard cue.displayName != nil else { return AnyShapeStyle(.tertiary) }
-        guard let color = cue.color else { return AnyShapeStyle(.secondary) }
-        return AnyShapeStyle(color)
     }
 
     private var accessibilityDescription: String {
@@ -477,12 +547,14 @@ private struct DrumLabel: View {
 private struct DrumLabelLayout: Layout {
     var stacking: CGFloat
     var maxWidth: CGFloat
-    /// The row-end size over the current size, for the number and the name.
+    /// The row-end size over the measured base size, for the number and the name.
     var rowNumberScale: CGFloat = 1
     var rowNameScale: CGFloat = 1
-    /// The standby-end size over the current size, likewise.
+    /// The standby-end size over the measured base size, likewise.
     var standbyNumberScale: CGFloat = 1
     var standbyNameScale: CGFloat = 1
+    /// The name's current visual scale relative to its measured base size.
+    var nameVisualScale: CGFloat = 1
 
     static let inlineSpacing: CGFloat = 12
     static let stackedSpacing: CGFloat = 8
@@ -506,11 +578,11 @@ private struct DrumLabelLayout: Layout {
         let indicators = subviews[2].sizeThatFits(.unspecified)
         let indicatorRoom = indicators.width > 0 ? indicators.width + Self.indicatorSpacing : 0
 
-        // The room the name has inline at the row end, converted back to the
-        // name's current size, blending out to the full width as it stacks.
+        // The room the name has inline at the row end and stacked at the
+        // standby end, both converted into the name's measured base size.
         let rowNumberWidth = number.width * rowNumberScale
         let inlineRoom = max(0, maxWidth - rowNumberWidth - Self.inlineSpacing - indicatorRoom) / rowNameScale
-        let stackedRoom = max(0, maxWidth - indicatorRoom)
+        let stackedRoom = max(0, maxWidth - indicatorRoom) / standbyNameScale
         let name = subviews[1].dimensions(
             in: ProposedViewSize(width: inlineRoom + (stackedRoom - inlineRoom) * k, height: nil)
         )
@@ -552,7 +624,10 @@ private struct DrumLabelLayout: Layout {
             proposal: ProposedViewSize(width: name.width, height: name.height)
         )
         subviews[2].place(
-            at: CGPoint(x: nameCentre.x + name.width / 2 + Self.indicatorSpacing, y: nameCentre.y),
+            at: CGPoint(
+                x: nameCentre.x + name.width * nameVisualScale / 2 + Self.indicatorSpacing,
+                y: nameCentre.y
+            ),
             anchor: .leading,
             proposal: .unspecified
         )
