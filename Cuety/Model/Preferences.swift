@@ -92,6 +92,32 @@ enum CueLayout: String, CaseIterable, Hashable, Sendable, Identifiable {
     }
 }
 
+enum UpcomingCueSize: String, CaseIterable, Hashable, Sendable, Identifiable {
+    case regular
+    case large
+    case extraLarge
+
+    var id: String { rawValue }
+
+    static let `default` = UpcomingCueSize.regular
+
+    var title: String {
+        switch self {
+        case .regular: "Default"
+        case .large: "Large"
+        case .extraLarge: "Extra Large"
+        }
+    }
+
+    var scale: CGFloat {
+        switch self {
+        case .regular: 1.0
+        case .large: 1.35
+        case .extraLarge: 1.75
+        }
+    }
+}
+
 enum PillSize: String, CaseIterable, Hashable, Sendable, Identifiable {
     case small
     case medium
@@ -237,6 +263,10 @@ final class Preferences {
         didSet { defaults.set(cueLayout.rawValue, forKey: Key.cueLayout) }
     }
 
+    var upcomingCueSize: UpcomingCueSize {
+        didSet { defaults.set(upcomingCueSize.rawValue, forKey: Key.upcomingCueSize) }
+    }
+
     var showsDrawer: Bool {
         didSet { defaults.set(showsDrawer, forKey: Key.showsDrawer) }
     }
@@ -350,6 +380,8 @@ final class Preferences {
         showsPlayhead = defaults.bool(forKey: Key.showsPlayhead)
         cueLayout = defaults.string(forKey: Key.cueLayout)
             .flatMap(CueLayout.init(rawValue:)) ?? .display
+        upcomingCueSize = defaults.string(forKey: Key.upcomingCueSize)
+            .flatMap(UpcomingCueSize.init(rawValue:)) ?? .default
         showsDrawer = defaults.bool(forKey: Key.showsDrawer)
         drawerRowCount = Limits.drawerRows.clamping(defaults.integer(forKey: Key.drawerRowCount))
 
@@ -394,6 +426,7 @@ final class Preferences {
         static let playheadAccent = "playheadAccent"
         static let showsPlayhead = "showsPlayhead"
         static let cueLayout = "cueLayout"
+        static let upcomingCueSize = "upcomingCueSize"
         static let showsDrawer = "showsDrawer"
         static let drawerRowCount = "drawerRowCount"
         static let showsDetailPills = "showsDetailPills"

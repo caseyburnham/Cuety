@@ -151,6 +151,7 @@ private struct CueDrum: View {
     private func metrics(in size: CGSize, typography: Typography) -> DrumMetrics {
         let showsName = model.preferences.showsCueName
         let showsPlayhead = model.preferences.showsPlayhead
+        let upcomingCueSize = model.preferences.upcomingCueSize
         let pillsHeight = self.pillsHeight
         let text = standby.displayNumber ?? "–"
         let reference = headlineSizingCache.referenceNumber(
@@ -165,17 +166,25 @@ private struct CueDrum: View {
             typography: typography,
             showsName: showsName,
             showsPlayhead: showsPlayhead,
+            upcomingCueSize: upcomingCueSize,
             pillsHeight: pillsHeight
         ) {
             let nameSize: CGFloat = min(28, max(17, size.height / 12))
             let padding = DrumMetrics.contentPadding
-            let bandHeight = DrumMetrics.bandHeight(for: size.height)
+            let topBandHeight = DrumMetrics.bandHeight(for: size.height)
+            let bottomBandHeight = DrumMetrics.bandHeight(
+                for: size.height,
+                scale: upcomingCueSize.scale
+            )
 
             let nameBlock = showsName
                 ? typography.lineHeight(size: nameSize) + DrumLabelLayout.stackedSpacing
                 : 0
             let pillBlock = pillsHeight > 0 ? Self.pillsSpacing + pillsHeight : 0
-            let available = max(0, size.height - bandHeight * 2 - DrumMetrics.previousCueExtraHeight - padding * 2)
+            let available = max(
+                0,
+                size.height - topBandHeight - bottomBandHeight - DrumMetrics.previousCueExtraHeight - padding * 2
+            )
             let numberHeight = max(0, available - nameBlock - pillBlock)
             let numberWidth = max(0, size.width - Self.horizontalPadding * 2)
 
@@ -208,11 +217,13 @@ private struct CueDrum: View {
             // sit under the name rather than against the cues below.
             let numberLineHeight = typography.lineHeight(size: numberSize)
             let blockHeight = numberLineHeight + nameBlock + pillBlock
-            let blockTop = bandHeight + DrumMetrics.previousCueExtraHeight + padding + max(0, available - blockHeight) / 2
+            let blockTop = topBandHeight + DrumMetrics.previousCueExtraHeight + padding + max(0, available - blockHeight) / 2
 
             return DrumMetrics(
                 size: size,
-                bandHeight: bandHeight,
+                bandHeight: topBandHeight,
+                bottomBandHeight: bottomBandHeight,
+                upcomingScale: upcomingCueSize.scale,
                 standbyNumberSize: numberSize,
                 standbyNameSize: nameSize,
                 showsStandbyName: showsName,
@@ -234,6 +245,7 @@ private final class DrumMetricsCache {
         let fontWeight: Font.Weight
         let showsName: Bool
         let showsPlayhead: Bool
+        let upcomingCueSize: UpcomingCueSize
         let pillsHeight: CGFloat
     }
 
@@ -246,6 +258,7 @@ private final class DrumMetricsCache {
         typography: Typography,
         showsName: Bool,
         showsPlayhead: Bool,
+        upcomingCueSize: UpcomingCueSize,
         pillsHeight: CGFloat,
         compute: () -> DrumMetrics
     ) -> DrumMetrics {
@@ -256,6 +269,7 @@ private final class DrumMetricsCache {
             fontWeight: typography.cueNumberWeight,
             showsName: showsName,
             showsPlayhead: showsPlayhead,
+            upcomingCueSize: upcomingCueSize,
             pillsHeight: pillsHeight
         )
         if cachedKey == key, let cachedMetrics {
@@ -278,10 +292,12 @@ struct DrumMetrics {
     static let minimumStandbyHeight: CGFloat = 160
     // Keep the neighbourhood alive beyond the viewport. Its visible row
     // count must never feed back into the space reserved for the main cue.
-    static func bandHeight(for canvasHeight: CGFloat) -> CGFloat {
-        min(
+    static func bandHeight(for canvasHeight: CGFloat, scale: CGFloat = 1) -> CGFloat {
+        let rowPitch = Self.rowPitch * scale
+        let maxShare = min(0.5, 0.25 * scale)
+        return min(
             CGFloat(CueLayout.listRowRadius) * rowPitch + bandPadding * 2,
-            max(0, canvasHeight - minimumStandbyHeight - contentPadding * 2) / 4
+            max(0, canvasHeight - minimumStandbyHeight - contentPadding * 2) * maxShare
         )
     }
 
@@ -289,6 +305,8 @@ struct DrumMetrics {
 
     let size: CGSize
     let bandHeight: CGFloat
+    let bottomBandHeight: CGFloat
+    let upcomingScale: CGFloat
     let standbyNumberSize: CGFloat
     let standbyNameSize: CGFloat
     let showsStandbyName: Bool
@@ -297,8 +315,47 @@ struct DrumMetrics {
     let arrowX: CGFloat
     let pillsTop: CGFloat
 
+    init(
+        size: CGSize,
+        bandHeight: CGFloat,
+        bottomBandHeight: CGFloat? = nil,
+        upcomingScale: CGFloat = 1,
+        standbyNumberSize: CGFloat,
+        standbyNameSize: CGFloat,
+        showsStandbyName: Bool,
+        numberCenterY: CGFloat,
+        arrowSize: CGFloat,
+        arrowX: CGFloat,
+        pillsTop: CGFloat
+    ) {
+        self.size = size
+        self.bandHeight = bandHeight
+        self.bottomBandHeight = bottomBandHeight ?? bandHeight
+        self.upcomingScale = upcomingScale
+        self.standbyNumberSize = standbyNumberSize
+        self.standbyNameSize = standbyNameSize
+        self.showsStandbyName = showsStandbyName
+        self.numberCenterY = numberCenterY
+        self.arrowSize = arrowSize
+        self.arrowX = arrowX
+        self.pillsTop = pillsTop
+    }
+
+    var upcomingRowPitch: CGFloat {
+        Self.rowPitch * upcomingScale
+    }
+
+    var largestRowFontSize: CGFloat {
+        CueRowView.Role.largestRowFontSize * upcomingScale
+    }
+
     private static func role(at position: Int) -> CueRowView.Role {
         position < 0 ? .above(distance: -position) : .below(distance: position)
+    }
+
+    private func rowFontSize(at position: Int) -> CGFloat {
+        let base = Self.role(at: position).fontSize
+        return position > 0 ? base * upcomingScale : base
     }
 
     func y(at position: Double) -> CGFloat {
@@ -309,14 +366,14 @@ struct DrumMetrics {
             } else if position < 0 {
                 return bandHeight + Self.previousCueExtraHeight - Self.bandPadding - distance * Self.rowPitch
             } else {
-                return size.height - bandHeight + Self.bandPadding + distance * Self.rowPitch
+                return size.height - bottomBandHeight + Self.bandPadding + distance * upcomingRowPitch
             }
         }
     }
 
     func numberSize(at position: Double) -> CGFloat {
         interpolate(position, logarithmic: true) { position in
-            position == 0 ? standbyNumberSize : Self.role(at: position).fontSize
+            position == 0 ? standbyNumberSize : rowFontSize(at: position)
         }
     }
 
@@ -324,7 +381,7 @@ struct DrumMetrics {
         interpolate(position, logarithmic: true) { position in
             position == 0
                 ? standbyNameSize
-                : Self.role(at: position).fontSize * CueRowView.Role.nameSizeRatio
+                : rowFontSize(at: position) * CueRowView.Role.nameSizeRatio
         }
     }
 
@@ -418,7 +475,16 @@ private struct DrumRows: View {
             // scale down smoothly on the GPU during fractional transitions so
             // CoreText never rasterizes intermediate font sizes per frame,
             // while resting integer positions render natively at 1:1 scale.
-            let basePosition = trunc(position)
+            let lowerPosition = position.rounded(.down)
+            let upperPosition = position.rounded(.up)
+            let baseNumberSize = max(
+                metrics.numberSize(at: lowerPosition),
+                metrics.numberSize(at: upperPosition)
+            )
+            let baseNameSize = max(
+                metrics.nameSize(at: lowerPosition),
+                metrics.nameSize(at: upperPosition)
+            )
 
             // A standby cue inside a group stands in for the group's row.
             DrumLabel(
@@ -426,8 +492,9 @@ private struct DrumRows: View {
                 typography: typography,
                 numberSize: metrics.numberSize(at: position),
                 nameSize: metrics.nameSize(at: position),
-                baseNumberSize: metrics.numberSize(at: basePosition),
-                baseNameSize: metrics.nameSize(at: basePosition),
+                baseNumberSize: baseNumberSize,
+                baseNameSize: baseNameSize,
+                largestRowFontSize: metrics.largestRowFontSize,
                 nameOpacity: metrics.nameOpacity(at: position),
                 stacking: metrics.stacking(at: position),
                 maxWidth: metrics.size.width - CueDrum.horizontalPadding * 2,
@@ -449,6 +516,7 @@ private struct DrumLabel: View {
     let nameSize: CGFloat
     let baseNumberSize: CGFloat
     let baseNameSize: CGFloat
+    let largestRowFontSize: CGFloat
     let nameOpacity: CGFloat
     let stacking: CGFloat
     let maxWidth: CGFloat
@@ -467,12 +535,12 @@ private struct DrumLabel: View {
 
         let baseIndicatorSize = max(
             CueRowView.Role.minimumIndicatorSize,
-            min(resolvedBaseNumberSize, CueRowView.Role.largestRowFontSize)
+            min(resolvedBaseNumberSize, largestRowFontSize)
                 * CueRowView.Role.indicatorSizeRatio
         )
         let targetIndicatorSize = max(
             CueRowView.Role.minimumIndicatorSize,
-            min(resolvedNumberSize, CueRowView.Role.largestRowFontSize)
+            min(resolvedNumberSize, largestRowFontSize)
                 * CueRowView.Role.indicatorSizeRatio
         )
 

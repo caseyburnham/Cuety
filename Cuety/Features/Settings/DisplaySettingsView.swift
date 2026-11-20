@@ -41,6 +41,14 @@ struct DisplaySettingsView: View {
                         Text(choice.title).tag(choice)
                     }
                 }
+
+                Picker("Upcoming cues size", selection: Bindable(preferences).upcomingCueSize) {
+                    ForEach(UpcomingCueSize.allCases) { size in
+                        Text(size.title).tag(size)
+                    }
+                }
+                .disabled(preferences.cueLayout != .list)
+                .help("Sets the size of upcoming cues below the standby cue in Cue List layout.")
             } header: {
                 Text("Layout")
             } footer: {

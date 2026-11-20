@@ -83,6 +83,20 @@ struct PreferenceLimitsTests {
         #expect(reloaded.playheadAccent == .cue(.skyBlue))
     }
 
+    @Test("Upcoming cue size defaults to regular and persists")
+    func upcomingCueSizeDefaultsAndPersists() throws {
+        let defaults = EphemeralDefaults()
+        let preferences = Preferences(defaults: defaults)
+
+        #expect(preferences.upcomingCueSize == .regular)
+
+        preferences.upcomingCueSize = .extraLarge
+        #expect(defaults.string(forKey: "upcomingCueSize") == "extraLarge")
+
+        let reloaded = Preferences(defaults: defaults)
+        #expect(reloaded.upcomingCueSize == .extraLarge)
+    }
+
     @Test("An out-of-range stored value is clamped as it is read")
     func loadingClampsStoredValues() throws {
         let defaults = EphemeralDefaults()
