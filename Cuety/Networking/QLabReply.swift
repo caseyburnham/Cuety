@@ -100,7 +100,7 @@ nonisolated enum QLabReplyParser {
     static let replyPrefix = "/reply"
 
     static func isReply(_ message: OSCMessage) -> Bool {
-        message.address.hasPrefix(replyPrefix)
+        message.address == replyPrefix || message.address.hasPrefix("/reply/")
     }
 
     static func parse<Payload: Decodable & Sendable>(

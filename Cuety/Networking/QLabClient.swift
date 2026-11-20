@@ -636,8 +636,8 @@ final class QLabClient {
     ) async throws -> QLabReply<Payload> {
         try await Self.send(message, over: connection, loggingTo: log)
 
-        let deadline = Task { [weak self] in
-            guard let timeout = self?.preferences.requestTimeout else { return }
+        let timeout = preferences.requestTimeout
+        let deadline = Task {
             try? await Task.sleep(for: .seconds(timeout))
             guard !Task.isCancelled else { return }
             await connection.cancel()
@@ -1566,8 +1566,8 @@ final class QLabClient {
         unconfirmedDetailIDs.formUnion(cueIDs)
         guard unconfirmedDetailsTask == nil else { return }
 
+        let timeout = preferences.requestTimeout
         unconfirmedDetailsTask = Task { [weak self] in
-            guard let timeout = self?.preferences.requestTimeout else { return }
             try? await Task.sleep(for: .seconds(timeout))
             guard !Task.isCancelled, let self else { return }
             self.unconfirmedDetailsTask = nil

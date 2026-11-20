@@ -321,6 +321,10 @@ struct QLabReplyTests {
     @Test("Recognises reply addresses")
     func recognisesReplies() {
         #expect(QLabReplyParser.isReply(OSCMessage("/reply/workspaces")))
+        #expect(QLabReplyParser.isReply(OSCMessage("/reply")))
+        #expect(!QLabReplyParser.isReply(OSCMessage("/replyExtra")))
+        #expect(QLabReplyParser.oscCorrelationAddress(of: OSCMessage("/replyExtra")) == nil)
+        #expect(QLabReplyParser.oscCorrelationAddress(of: OSCMessage("/reply")) == nil)
         #expect(!QLabReplyParser.isReply(OSCMessage("/update/workspace/ABC")))
         #expect(!QLabReplyParser.isReply(OSCMessage("/workspace/ABC/thump")))
     }

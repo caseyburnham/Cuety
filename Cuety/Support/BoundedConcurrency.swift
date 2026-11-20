@@ -13,13 +13,17 @@ func withBoundedConcurrency<Item: Sendable, Output: Sendable>(
     run operation: @escaping @Sendable (Item) async -> Output,
     collect: (Output) -> Void = { _ in }
 ) async -> Bool {
-    await withTaskGroup(of: Output.self) { group in
+    guard !items.isEmpty else { return true }
+    guard shouldContinue() else { return false }
+    let maxInFlight = max(1, limit)
+
+    return await withTaskGroup(of: Output.self) { group in
         var remaining = items[...]
 
-        for item in remaining.prefix(limit) {
+        for item in remaining.prefix(maxInFlight) {
             group.addTask { await operation(item) }
         }
-        remaining = remaining.dropFirst(limit)
+        remaining = remaining.dropFirst(maxInFlight)
 
         while let output = await group.next() {
             guard shouldContinue() else {

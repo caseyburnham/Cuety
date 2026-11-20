@@ -46,7 +46,7 @@ actor QLabConnection {
     private var continuation: AsyncStream<Event>.Continuation?
 
     private var readiness: Result<Void, any Error>?
-    private var readinessWaiters: [CheckedContinuation<Void, any Error>] = []
+    private var readinessWaiters: [(id: UUID, continuation: CheckedContinuation<Void, any Error>)] = []
     private var readinessTimeout: Task<Void, Never>?
 
     private let queue = DispatchQueue(label: "org.arvadacenter.Cuety.connection")
@@ -78,14 +78,14 @@ actor QLabConnection {
         let connection = NWConnection(to: endpoint, using: .qlabTCP())
         self.connection = connection
 
-        connection.stateUpdateHandler = { [weak self] state in
-            guard let self else { return }
-            Task { await self.handleStateChange(state) }
+        connection.stateUpdateHandler = { [weak self, weak connection] state in
+            guard let self, let connection else { return }
+            Task { await self.handleStateChange(state, for: connection) }
         }
 
-        connection.viabilityUpdateHandler = { [weak self] isViable in
-            guard let self else { return }
-            Task { await self.yield(.pathChanged(isViable: isViable)) }
+        connection.viabilityUpdateHandler = { [weak self, weak connection] isViable in
+            guard let self, let connection else { return }
+            Task { await self.handleViabilityChange(isViable, for: connection) }
         }
 
         connection.start(queue: queue)
@@ -105,6 +105,7 @@ actor QLabConnection {
         readinessTimeout = nil
         dropReportTask?.cancel()
         dropReportTask = nil
+        droppedEventCount = 0
 
         connection?.stateUpdateHandler = nil
         connection?.viabilityUpdateHandler = nil
@@ -132,17 +133,45 @@ actor QLabConnection {
     func waitUntilReady(timeout: TimeInterval) async throws {
         if let readiness { return try readiness.get() }
 
-        if readinessTimeout == nil {
-            readinessTimeout = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(timeout))
-                guard !Task.isCancelled else { return }
-                await self?.resolveReadiness(.failure(ConnectFailure.timedOut))
+        let waiterID = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                if let readiness {
+                    continuation.resume(with: readiness)
+                    return
+                }
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                readinessWaiters.append((id: waiterID, continuation: continuation))
+                if readinessTimeout == nil {
+                    let currentConnection = connection
+                    readinessTimeout = Task { [weak self, weak currentConnection] in
+                        try? await Task.sleep(for: .seconds(timeout))
+                        guard !Task.isCancelled else { return }
+                        await self?.timeoutReadiness(for: currentConnection)
+                    }
+                }
             }
+        } onCancel: {
+            Task { await self.cancelReadinessWaiter(waiterID) }
         }
+    }
 
-        try await withCheckedThrowingContinuation { continuation in
-            readinessWaiters.append(continuation)
+    private func cancelReadinessWaiter(_ id: UUID) {
+        guard let index = readinessWaiters.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = readinessWaiters.remove(at: index)
+        if readinessWaiters.isEmpty, readiness == nil {
+            readinessTimeout?.cancel()
+            readinessTimeout = nil
         }
+        waiter.continuation.resume(throwing: CancellationError())
+    }
+
+    private func timeoutReadiness(for timedOutConnection: NWConnection?) {
+        guard connection === timedOutConnection else { return }
+        resolveReadiness(.failure(ConnectFailure.timedOut))
     }
 
     private func resolveReadiness(_ result: Result<Void, any Error>) {
@@ -154,7 +183,7 @@ actor QLabConnection {
 
         let waiters = readinessWaiters
         readinessWaiters.removeAll()
-        for waiter in waiters { waiter.resume(with: result) }
+        for waiter in waiters { waiter.continuation.resume(with: result) }
     }
 
     @discardableResult
@@ -237,7 +266,8 @@ actor QLabConnection {
                     Task {
                         await owner.handleReceiveDiagnostics(
                             droppedCount: droppedCount,
-                            malformedError: malformedError
+                            malformedError: malformedError,
+                            for: connection
                         )
                     }
                 }
@@ -252,7 +282,8 @@ actor QLabConnection {
                     Task {
                         await owner.handleReceiveDiagnostics(
                             droppedCount: droppedCount,
-                            malformedError: malformedError
+                            malformedError: malformedError,
+                            for: connection
                         )
                     }
                 }
@@ -263,7 +294,8 @@ actor QLabConnection {
                 Task {
                     await owner.handleReceiveDiagnostics(
                         droppedCount: droppedCount,
-                        malformedError: malformedError
+                        malformedError: malformedError,
+                        for: connection
                     )
                 }
             }
@@ -273,10 +305,15 @@ actor QLabConnection {
         }
     }
 
-    private func handleReceiveDiagnostics(droppedCount: Int, malformedError: String?) {
+    private func handleReceiveDiagnostics(
+        droppedCount: Int,
+        malformedError: String?,
+        for connection: NWConnection
+    ) {
         if let malformedError {
             logger.warning("Dropped malformed OSC packet: \(malformedError, privacy: .public)")
         }
+        guard self.connection === connection else { return }
         if droppedCount > 0 {
             droppedEventCount += droppedCount
             notifyEventsDropped()
@@ -297,10 +334,11 @@ actor QLabConnection {
         }
     }
 
-    private func handleStateChange(_ state: NWConnection.State) {
+    private func handleStateChange(_ state: NWConnection.State, for connection: NWConnection) {
+        guard self.connection === connection else { return }
         switch state {
         case .ready:
-            if let connection { receiveNextMessage(on: connection) }
+            receiveNextMessage(on: connection)
             resolveReadiness(.success(()))
         case .failed(let error):
             logger.error("Connection failed: \(error.localizedDescription, privacy: .public)")
@@ -311,6 +349,11 @@ actor QLabConnection {
             break
         }
         yield(.stateChanged(state))
+    }
+
+    private func handleViabilityChange(_ isViable: Bool, for connection: NWConnection) {
+        guard self.connection === connection else { return }
+        yield(.pathChanged(isViable: isViable))
     }
 
     private func yield(_ event: Event) {

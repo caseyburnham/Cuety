@@ -91,7 +91,6 @@ struct ConnectionInspectorView: View {
                 "Address",
                 value: server?.address ?? "Resolved by Bonjour"
             )
-           /// LabeledContent("Protocol", value: "TCP, SLIP-framed (OSC 1.1)")
             LabeledContent("Protocol", value: "TCP, SLIP-framed (OSC 1.1)")
         }
     }

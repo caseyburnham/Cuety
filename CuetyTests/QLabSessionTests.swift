@@ -1583,6 +1583,55 @@ struct QLabDisconnectTests {
         #expect(client.status == .connected)
         #expect(client.watchedCueListID == "L2")
     }
+
+    @Test("Cancelling a waitUntilReady task unblocks immediately without failing the connection")
+    func cancellingWaitUntilReadyUnblocksImmediately() async throws {
+        // Use TEST-NET-1 (RFC 5737) so TCP SYN remains pending while we cancel the waiter.
+        let connection = QLabConnection(
+            endpoint: .hostPort(host: "192.0.2.1", port: 53000)
+        )
+        _ = await connection.start()
+        defer { Task { await connection.cancel() } }
+
+        let waiter = Task {
+            try await connection.waitUntilReady(timeout: 10)
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        waiter.cancel()
+
+        let result = await waiter.result
+        if case .failure(let error) = result {
+            #expect(error is CancellationError)
+        } else {
+            Issue.record("Expected cancelled waitUntilReady to throw CancellationError")
+        }
+    }
+
+    @Test("Bounded concurrency honours initial cancellation and non-positive limits")
+    func boundedConcurrencyEdgeCases() async {
+        let emptyRan = await withBoundedConcurrency(over: [Int](), limit: 0) { $0 }
+        #expect(emptyRan)
+
+        let cancelledBeforeStart = await withBoundedConcurrency(
+            over: [1, 2, 3],
+            limit: 2,
+            while: { false }
+        ) { item in
+            Issue.record("Should not run operation for \(item) when shouldContinue is initially false")
+            return item
+        }
+        #expect(!cancelledBeforeStart)
+
+        var collected: [Int] = []
+        let zeroLimitRan = await withBoundedConcurrency(
+            over: [10, 20, 30],
+            limit: 0,
+            run: { $0 * 2 },
+            collect: { collected.append($0) }
+        )
+        #expect(zeroLimitRan)
+        #expect(collected.sorted() == [20, 40, 60])
+    }
 }
 
 private actor EventLossRecorder {
